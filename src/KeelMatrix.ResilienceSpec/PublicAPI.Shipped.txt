@@ -1,6 +1,8 @@
 #nullable enable
 const KeelMatrix.ResilienceSpec.HttpFaultScript.MaximumSteps = 512 -> int
+const KeelMatrix.ResilienceSpec.HttpAttemptReport.MaximumRecordedAttempts = 512 -> int
 KeelMatrix.ResilienceSpec.ConcurrentScriptUseException
+KeelMatrix.ResilienceSpec.AttemptStateOverflowException
 KeelMatrix.ResilienceSpec.HttpAttempt
 KeelMatrix.ResilienceSpec.HttpAttempt.Duration.get -> System.TimeSpan?
 KeelMatrix.ResilienceSpec.HttpAttempt.Duration.init -> void
@@ -28,6 +30,7 @@ KeelMatrix.ResilienceSpec.HttpAttemptReport.Attempts.get -> System.Collections.G
 KeelMatrix.ResilienceSpec.HttpAttemptReport.DescribeTimeline() -> string!
 KeelMatrix.ResilienceSpec.HttpAttemptReport.HasTiming.get -> bool
 KeelMatrix.ResilienceSpec.HttpAttemptReport.IsSettled.get -> bool
+KeelMatrix.ResilienceSpec.HttpAttemptReport.IsOverflowed.get -> bool
 KeelMatrix.ResilienceSpec.HttpAttemptReport.LastAttempt.get -> KeelMatrix.ResilienceSpec.HttpAttempt?
 KeelMatrix.ResilienceSpec.HttpAttemptReport.ObservationStep.get -> System.TimeSpan?
 KeelMatrix.ResilienceSpec.HttpAttemptReport.SettledVirtualElapsed.get -> System.TimeSpan?

@@ -1,5 +1,1 @@
 #nullable enable
-
-const KeelMatrix.ResilienceSpec.HttpAttemptReport.MaximumRecordedAttempts = 512 -> int
-KeelMatrix.ResilienceSpec.AttemptStateOverflowException
-KeelMatrix.ResilienceSpec.HttpAttemptReport.IsOverflowed.get -> bool
