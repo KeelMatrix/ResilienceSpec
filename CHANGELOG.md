@@ -23,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - An `IHttpClientFactory` adapter that composes the scripted downstream with the client's existing resilience and
   delegating handlers, while the core API stays usable without dependency injection.
 - Attempt records and diagnostics that exclude URIs, query strings, headers, cookies, authorization values, bodies,
-  and exception messages, with bounded scripts, bounded attempt state, and single-consumer semantics by default.
+  and exception messages, with bounded scripts, a bounded attempt timeline that reports `IsOverflowed` and fails
+  attempt-state assertions with `AttemptStateOverflowException` instead of truncating silently, and single-consumer
+  semantics by default.
 - Best-effort activation telemetry through `KeelMatrix.Telemetry` only after a scenario reached an injected failure and
   evaluated a resilience assertion, with `KEELMATRIX_NO_TELEMETRY=1` opt-out.

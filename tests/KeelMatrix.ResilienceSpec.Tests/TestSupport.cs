@@ -147,6 +147,37 @@ internal sealed class RetryHandler : DelegatingHandler
         delay == TimeSpan.Zero ? Task.CompletedTask : Task.Delay(delay, _timeProvider, cancellationToken);
 }
 
+/// <summary>
+/// A hand-written retry handler whose predicate covers every exception, including harness failures such as
+/// <see cref="ScriptExhaustedException"/>. A real catch-all retry configuration can therefore make far more attempts
+/// than any script can describe, which is exactly the shape the bounded attempt-state contract must handle.
+/// </summary>
+internal sealed class RetryEveryExceptionHandler : DelegatingHandler
+{
+    private readonly int _maximumRetries;
+
+    internal RetryEveryExceptionHandler(int maximumRetries) => _maximumRetries = maximumRetries;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception) when (attempt < _maximumRetries)
+            {
+                await Task.Yield();
+            }
+        }
+    }
+}
+
 /// <summary>A per-attempt timeout, expressed on the injected clock.</summary>
 internal sealed class AttemptTimeoutHandler : DelegatingHandler
 {

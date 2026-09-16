@@ -88,6 +88,7 @@ internal sealed class ScenarioObserver
     private readonly long _startTimestamp;
     private int _inFlight;
     private int _ordinal;
+    private bool _overflowed;
     private bool _settled;
     private TimeSpan? _settledVirtualElapsed;
 
@@ -104,13 +105,17 @@ internal sealed class ScenarioObserver
 
     internal int StepCount => _script.StepCount;
 
+    /// <summary>
+    /// Gets the exact number of attempts that reached this downstream, including attempts that could not be kept in
+    /// the bounded recorded timeline.
+    /// </summary>
     internal int AttemptCount
     {
         get
         {
             lock (_gate)
             {
-                return _entries.Count;
+                return _ordinal;
             }
         }
     }
@@ -132,7 +137,17 @@ internal sealed class ScenarioObserver
             _settledVirtualElapsed = null;
             var ordinal = ++_ordinal;
             entry = new AttemptEntry(ordinal, method, _script.StepAt(ordinal), Elapsed());
-            _entries.Add(entry);
+            if (_entries.Count < HttpAttemptReport.MaximumRecordedAttempts)
+            {
+                _entries.Add(entry);
+            }
+            else
+            {
+                // The timeline is bounded. The attempt is still served so that the client under test keeps seeing
+                // the assembled behaviour it was configured for, but the report has to declare the incomplete
+                // timeline instead of presenting a truncated one as if it were complete.
+                _overflowed = true;
+            }
         }
 
         return new AttemptScope(this, entry);
@@ -179,6 +194,8 @@ internal sealed class ScenarioObserver
 
             return new HttpAttemptReport(
                 attempts,
+                _ordinal,
+                _overflowed,
                 _settled,
                 _settledVirtualElapsed,
                 _clock is null ? null : _options.AdvanceStep,

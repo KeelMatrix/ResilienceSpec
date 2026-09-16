@@ -11,7 +11,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// <remarks>
 /// Every failure reports the expectation, the observation, and the compact local timeline. Request URIs, headers,
 /// bodies, and exception messages are never echoed. An assertion that needs injected-clock timing fails with
-/// <see cref="MissingTimeProviderException"/> when the scenario has no controllable clock.
+/// <see cref="MissingTimeProviderException"/> when the scenario has no controllable clock, and an assertion over
+/// attempt state fails with <see cref="AttemptStateOverflowException"/> when the client under test served more
+/// attempts than the bounded timeline records.
 /// </remarks>
 public static class ResilienceAssertions
 {
@@ -19,10 +21,12 @@ public static class ResilienceAssertions
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="expected">The exact expected attempt count.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
+    /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="ResilienceAssertionException">The attempt count differs.</exception>
     public static HttpAttemptReport ShouldHaveAttempts(this HttpAttemptReport report, int expected)
     {
         ArgumentNullException.ThrowIfNull(report);
+        report.RequireCompleteTimeline(nameof(ShouldHaveAttempts));
 
         if (expected < 0)
         {
@@ -42,10 +46,12 @@ public static class ResilienceAssertions
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="maximum">The largest acceptable attempt count.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
+    /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="ResilienceAssertionException">More attempts were observed.</exception>
     public static HttpAttemptReport ShouldHaveAtMostAttempts(this HttpAttemptReport report, int maximum)
     {
         ArgumentNullException.ThrowIfNull(report);
+        report.RequireCompleteTimeline(nameof(ShouldHaveAtMostAttempts));
 
         if (maximum < 0)
         {
@@ -65,11 +71,13 @@ public static class ResilienceAssertions
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="methods">The expected methods, in attempt order.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
+    /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="ResilienceAssertionException">The observed method sequence differs.</exception>
     public static HttpAttemptReport ShouldHaveMethodSequence(this HttpAttemptReport report, params HttpMethod[] methods)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(methods);
+        report.RequireCompleteTimeline(nameof(ShouldHaveMethodSequence));
 
         if (methods.Length == 0)
         {
@@ -108,11 +116,13 @@ public static class ResilienceAssertions
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="method">The method that must not be retried.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
+    /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="ResilienceAssertionException">The method reached the downstream more than once.</exception>
     public static HttpAttemptReport ShouldNotHaveRetried(this HttpAttemptReport report, HttpMethod method)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(method);
+        report.RequireCompleteTimeline(nameof(ShouldNotHaveRetried));
 
         var count = 0;
         foreach (var attempt in report.Attempts)
@@ -140,11 +150,13 @@ public static class ResilienceAssertions
     /// </summary>
     /// <param name="report">The attempt report to assert on.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
+    /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
     /// <exception cref="ResilienceAssertionException">No response advertised <c>Retry-After</c>, or it was not honoured.</exception>
     public static HttpAttemptReport ShouldRespectRetryAfter(this HttpAttemptReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
+        report.RequireCompleteTimeline(nameof(ShouldRespectRetryAfter));
         RequireTiming(report, nameof(ShouldRespectRetryAfter));
 
         var step = report.ObservationStep!.Value;
@@ -182,11 +194,13 @@ public static class ResilienceAssertions
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="expected">The expected inter-attempt delay.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
+    /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
     /// <exception cref="ResilienceAssertionException">The observed delays differ from the expectation.</exception>
     public static HttpAttemptReport ShouldHaveRetryDelay(this HttpAttemptReport report, TimeSpan expected)
     {
         ArgumentNullException.ThrowIfNull(report);
+        report.RequireCompleteTimeline(nameof(ShouldHaveRetryDelay));
         RequireTiming(report, nameof(ShouldHaveRetryDelay));
 
         if (report.AttemptCount < 2)
@@ -223,11 +237,13 @@ public static class ResilienceAssertions
     /// <param name="ordinal">The one-based attempt ordinal.</param>
     /// <param name="expected">The expected injected-clock duration of that attempt.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
+    /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
     /// <exception cref="ResilienceAssertionException">The attempt is missing or lasted a different time.</exception>
     public static HttpAttemptReport ShouldHaveAttemptDuration(this HttpAttemptReport report, int ordinal, TimeSpan expected)
     {
         ArgumentNullException.ThrowIfNull(report);
+        report.RequireCompleteTimeline(nameof(ShouldHaveAttemptDuration));
         RequireTiming(report, nameof(ShouldHaveAttemptDuration));
 
         HttpAttempt? attempt = null;
@@ -265,11 +281,13 @@ public static class ResilienceAssertions
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="expected">The expected injected-clock time until the run settled.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
+    /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
     /// <exception cref="ResilienceAssertionException">The run has not settled or settled at a different time.</exception>
     public static HttpAttemptReport ShouldHaveSettledAtVirtualTime(this HttpAttemptReport report, TimeSpan expected)
     {
         ArgumentNullException.ThrowIfNull(report);
+        report.RequireCompleteTimeline(nameof(ShouldHaveSettledAtVirtualTime));
         RequireTiming(report, nameof(ShouldHaveSettledAtVirtualTime));
 
         if (!report.IsSettled || report.SettledVirtualElapsed is not { } observed)
