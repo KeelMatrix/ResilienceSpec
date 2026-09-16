@@ -278,7 +278,12 @@ interleaving outcomes. Use `ScriptConcurrency.AllowConcurrent` when the scenario
 
 The recording and verification path described here needs no listener, socket, DNS lookup, container, or hosted
 service. Only the optional telemetry described under [Telemetry](#telemetry) can resolve a name or open a socket, and
-it is disabled by `KEELMATRIX_NO_TELEMETRY=1`.
+it is disabled by `KEELMATRIX_NO_TELEMETRY=1`. Result-level assertions remain evaluable on an overflowed report
+because the caller-visible outcome is exact; attempt-state assertions refuse the incomplete timeline. When
+`IsOverflowed` is `true`, `LastAttempt` is the last recorded attempt, not necessarily the final attempt served by the
+downstream. A very long runaway retry loop can still return a pending result when the observation window ends; the
+report retains the exact served count and explicit overflow state, so adjust the client's retry budget or observation
+configuration.
 
 ## Integration With Microsoft.Extensions.Http.Resilience
 
@@ -309,11 +314,9 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Platforms And Target Frameworks
 
 - Target framework: `net8.0`.
-- The package and its tests target any platform that supports `net8.0`; the validation evidence in this repository is
-  produced on Windows.
-- Linux and macOS behaviour is expected to match, because scripts, reports, and assertions use no filesystem, shell,
-  culture-specific, or platform-specific behaviour, but it has not been exercised in this repository. Treat
-  cross-platform timing evidence as unverified until it is produced on those platforms.
+- The package and its tests use portable .NET APIs; the validation evidence in this repository is produced on Windows.
+- Linux and macOS execution has not been performed in this repository, so their behaviour—including timing behaviour—
+  remains unverified until evidence is produced on those platforms.
 
 ## Telemetry
 

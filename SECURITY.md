@@ -4,8 +4,9 @@
 
 Report suspected vulnerabilities privately before any public disclosure:
 
-1. Email **keelmatrix@gmail.com**.
-2. Open a private GitHub Security Advisory for this repository.
+1. Email **keelmatrix@gmail.com**, which is the private reporting route for this repository.
+2. If private vulnerability reporting is enabled in GitHub for this repository, you may also open a private GitHub
+   Security Advisory.
 
 Do not create a public issue or publicly disclose vulnerability details, exploit steps, credentials, request data,
 attempt records, or scripted scenarios that contain sensitive values.

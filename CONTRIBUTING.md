@@ -37,6 +37,15 @@ against the lowest supported Microsoft resilience release.
 
 See [docs/DEV.md](docs/DEV.md) for the individual commands and what each gate proves.
 
+Before creating a release tag, run the repository's single release-contract check against the finalized changelog:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Validate-ReleaseContract.ps1 -Tag v0.1.0
+```
+
+The check must pass only after the target entry is dated, version-consistent, and written as an `Added`-only first
+release entry. The tag-triggered workflow runs the same check again.
+
 ## Security and community
 
 Security reports must use the private channels in [`SECURITY.md`](SECURITY.md), not a public issue. Community conduct

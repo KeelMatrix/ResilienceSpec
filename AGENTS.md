@@ -12,8 +12,8 @@
 - `tests/PackageSmoke` is a clean consumer that restores the packed package from an isolated local feed. It is
   deliberately outside the solution.
 - `samples/KeelMatrix.ResilienceSpec.Sample` is a runnable walkthrough of the documented quick start.
-- `scripts` contains the repository gates: `Validate.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`, and
-  `Invoke-DependencyAudit.ps1`.
+- `scripts` contains the repository gates: `Validate.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`,
+  `Invoke-DependencyAudit.ps1`, and `Validate-ReleaseContract.ps1`.
 - `docs/DEV.md` explains the local validation path; `README.md` and `src/KeelMatrix.ResilienceSpec/README.md` are the
   user-facing documentation.
 
@@ -25,6 +25,7 @@ pwsh -NoProfile -File scripts/Validate.ps1 -Mode Focused -SkipPackage
 dotnet test tests/KeelMatrix.ResilienceSpec.Tests -c Release
 dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
 pwsh -NoProfile -File scripts/Invoke-PackageSmoke.ps1
+pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 ```
 
 ## Invariants

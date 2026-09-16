@@ -35,6 +35,13 @@ The gate performs, in order: restore from `NuGet.config`, a formatting/analyzer 
 `KeelMatrix.ResilienceSpec.slnx`, the Release test run of both test projects, and the package gate
 (`scripts/Invoke-PackageSmoke.ps1`). `-Mode Full` adds `scripts/Invoke-DependencyAudit.ps1 -Mode Required`.
 
+## Hosted CI status
+
+Ordinary push and pull-request CI is intentionally absent while this repository is private and private GitHub Actions
+use is not approved. The repository contains only the tag-triggered release workflow at
+`.github/workflows/release.yml`; it cannot run from a normal `main` push or pull request. As a result, the validation
+evidence below is local-only: hosted runner behaviour, hosted CI checks, and Linux/macOS parity remain unverified.
+
 Useful narrower variants:
 
 ```powershell
@@ -83,6 +90,18 @@ advance that released it.
 
 `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
 the wait runs on the injected clock, so it is deliberately not exposed.
+
+## Dependency audit evidence
+
+`scripts/Invoke-DependencyAudit.ps1 -Mode Required` fails closed unless direct and transitive advisory data is
+available. On 2026-09-16, a bounded required-audit attempt and a bounded no-restore advisory query could not reach
+NuGet.org from this environment: the advisory/flat-container socket was denied before authoritative results were
+returned. The repository therefore makes no claim that the dependency graph is clean.
+
+This is an accepted preparation-only environment risk, scoped to the missing advisory response. The mitigation is to
+rerun the required audit from a network-enabled isolated environment before any release tag or publication, keep the
+required mode fail-closed, and treat a non-zero result as a release blocker. No release action is authorized by this
+note.
 
 ## Release preparation
 

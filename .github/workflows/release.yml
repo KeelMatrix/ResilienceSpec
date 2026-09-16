@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  KEELMATRIX_NO_TELEMETRY: '1'
+
+jobs:
+  verify:
+    name: Verify and pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release-version.outputs.version }}
+
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Validate release tag
+        id: release-version
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v(?<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$') {
+            throw "Malformed release tag '$tag'. Expected vX.Y.Z."
+          }
+          "version=$($Matches.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Validate changelog and package version
+        shell: pwsh
+        run: >-
+          ./scripts/Validate-ReleaseContract.ps1
+          -Tag "$env:GITHUB_REF_NAME"
+          -PackageProject ./src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj
+          -ChangelogPath ./CHANGELOG.md
+
+      - name: Restore
+        run: >-
+          dotnet restore KeelMatrix.ResilienceSpec.slnx
+          --configfile NuGet.config
+          --no-cache
+          --force
+          -p:NuGetAudit=false
+
+      - name: Build
+        run: >-
+          dotnet build KeelMatrix.ResilienceSpec.slnx
+          --configuration Release
+          --no-restore
+          -p:Version=${{ steps.release-version.outputs.version }}
+          -p:NuGetAudit=false
+
+      - name: Test
+        run: >-
+          dotnet test KeelMatrix.ResilienceSpec.slnx
+          --configuration Release
+          --no-build
+          --no-restore
+          -p:Version=${{ steps.release-version.outputs.version }}
+          -p:NuGetAudit=false
+
+      - name: Pack shipping project
+        shell: pwsh
+        run: |
+          $packageDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts/packages'
+          if (Test-Path -LiteralPath $packageDirectory) {
+            Remove-Item -LiteralPath $packageDirectory -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
+          dotnet pack ./src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj `
+            --configuration Release `
+            --no-build `
+            --no-restore `
+            --include-symbols `
+            -p:SymbolPackageFormat=snupkg `
+            -p:Version=${{ steps.release-version.outputs.version }} `
+            -p:PackageVersion=${{ steps.release-version.outputs.version }} `
+            -p:SourceRevisionId=$env:GITHUB_SHA `
+            -p:RepositoryCommit=$env:GITHUB_SHA `
+            -p:NuGetAudit=false `
+            --output $packageDirectory
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packing failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Validate exact release artifact set
+        shell: pwsh
+        run: |
+          $packageDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts/packages'
+          $version = '${{ steps.release-version.outputs.version }}'
+          $expected = @(
+            "KeelMatrix.ResilienceSpec.$version.nupkg",
+            "KeelMatrix.ResilienceSpec.$version.snupkg"
+          ) | Sort-Object
+          $actual = @(Get-ChildItem -LiteralPath $packageDirectory -File | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($actual -join "`n") -cne ($expected -join "`n")) {
+            throw "Unexpected release artifact set. Expected: $($expected -join ', '). Actual: $($actual -join ', ')."
+          }
+
+      - name: Inspect package contents
+        shell: pwsh
+        run: >-
+          ./scripts/Inspect-Package.ps1
+          -PackagePath ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ steps.release-version.outputs.version }}.nupkg
+          -SymbolsPath ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ steps.release-version.outputs.version }}.snupkg
+          -ExpectedVersion ${{ steps.release-version.outputs.version }}
+          -ExpectedRepositoryCommit $env:GITHUB_SHA
+
+      - name: Upload validated packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: artifacts/packages
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to NuGet.org
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Set up .NET SDK for publishing
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.401
+
+      - name: Download validated packages
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: artifacts/packages
+
+      - name: Authenticate to NuGet.org
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: dmitriyzen
+
+      - name: Publish package
+        shell: pwsh
+        run: >-
+          dotnet nuget push
+          ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ needs.verify.outputs.version }}.nupkg
+          --source https://api.nuget.org/v3/index.json
+          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
+
+      - name: Publish symbols
+        shell: pwsh
+        run: >-
+          dotnet nuget push
+          ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ needs.verify.outputs.version }}.snupkg
+          --source https://api.nuget.org/v3/index.json
+          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"

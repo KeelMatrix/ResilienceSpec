@@ -17,7 +17,10 @@ headers other than the scripted `Retry-After` value. Scripts are bounded to `Htt
 the recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client that
 makes more attempts than that cannot grow attempt state inside the test process: the run reports
 `HttpAttemptReport.IsOverflowed` and attempt-state assertions fail with `AttemptStateOverflowException` instead of
-reporting a truncated total.
+reporting a truncated total. Result-level assertions remain evaluable because the caller-visible outcome is exact. When
+the report is overflowed, `LastAttempt` is the last recorded attempt, not necessarily the final served attempt. A very
+long runaway retry loop may remain `Pending` when the observation window ends; the served count and overflow state are
+still explicit.
 
 ## Optional telemetry
 

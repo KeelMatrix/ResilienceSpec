@@ -74,10 +74,12 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   `ScriptConcurrency.AllowConcurrent` is requested.
 - The recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client whose
   retry predicate covers harness failures cannot grow attempt state inside the test process. Such a run reports
-  `HttpAttemptReport.IsOverflowed` and fails assertions with `AttemptStateOverflowException` instead of judging a
-  partial timeline.
-- The package targets `net8.0`. Validation evidence in the repository is produced on Windows; Linux and macOS are
-  expected to behave identically but are not yet verified.
+  `HttpAttemptReport.IsOverflowed` and fails attempt-state assertions with `AttemptStateOverflowException` instead of
+  judging a partial timeline; result-level assertions remain evaluable. When overflowed, `LastAttempt` is the last
+  recorded attempt rather than necessarily the final served attempt. A sufficiently long runaway retry loop may still
+  return `Pending` when its observation window ends, with the exact served count and overflow state preserved.
+- The package targets `net8.0`. Validation evidence in the repository is produced on Windows; Linux and macOS execution,
+  including timing behaviour, has not been performed and remains unverified.
 
 ## Supported Integration Range
 
