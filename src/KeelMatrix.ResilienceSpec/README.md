@@ -5,7 +5,9 @@ real handler chain, replace only the terminal network boundary with a determinis
 unsafe-method behaviour, final outcome, and — on an injected clock — retry timing.
 
 The package does not make a system resilient and it does not configure resilience. It verifies an already configured
-client, and it needs no listener, socket, DNS lookup, container, or hosted service.
+client. The verification path needs no listener, socket, DNS lookup, container, or hosted service; the optional
+telemetry described under [Telemetry](#telemetry) is separate, best-effort, opt-out network behaviour that KeelMatrix
+validation disables.
 
 ## Install
 
@@ -49,8 +51,8 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 
 - `HttpFault` and `HttpFaultScript` describe a deterministic sequence of responses, network-like failures, gated
   timeouts, and clock-based delays.
-- `ScriptedHttpMessageHandler` replaces only the terminal network boundary. It answers in memory and never opens a
-  socket, resolves a name, or binds a listener.
+- `ScriptedHttpMessageHandler` replaces only the terminal network boundary. The verification path answers in memory
+  and never opens a socket, resolves a name, or binds a listener.
 - `HttpAttemptReport` is an immutable timeline of the attempts that reached that boundary. Records contain only the
   ordinal, method, broad outcome, scripted status or `Retry-After` value, and injected-clock timing.
 - Assertions cover exact and maximum attempt counts, method sequence, unsafe-method retries, final status or
@@ -70,6 +72,10 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   observation window of wall-clock time.
 - One script serves one logical call. Concurrent use fails with `ConcurrentScriptUseException` unless
   `ScriptConcurrency.AllowConcurrent` is requested.
+- The recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client whose
+  retry predicate covers harness failures cannot grow attempt state inside the test process. Such a run reports
+  `HttpAttemptReport.IsOverflowed` and fails assertions with `AttemptStateOverflowException` instead of judging a
+  partial timeline.
 - The package targets `net8.0`. Validation evidence in the repository is produced on Windows; Linux and macOS are
   expected to behave identically but are not yet verified.
 
@@ -85,6 +91,11 @@ An activation is requested only after a scripted scenario reached at least one i
 least one resilience assertion. Telemetry is best-effort, cannot break the host, and can be disabled with
 `KEELMATRIX_NO_TELEMETRY=1`. The package never transmits request data, client names, URLs, headers, bodies, or
 exception messages.
+
+Telemetry is the one part of the package that is network behaviour rather than an in-memory verification: when it is
+enabled, an activation is posted over HTTPS to the shared KeelMatrix telemetry endpoint, which resolves a name and
+opens a socket. KeelMatrix validation sets `KEELMATRIX_NO_TELEMETRY=1`, and a consumer that needs a fully offline
+test process sets it too.
 
 ## Documentation
 

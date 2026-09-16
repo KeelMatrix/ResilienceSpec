@@ -1,7 +1,9 @@
 # Privacy
 
 KeelMatrix.ResilienceSpec keeps scenarios, attempt reports, and diagnostics local. It has no hosted verification
-backend and never sends request or response data anywhere.
+backend and never sends request or response data anywhere. The verification path needs no listener, socket, DNS
+lookup, container, or hosted service; the optional telemetry described below is the only network behaviour the
+package can trigger.
 
 ## Product data boundary
 
@@ -11,7 +13,11 @@ or service names, scripted scenario contents, repository names, or local paths.
 
 Attempt records and failure messages contain only the attempt ordinal, the HTTP method, the broad outcome, the
 scripted status or `Retry-After` value, and injected-clock timing. Scripted responses carry an empty body and no
-headers other than the scripted `Retry-After` value, and scripts and timelines are bounded to a maximum step count.
+headers other than the scripted `Retry-After` value. Scripts are bounded to `HttpFaultScript.MaximumSteps` steps and
+the recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client that
+makes more attempts than that cannot grow attempt state inside the test process: the run reports
+`HttpAttemptReport.IsOverflowed` and attempt-state assertions fail with `AttemptStateOverflowException` instead of
+reporting a truncated total.
 
 ## Optional telemetry
 
@@ -23,14 +29,20 @@ succeeds, and failing to evaluate any assertion do not activate telemetry.
 Telemetry is best-effort and opt-out. A telemetry failure cannot change a scenario result, fail a test, or affect the
 host application.
 
+Telemetry is the one part of the package that is network behaviour: when it is enabled, an activation is posted over
+HTTPS to the shared KeelMatrix telemetry endpoint, which resolves a name and opens a socket. That is why the
+verification path stays offline only while telemetry is disabled. KeelMatrix development and validation runs always
+set `KEELMATRIX_NO_TELEMETRY=1`, and any consumer that needs a fully offline test process sets it too.
+
 ## Local state and controls
 
 ResilienceSpec does not persist scenarios, attempt reports, or diagnostics. The shared telemetry dependency may create
 local marker or queue files to support delivery and opt-out; its maintained policy documents those details.
 
 Set `KEELMATRIX_NO_TELEMETRY=1` for local or CI validation. KeelMatrix development and validation runs suppress
-telemetry and are not demand measurements. The shared telemetry package also honours its documented process-level and
-repository-local opt-out controls.
+telemetry and are not demand measurements, and the repository's zero-socket package evidence is produced under that
+same setting, so it covers the verification path only. The shared telemetry package also honours its documented
+process-level and repository-local opt-out controls.
 
 ## Shared telemetry policy
 

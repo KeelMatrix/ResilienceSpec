@@ -6,8 +6,10 @@ count, unsafe-method behaviour, final outcome, and — on an injected clock — 
 
 The package does **not** make a system resilient and it does not configure resilience. It verifies the observable
 behaviour of a client that is already configured, so a configuration mistake fails in a test instead of in
-production. Only `System.Net.Http` behaviour is under test; the terminal handler never opens a socket, resolves a
-name, or binds a listener.
+production. Only `System.Net.Http` behaviour is under test, and the verification path needs no listener, socket, DNS
+lookup, container, or hosted service: the terminal handler never opens a socket, resolves a name, or binds a
+listener. The optional telemetry described under [Telemetry](#telemetry) is separate, best-effort, opt-out network
+behaviour that KeelMatrix validation disables.
 
 ## Install
 
@@ -263,10 +265,18 @@ records request URIs, query strings, header values, cookies, authorization value
 exception messages, and the local timeline it prints on failure contains no request data.
 
 Scripted responses carry an empty body and no headers other than the scripted `Retry-After` value. A script is bounded
-to `HttpFaultScript.MaximumSteps` steps, a timeline is bounded by the same value, and one script has deterministic
-single-consumer semantics by default: a second in-flight request fails with `ConcurrentScriptUseException` instead of
-silently interleaving outcomes. Use `ScriptConcurrency.AllowConcurrent` when the scenario under test is genuinely
-concurrent.
+to `HttpFaultScript.MaximumSteps` steps, and the recorded attempt timeline keeps at most
+`HttpAttemptReport.MaximumRecordedAttempts` attempts, which is that same value. A client that somehow makes more
+attempts than that — for example by retrying a harness failure such as `ScriptExhaustedException` — still gets the
+served `AttemptCount`, a report whose `IsOverflowed` is `true`, and a timeline that ends with an explicit truncation
+line. Assertions over attempt state then fail with `AttemptStateOverflowException` instead of judging a partial
+timeline, so the served attempt count is never silently truncated. One script has deterministic single-consumer
+semantics by default: a second in-flight request fails with `ConcurrentScriptUseException` instead of silently
+interleaving outcomes. Use `ScriptConcurrency.AllowConcurrent` when the scenario under test is genuinely concurrent.
+
+The recording and verification path described here needs no listener, socket, DNS lookup, container, or hosted
+service. Only the optional telemetry described under [Telemetry](#telemetry) can resolve a name or open a socket, and
+it is disabled by `KEELMATRIX_NO_TELEMETRY=1`.
 
 ## Integration With Microsoft.Extensions.Http.Resilience
 
@@ -311,6 +321,11 @@ assertion was evaluated; constructing a script, handler, or scenario never activ
 best-effort, never a reliability dependency, cannot break the host, and can be disabled by setting
 `KEELMATRIX_NO_TELEMETRY=1`. See [PRIVACY.md](PRIVACY.md) for the full contract.
 
+Telemetry is the one part of the package that is network behaviour rather than an in-memory verification: when it is
+enabled, an activation is posted over HTTPS to the shared KeelMatrix telemetry endpoint, which resolves a name and
+opens a socket. KeelMatrix validation sets `KEELMATRIX_NO_TELEMETRY=1`, which is why the repository's own zero-socket
+evidence covers the verification path and not the optional telemetry transport.
+
 ## Troubleshooting
 
 | Symptom | Cause and next step |
@@ -319,6 +334,7 @@ best-effort, never a reliability dependency, cannot break the host, and can be d
 | `MissingTimeProviderException` from a timing assertion | The scenario was created without a clock. Create it with `new ResilienceScenario(script, clock, clock.Advance)`. |
 | `ConcurrentScriptUseException` | Two in-flight requests consumed one script. Create one scenario per logical call, or opt in to `ScriptConcurrency.AllowConcurrent`. |
 | `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |
+| `AttemptStateOverflowException` | The client under test served more attempts than `HttpAttemptReport.MaximumRecordedAttempts`, so the recorded timeline is incomplete and cannot judge attempt state. Lower the client's configured maximum attempts; a script cannot describe more attempts than `HttpFaultScript.MaximumSteps` steps. |
 | A timing assertion fails by less than one advance step | The observation granularity is `ResilienceScenarioOptions.AdvanceStep`. Lower it for finer observation. |
 | A request never settles | The script contains a step that waits for the clock or never answers. Check that the injected clock is registered and that `AdvanceClock` is enabled, or assert `ShouldBePending()`. |
 

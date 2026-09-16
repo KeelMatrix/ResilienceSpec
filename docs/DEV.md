@@ -7,7 +7,9 @@ This document is for maintainers of KeelMatrix.ResilienceSpec. Package consumers
 
 - The .NET SDK selected by `global.json` (`10.0.401`).
 - PowerShell 7 (`pwsh`) for the repository gates.
-- No listener, socket, container, or hosted service is needed. Scripted scenarios are answered in memory.
+- The verification path needs no listener, socket, container, or hosted service: scripted scenarios are answered in
+  memory. Validation sets `KEELMATRIX_NO_TELEMETRY=1` (see the validation path below), so the optional telemetry
+  transport is not exercised either.
 
 ## Repository layout
 

@@ -84,6 +84,9 @@ await RunAsync("POST is not retried when unsafe retries are disabled", async () 
 
 Console.WriteLine(
     $"Attempts answered in memory: {inMemoryAttempts}; reserved '.invalid' hosts were never resolved.");
+Console.WriteLine(
+    "Telemetry: this run sets KEELMATRIX_NO_TELEMETRY=1, so the transport measurement below covers the "
+    + "verification path only; the optional telemetry transport is not exercised.");
 foreach (var line in observer.DescribeEvents())
 {
     Console.WriteLine($"Runtime transport events: {line}");
@@ -105,6 +108,12 @@ if (inMemoryAttempts != 3)
     failures.Add($"expected 3 attempts answered in memory, observed {inMemoryAttempts}");
 }
 
+if (Environment.GetEnvironmentVariable("KEELMATRIX_NO_TELEMETRY") != "1")
+{
+    failures.Add(
+        "the zero-transport measurement is only valid under the documented telemetry opt-out, which this run did not set");
+}
+
 if (failures.Count > 0)
 {
     Console.Error.WriteLine("Package smoke failed:");
@@ -116,7 +125,8 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Package smoke completed without a listener, socket, or name-resolution dependency.");
+Console.WriteLine(
+    "Package smoke completed without a listener, socket, or name-resolution dependency on the verification path.");
 return 0;
 
 ServiceProvider BuildProvider(string name, ResilienceScenario scenario, Action<HttpStandardResilienceOptions> configure)
