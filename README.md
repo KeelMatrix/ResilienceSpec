@@ -314,9 +314,10 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Platforms And Target Frameworks
 
 - Target framework: `net8.0`.
-- The package and its tests use portable .NET APIs; the validation evidence in this repository is produced on Windows.
-- Linux and macOS execution has not been performed in this repository, so their behaviour—including timing behaviour—
-  remains unverified until evidence is produced on those platforms.
+- The package and its tests use portable .NET APIs. Windows and Linux validation includes the core and integration
+  suites, including injected-clock timing behaviour.
+- macOS execution has not been performed in this repository, so its behaviour—including timing behaviour—remains
+  unverified.
 
 ## Telemetry
 

@@ -7,6 +7,7 @@ This document is for maintainers of KeelMatrix.ResilienceSpec. Package consumers
 
 - The .NET SDK selected by `global.json` (`10.0.401`).
 - PowerShell 7 (`pwsh`) for the repository gates.
+- Bash for the Linux validation script.
 - The verification path needs no listener, socket, container, or hosted service: scripted scenarios are answered in
   memory. Validation sets `KEELMATRIX_NO_TELEMETRY=1` (see the validation path below), so the optional telemetry
   transport is not exercised either.
@@ -37,12 +38,28 @@ The gate performs, in order: restore from `NuGet.config`, a formatting/analyzer 
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
 restores the shipping package from its own temporary local feed.
 
+## Linux validation
+
+The repository-controlled Linux check requires the .NET SDK selected by `global.json`, PowerShell 7 (`pwsh`) for the
+release-contract tests, and Bash. It does not require Docker, a listener, or any external service. From a Linux shell,
+run:
+
+```bash
+bash ./scripts/validate-linux.sh
+```
+
+The script restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core Release tests, and runs the
+integration Release tests when that project is present. It is independent of `scripts/Validate.ps1` and is not part
+of the Windows validation gate. The checked-in validation evidence includes Linux core and integration execution,
+including injected-clock timing tests; macOS execution and timing remain unverified.
+
 ## Hosted CI status
 
 Ordinary push and pull-request CI is intentionally absent while this repository is private and private GitHub Actions
 use is not approved. The repository contains only the tag-triggered release workflow at
 `.github/workflows/release.yml`; it cannot run from a normal `main` push or pull request. As a result, the validation
-evidence below is local-only: hosted runner behaviour, hosted CI checks, and Linux/macOS parity remain unverified.
+evidence below is local-only: hosted runner behaviour and hosted CI checks remain unverified. Local Windows and Linux
+validation evidence exists; macOS execution and timing remain unverified.
 
 Useful narrower variants:
 

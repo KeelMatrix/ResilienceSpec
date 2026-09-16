@@ -78,8 +78,9 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   judging a partial timeline; result-level assertions remain evaluable. When overflowed, `LastAttempt` is the last
   recorded attempt rather than necessarily the final served attempt. A sufficiently long runaway retry loop may still
   return `Pending` when its observation window ends, with the exact served count and overflow state preserved.
-- The package targets `net8.0`. Validation evidence in the repository is produced on Windows; Linux and macOS execution,
-  including timing behaviour, has not been performed and remains unverified.
+- The package targets `net8.0`. Windows and Linux validation covers the core and integration suites, including
+  injected-clock timing behaviour. macOS execution has not been performed and remains unverified, including timing
+  behaviour.
 
 ## Supported Integration Range
 

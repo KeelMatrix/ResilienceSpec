@@ -5,6 +5,12 @@ backend and never sends request or response data anywhere. The verification path
 lookup, container, or hosted service; the optional telemetry described below is the only network behaviour the
 package can trigger.
 
+## Platforms
+
+The package targets `net8.0`. Windows and Linux validation covers the core and integration suites, including
+injected-clock timing behaviour. macOS execution has not been performed, so macOS behaviour and timing remain
+unverified.
+
 ## Product data boundary
 
 The scripted downstream runs in memory inside your test process. The package does not transmit request URIs, hosts,
