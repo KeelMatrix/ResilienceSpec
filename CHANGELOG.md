@@ -12,8 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 ### Added
 
 - A scripted in-memory downstream (`HttpFault`, `HttpFaultScript`, `ScriptedHttpMessageHandler`) that replaces only the
-  terminal network boundary of a configured `HttpClient`, so no listener, socket, DNS lookup, or hosted service is
-  required.
+  terminal network boundary of a configured `HttpClient`, so the verification path requires no listener, socket, DNS
+  lookup, or hosted service.
 - An immutable attempt report and assertion helpers for exact and maximum attempt counts, method sequence,
   "this unsafe request was not retried", final response or exception, and cancellation outcomes, with failures that
   print the observed timeline.

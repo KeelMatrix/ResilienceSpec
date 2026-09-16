@@ -65,8 +65,10 @@ scenario.Report
     .ShouldRespectRetryAfter();
 ```
 
-Nothing in this example binds a port, resolves a host name, or reaches the network. The reserved `.invalid` host is
-answered in memory by the scripted terminal handler.
+Nothing in this example binds a port, resolves a host name, or reaches the network while the verification path runs.
+The reserved `.invalid` host is answered in memory by the scripted terminal handler. The optional telemetry described
+under [Telemetry](#telemetry) is the only part of a default run that can reach the network, and
+`KEELMATRIX_NO_TELEMETRY=1` disables it.
 
 ## What You Can Assert
 
