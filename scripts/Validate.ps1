@@ -35,6 +35,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $repo 'KeelMatrix.ResilienceSpec.slnx'
 $nugetConfig = Join-Path $repo 'NuGet.config'
 $smokeScript = Join-Path $PSScriptRoot 'Invoke-PackageSmoke.ps1'
+$sampleScript = Join-Path $PSScriptRoot 'Run-Sample.ps1'
 $auditScript = Join-Path $PSScriptRoot 'Invoke-DependencyAudit.ps1'
 $durations = [ordered]@{}
 
@@ -69,6 +70,9 @@ try {
     if (-not $SkipPackage) {
         Invoke-Step -Name 'Package build, inspection, and clean consumer smoke' -File 'pwsh' -Arguments @('-NoProfile', '-File', $smokeScript)
         $durations['smoke'] = $script:stepDuration
+
+        Invoke-Step -Name 'Run sample against the packed package' -File 'pwsh' -Arguments @('-NoProfile', '-File', $sampleScript)
+        $durations['sample'] = $script:stepDuration
     }
 
     if ($Mode -eq 'Full') {

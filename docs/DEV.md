@@ -33,7 +33,9 @@ pwsh -NoProfile -File .\scripts\Validate.ps1
 
 The gate performs, in order: restore from `NuGet.config`, a formatting/analyzer check, a Release build of
 `KeelMatrix.ResilienceSpec.slnx`, the Release test run of both test projects, and the package gate
-(`scripts/Invoke-PackageSmoke.ps1`). `-Mode Full` adds `scripts/Invoke-DependencyAudit.ps1 -Mode Required`.
+(`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
+`scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
+restores the shipping package from its own temporary local feed.
 
 ## Hosted CI status
 
@@ -48,7 +50,7 @@ Useful narrower variants:
 pwsh -NoProfile -File .\scripts\Validate.ps1 -Mode Focused -SkipPackage
 dotnet test .\tests\KeelMatrix.ResilienceSpec.Tests -c Release
 dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
-dotnet run --project .\samples\KeelMatrix.ResilienceSpec.Sample -c Release
+pwsh -NoProfile -File .\scripts\Run-Sample.ps1
 ```
 
 ## Package gate
@@ -68,6 +70,16 @@ to `artifacts/packages/package-smoke.log`, which is ignored by Git and never pac
 authors, description, tags, license, README, icon, repository and SourceLink commit, the single `net8.0` dependency
 group with its exact dependency versions, the portable PDB inside the symbol package, and the absence of any file
 that is not on the allowlist.
+
+## Sample package flow
+
+```powershell
+pwsh -NoProfile -File .\scripts\Run-Sample.ps1
+```
+
+The sample gate packs `KeelMatrix.ResilienceSpec` to a temporary local feed, maps only that package ID to the feed,
+restores all other dependencies from NuGet.org into an isolated cache, verifies the restored package hash, and runs
+the sample with `--no-restore`. The temporary feed and cache are removed when the command finishes.
 
 ## Integration range
 
@@ -94,14 +106,14 @@ the wait runs on the injected clock, so it is deliberately not exposed.
 ## Dependency audit evidence
 
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required` fails closed unless direct and transitive advisory data is
-available. On 2026-09-16, a bounded required-audit attempt and a bounded no-restore advisory query could not reach
-NuGet.org from this environment: the advisory/flat-container socket was denied before authoritative results were
-returned. The repository therefore makes no claim that the dependency graph is clean.
+available. The audit previously identified `Microsoft.Build.Tasks.Git 8.0.0`, brought in by the private
+`Microsoft.SourceLink.GitHub 8.0.0` build dependency, through advisory `GHSA-23fw-v26w-5fgq`. The repository now
+uses `Microsoft.SourceLink.GitHub 10.0.401`, aligned with the selected .NET SDK. The final required audit passed on
+2026-09-16: all three projects reported no vulnerable packages from `https://api.nuget.org/v3/index.json`.
 
-This is an accepted preparation-only environment risk, scoped to the missing advisory response. The mitigation is to
-rerun the required audit from a network-enabled isolated environment before any release tag or publication, keep the
-required mode fail-closed, and treat a non-zero result as a release blocker. No release action is authorized by this
-note.
+The earlier advisory finding is resolved by the SourceLink update and the passing audit. Keep the required mode
+fail-closed and rerun it before any release tag or publication; treat a non-zero result as a release blocker. No
+release action is authorized by this note.
 
 ## Release preparation
 
