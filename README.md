@@ -1,73 +1,335 @@
 # KeelMatrix.ResilienceSpec
 
-This repository contains the feasibility probe for a proposed HttpClient resilience verifier. It is **not a
-shipping package**, it defines no public product API, and it produces no NuGet artifact. Every project in the
-solution is explicitly non-packable.
+KeelMatrix.ResilienceSpec verifies what your configured `HttpClient` actually does when the downstream fails. Keep
+the real handler chain, replace only the terminal network boundary with a deterministic script, and assert attempt
+count, unsafe-method behaviour, final outcome, and — on an injected clock — retry timing.
 
-The probe answers one question with measurements instead of assumptions:
+The package does **not** make a system resilient and it does not configure resilience. It verifies the observable
+behaviour of a client that is already configured, so a configuration mistake fails in a test instead of in
+production. Only `System.Net.Http` behaviour is under test; the terminal handler never opens a socket, resolves a
+name, or binds a listener.
 
-> Can a deterministic in-memory terminal handler sit behind a real `IHttpClientFactory` handler chain that
-> contains `Microsoft.Extensions.Http.Resilience`, and can retry, `Retry-After`, per-attempt timeout, and
-> total-request timeout behaviour be made deterministic through supported public APIs - with no reflection
-> into resilience internals and no wall-clock timing tolerances?
+## Install
 
-## What is measured
+```text
+dotnet add package KeelMatrix.ResilienceSpec
+```
 
-| Probe | Measurement |
+## Quick Start
+
+Install the scripted downstream on the client under test, keep the resilience configuration you ship, and run the
+request through the scenario so that retries happen on the injected clock.
+
+```csharp
+using System.Net;
+using KeelMatrix.ResilienceSpec;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http.Resilience;
+using Microsoft.Extensions.Time.Testing;
+using Polly;
+
+var clock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+
+var scenario = new ResilienceScenario(
+    HttpFaultScript.Sequence(
+        HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
+        HttpFault.Success()),
+    clock,
+    clock.Advance);
+
+var services = new ServiceCollection();
+services.AddSingleton<TimeProvider>(clock);
+services.AddHttpClient("orders")
+    .UseResilienceSpecDownstream(scenario)
+    .AddStandardResilienceHandler()
+    .Configure(options =>
+    {
+        options.Retry.MaxRetryAttempts = 1;
+        options.Retry.Delay = TimeSpan.FromSeconds(2);
+        options.Retry.BackoffType = DelayBackoffType.Constant;
+        options.Retry.UseJitter = false;
+    });
+
+using var provider = services.BuildServiceProvider();
+var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("orders");
+
+using var request = new HttpRequestMessage(HttpMethod.Get, "https://orders.invalid/orders/42");
+using var result = await scenario.SendAsync(client, request);
+
+result.ShouldHaveStatus(HttpStatusCode.OK);
+scenario.Report
+    .ShouldHaveAttempts(2)
+    .ShouldHaveMethodSequence(HttpMethod.Get, HttpMethod.Get)
+    .ShouldRespectRetryAfter();
+```
+
+Nothing in this example binds a port, resolves a host name, or reaches the network. The reserved `.invalid` host is
+answered in memory by the scripted terminal handler.
+
+## What You Can Assert
+
+| Concept | API |
 | --- | --- |
-| `chain` | Handler order and attempt counts for a scripted `503` then `200`, plus a negative control with the resilience handler removed. |
-| `truth` | Attempt count, final status, and reference wall-clock delay for `503` then `200`, and the retry ceiling for an always-failing downstream. |
-| `unsafe` | Default POST retry behaviour, the public API that disables unsafe-method retries, a safe-method control, and a POST that fails through the per-attempt timeout. |
-| `virtualtime` | Whether a registered `TimeProvider` reaches the standard resilience handler, and whether the public pipeline builder's `TimeProvider` drives the retry delay. |
-| `retryafter` | `Retry-After` as delta seconds and as an HTTP-date, including which clock resolves each form. |
-| `timeouts` | Whether per-attempt and total-request timeouts fire on the controlled clock, and that they never hang. |
-| `network` | Runtime network event counters observed during the run, plus the in-memory attempt total. |
-| `versions` | Runtime, host, and the assembly versions actually loaded by the run. |
+| Scripted downstream steps | `HttpFault.Response`, `HttpFault.Success`, `HttpFault.NetworkError`, `HttpFault.Timeout`, `HttpFault.Delay`, composed with `HttpFaultScript.Sequence`, `HttpFaultScript.Repeat`, `HttpFaultScript.Always` |
+| Terminal handler | `ScriptedHttpMessageHandler` |
+| Scenario and injected clock | `ResilienceScenario`, `ResilienceScenarioOptions`, `ResilienceScenario.SendAsync` |
+| Immutable attempt report | `HttpAttemptReport`, `HttpAttempt`, `HttpAttemptOutcome` |
+| Final caller-visible outcome | `ResilienceResult`, `ResilienceResultKind` |
+| Assertions | `ShouldHaveAttempts`, `ShouldHaveAtMostAttempts`, `ShouldHaveMethodSequence`, `ShouldNotHaveRetried`, `ShouldRespectRetryAfter`, `ShouldHaveRetryDelay`, `ShouldHaveAttemptDuration`, `ShouldHaveSettledAtVirtualTime`, `ShouldHaveStatus`, `ShouldHaveKind`, `ShouldBePending`, `ShouldHaveException<T>` |
+| HttpClientFactory adapter | `ResilienceSpecHttpClientBuilderExtensions.UseResilienceSpecDownstream` |
 
-## Running the probe
-
-```text
-dotnet restore ResilienceSpec.Probe.sln --configfile NuGet.config
-dotnet build ResilienceSpec.Probe.sln -c Release --no-restore
-dotnet run --project tests/ResilienceSpec.Probe.Runner -c Release --no-build
-```
-
-Running every project of the solution and then the runner is the complete probe. Individual probes can be run
-for a shorter loop by naming them, for example:
+An assertion failure reports the expectation, the observation, and the observed timeline:
 
 ```text
-dotnet run --project tests/ResilienceSpec.Probe.Runner -c Release -- chain
+Expected exactly 2 attempt(s) at the scripted downstream, but the downstream served 1 attempt(s).
+
+Timeline:
+#1 GET -> response 503 (retry-after 2 s) | started +0 ms | lasted 0 ms
 ```
 
-The probe-only dependency versions are centralized in `Directory.Packages.props` and can be overridden to
-measure another published version:
+## GET Retries And The 503 -> 200 Scenario
 
-```text
-dotnet run --project tests/ResilienceSpec.Probe.Runner -c Release -p:ProbeResilienceVersion=9.10.0
+```csharp
+var scenario = new ResilienceScenario(
+    HttpFaultScript.Sequence(
+        HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+        HttpFault.Success()),
+    clock,
+    clock.Advance);
+
+// ... configure the client as in the quick start ...
+
+using var request = new HttpRequestMessage(HttpMethod.Get, "https://orders.invalid/orders/42");
+using var result = await scenario.SendAsync(client, request);
+
+result.ShouldHaveStatus(HttpStatusCode.OK);
+scenario.Report.ShouldHaveAttempts(2).ShouldHaveRetryDelay(TimeSpan.FromSeconds(1));
 ```
 
-## Interpreting the output
+## POST Must Not Be Retried
 
-Each probe prints facts, then hard expectations, then a verdict per gate item. `PASS` means the measured
-behaviour matches the claim, `NARROW` means only a named subset is feasible, and `FAIL` means the claim did not
-hold. Hard expectations are the facts the harness itself must satisfy; a failed expectation fails the run.
+Microsoft's standard resilience handler retries all HTTP methods by default, including unsafe ones. When your
+configuration disables that, the invariant is directly assertable:
 
-Bounded observation windows (at most a few seconds) are used only to distinguish "completed" from "still
-pending" while a controlled clock is advanced. No assertion in this probe depends on an elapsed-time
-tolerance, and no probe sleeps to make a timing claim true. Wall-clock numbers are printed as reference values
-only.
+```csharp
+services.AddHttpClient("payments")
+    .UseResilienceSpecDownstream(scenario)
+    .AddStandardResilienceHandler()
+    .Configure(options =>
+    {
+        options.Retry.MaxRetryAttempts = 3;
+        options.Retry.Delay = TimeSpan.FromSeconds(1);
+        options.Retry.BackoffType = DelayBackoffType.Constant;
+        options.Retry.UseJitter = false;
+        options.Retry.DisableForUnsafeHttpMethods();
+    });
 
-## Network behaviour
+// ... run the POST through the scenario ...
 
-Requests use the reserved `.invalid` top-level domain and are answered by an in-memory `HttpMessageHandler`, so
-a request that left the process would fail name resolution instead of reaching the terminal handler. The
-`network` probe reports the runtime network events observed during the run and the number of attempts answered
-in memory. The probe never binds a listener.
+using var result = await scenario.SendAsync(client, request);
 
-## Scope
+result.ShouldHaveStatus(HttpStatusCode.ServiceUnavailable);
+scenario.Report.ShouldHaveAttempts(1).ShouldNotHaveRetried(HttpMethod.Post);
+```
 
-This repository is a bounded feasibility probe. Do not add a shipping package, product public API, analyzer,
-CLI, workflow, or telemetry wiring here before the product scope is decided and implemented separately.
+`ShouldNotHaveRetried` counts the attempts of that method at the scripted downstream, so it fails with the observed
+timeline when the configured client repeats an unsafe request.
 
-The resilience packages referenced here are probe-only development dependencies. The in-memory terminal
-handler and its records use only `System.Net.Http`.
+## Retry-After (Delta Seconds)
+
+```csharp
+var scenario = new ResilienceScenario(
+    HttpFaultScript.Sequence(
+        HttpFault.Response(HttpStatusCode.TooManyRequests, retryAfter: TimeSpan.FromSeconds(5)),
+        HttpFault.Success()),
+    clock,
+    clock.Advance);
+
+// ... run the request ...
+
+scenario.Report.ShouldRespectRetryAfter().ShouldHaveRetryDelay(TimeSpan.FromSeconds(5));
+```
+
+The delta form is deterministic because the wait runs on the injected clock. The HTTP-date form is deliberately not
+supported; see [Timing Limitations](#timing-limitations).
+
+## Exceptions And Cancellation
+
+```csharp
+var scenario = new ResilienceScenario(
+    HttpFaultScript.Sequence(HttpFault.NetworkError(), HttpFault.Success()),
+    clock,
+    clock.Advance);
+
+using var result = await scenario.SendAsync(client, request);
+
+// The chain handled the network-like failure and retried it.
+result.ShouldHaveStatus(HttpStatusCode.OK);
+scenario.Report.ShouldHaveAttempts(2);
+```
+
+```csharp
+var scenario = new ResilienceScenario(
+    HttpFaultScript.Sequence(HttpFault.Timeout()),
+    clock,
+    clock.Advance);
+
+using var caller = new CancellationTokenSource();
+var run = scenario.SendAsync(client, request, caller.Token);
+await caller.CancelAsync();
+using var result = await run;
+
+result.ShouldHaveKind(ResilienceResultKind.Canceled);
+```
+
+`HttpFault.Timeout()` never answers, so an attempt can only end through a timeout strategy or through caller
+cancellation. The result distinguishes them: `ResilienceResultKind.Canceled` when your token was cancelled,
+`ResilienceResultKind.Timeout` when the chain abandoned the attempt without you asking, `DownstreamError` when an
+exception reached the caller, `ScriptExhausted` when the script ran out of steps, and `ConcurrentUse` when one script
+was consumed by two in-flight requests.
+
+## Deterministic Timing
+
+Timing assertions are available only when a scenario is created with a controllable `TimeProvider` and the operation
+that advances it:
+
+```csharp
+var clock = new FakeTimeProvider();
+var scenario = new ResilienceScenario(script, clock, clock.Advance);
+```
+
+The same clock instance must drive the resilience pipeline, which is what `services.AddSingleton<TimeProvider>(clock)`
+does for `Microsoft.Extensions.Http.Resilience`. The adapter fails configuration with a
+`MissingTimeProviderException` when a scenario was created with a clock but no `TimeProvider` is registered, so a
+timing assertion can never silently observe a pipeline that still runs on the system clock.
+
+While a request is pending, `ResilienceScenario.SendAsync` advances the injected clock in `AdvanceStep` increments and
+waits one `ObservationWindow` for the pipeline to react. Timing assertions compare the observed injected-clock value
+with the expected value and tolerate at most one advance step, which is the sampling granularity reported by
+`HttpAttemptReport.ObservationStep`. Nothing is measured with the wall clock and there are no elapsed-time tolerances.
+
+Assertions that ship with the timing subset:
+
+| Assertion | What it proves |
+| --- | --- |
+| `ShouldRespectRetryAfter()` | Every scripted `Retry-After` delta was honoured by the next attempt |
+| `ShouldHaveRetryDelay(expected)` | Every inter-attempt delay matches the configured backoff |
+| `ShouldHaveAttemptDuration(ordinal, expected)` | One attempt lasted the configured per-attempt timeout |
+| `ShouldHaveSettledAtVirtualTime(expected)` | The request settled at the configured total timeout |
+
+Timing assertions throw `MissingTimeProviderException` when the scenario has no controllable clock. The package never
+falls back to sleeps or tolerances.
+
+The "clock not advanced" control is part of the same contract. Set `AdvanceClock` to `false` to observe a pending
+request without moving time:
+
+```csharp
+var options = new ResilienceScenarioOptions
+{
+    AdvanceClock = false,
+    PendingObservation = TimeSpan.FromMilliseconds(200),
+};
+
+var scenario = new ResilienceScenario(
+    HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(2), HttpFault.Success())),
+    clock,
+    clock.Advance,
+    options);
+
+// ... run the request ...
+
+result.ShouldBePending();
+scenario.Report.ShouldHaveAttempts(1);
+```
+
+### Timing Limitations
+
+- **`Retry-After` HTTP-date is not supported.** The date delta is resolved against the wall clock while the resulting
+  wait runs on the injected clock, so the two disagree whenever the test clock and the wall clock differ. Scripted
+  responses therefore carry the delta-seconds form only, and `HttpFault.Response` has no HTTP-date overload.
+- **Timing assertions need an injected clock.** Without one, attempt, method, outcome, and unsafe-method assertions
+  still work, and timing assertions fail with an actionable configuration error.
+- **Timing observations are sampled.** The clock advances in `AdvanceStep` increments, so the observed value can lag
+  the exact release instant by at most one step. Lower `AdvanceStep` for finer observation; each advance costs one
+  observation window of wall-clock time.
+- **`Retry-After` is asserted for delta responses only.** A response without `Retry-After` is governed by the
+  configured backoff, which `ShouldHaveRetryDelay` verifies.
+
+## Recording And Privacy
+
+Attempt records are intentionally minimal. `HttpAttempt` contains only the attempt ordinal, the HTTP method, the broad
+outcome, the scripted status code, the scripted `Retry-After` value, and injected-clock timing. The package never
+records request URIs, query strings, header values, cookies, authorization values, request or response bodies, or
+exception messages, and the local timeline it prints on failure contains no request data.
+
+Scripted responses carry an empty body and no headers other than the scripted `Retry-After` value. A script is bounded
+to `HttpFaultScript.MaximumSteps` steps, a timeline is bounded by the same value, and one script has deterministic
+single-consumer semantics by default: a second in-flight request fails with `ConcurrentScriptUseException` instead of
+silently interleaving outcomes. Use `ScriptConcurrency.AllowConcurrent` when the scenario under test is genuinely
+concurrent.
+
+## Integration With Microsoft.Extensions.Http.Resilience
+
+The scripted downstream is installed as the primary (innermost) handler, so the resilience strategies, delegating
+handlers, and ordering of the client under test all stay in place. `UseResilienceSpecDownstream` returns the
+`IHttpClientBuilder`, which means it chains before `AddStandardResilienceHandler()`:
+
+```csharp
+services.AddHttpClient("orders")
+    .UseResilienceSpecDownstream(scenario)
+    .AddStandardResilienceHandler();
+```
+
+Supported and tested range: `Microsoft.Extensions.Http.Resilience` **9.8.0 and newer, below 11.0**. The repository's
+integration suite runs against the lowest tested release (9.8.0) and the current release (10.10.0) with
+`-p:ResilienceVersion=`. The core package does not reference `Microsoft.Extensions.Http.Resilience` or Polly: the
+terminal handler, the script, the report, and the assertions use only `System.Net.Http`, and the test suite proves the
+same contracts with a hand-written delegating handler.
+
+## Configuration Inspection Versus Observable Behaviour
+
+Inspection tools answer "what pipeline did I construct?" by reading options and pipeline descriptors.
+KeelMatrix.ResilienceSpec answers "what did this assembled client do?" by counting the attempts that really reached
+the network boundary, in order, with their methods and outcomes. Configuration intent and observable behaviour can
+differ — for example when a retry predicate, a disabling API, or a timeout interacts with the method of the request —
+so this package deliberately asserts the assembled behaviour instead of restating configuration.
+
+## Platforms And Target Frameworks
+
+- Target framework: `net8.0`.
+- The package and its tests target any platform that supports `net8.0`; the validation evidence in this repository is
+  produced on Windows.
+- Linux and macOS behaviour is expected to match, because scripts, reports, and assertions use no filesystem, shell,
+  culture-specific, or platform-specific behaviour, but it has not been exercised in this repository. Treat
+  cross-platform timing evidence as unverified until it is produced on those platforms.
+
+## Telemetry
+
+The package uses the shared `KeelMatrix.Telemetry` activation and weekly heartbeat contract. An activation is
+requested only when a scripted scenario actually reached at least one injected failure **and** at least one resilience
+assertion was evaluated; constructing a script, handler, or scenario never activates telemetry. Telemetry is
+best-effort, never a reliability dependency, cannot break the host, and can be disabled by setting
+`KEELMATRIX_NO_TELEMETRY=1`. See [PRIVACY.md](PRIVACY.md) for the full contract.
+
+## Troubleshooting
+
+| Symptom | Cause and next step |
+| --- | --- |
+| `MissingTimeProviderException` when creating a client | The scenario has a controllable clock but the container has no `TimeProvider`. Register the same instance with `services.AddSingleton<TimeProvider>(clock)`, or set `RequireRegisteredTimeProvider` to `false` when the pipeline time source is configured another way. |
+| `MissingTimeProviderException` from a timing assertion | The scenario was created without a clock. Create it with `new ResilienceScenario(script, clock, clock.Advance)`. |
+| `ConcurrentScriptUseException` | Two in-flight requests consumed one script. Create one scenario per logical call, or opt in to `ScriptConcurrency.AllowConcurrent`. |
+| `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |
+| A timing assertion fails by less than one advance step | The observation granularity is `ResilienceScenarioOptions.AdvanceStep`. Lower it for finer observation. |
+| A request never settles | The script contains a step that waits for the clock or never answers. Check that the injected clock is registered and that `AdvanceClock` is enabled, or assert `ShouldBePending()`. |
+
+## Documentation
+
+- [docs/DEV.md](docs/DEV.md) documents the local validation path and package gates.
+- [CHANGELOG.md](CHANGELOG.md) lists released and unreleased changes.
+- [SECURITY.md](SECURITY.md) explains how to report a vulnerability privately.
+- [PRIVACY.md](PRIVACY.md) describes telemetry and data handling.
+- [CONTRIBUTING.md](CONTRIBUTING.md) documents how to contribute changes.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -1,16 +1,21 @@
 <Project>
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
-    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <Version>0.1.0</Version>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>
+    <DeterministicSourcePaths>true</DeterministicSourcePaths>
+    <ContinuousIntegrationBuild Condition="'$(Configuration)' == 'Release' Or '$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>8.0-recommended</AnalysisLevel>
-    <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
-    <ContinuousIntegrationBuild Condition="'$(Configuration)' == 'Release'">true</ContinuousIntegrationBuild>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release' and '$(IsTestProject)' != 'true'">true</TreatWarningsAsErrors>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 </Project>

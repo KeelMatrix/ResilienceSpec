@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/KeelMatrix.ResilienceSpec.Sample/KeelMatrix.ResilienceSpec.Sample.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KeelMatrix.ResilienceSpec.IntegrationTests/KeelMatrix.ResilienceSpec.IntegrationTests.csproj" />
+    <Project Path="tests/KeelMatrix.ResilienceSpec.Tests/KeelMatrix.ResilienceSpec.Tests.csproj" />
+  </Folder>
+</Solution>

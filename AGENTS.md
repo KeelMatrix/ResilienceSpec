@@ -2,40 +2,53 @@
 
 ## Navigation
 
-- `src/ResilienceSpec.Probe.Core` contains the non-shipping probe primitives: the scripted in-memory terminal
-  handler, the observation timeline, the recording delegating handler, and the runtime network-event observer.
-  It references no package and uses only `System.Net.Http`.
-- `tests/ResilienceSpec.Probe.Runner` assembles the probe chains, references the resilience packages as
-  probe-only development dependencies, and prints the evidence.
-- `tests/ResilienceSpec.Probe.Runner/Probes` contains one file per measured item.
+- `src/KeelMatrix.ResilienceSpec` is the only packable project. It contains the script, the scripted terminal
+  handler, the scenario, the attempt report, the assertions, the HttpClientFactory adapter, and the telemetry entry
+  point.
+- `tests/KeelMatrix.ResilienceSpec.Tests` proves the core contracts with hand-written delegating handlers, so the
+  core package is exercised without any resilience library.
+- `tests/KeelMatrix.ResilienceSpec.IntegrationTests` wires the real `Microsoft.Extensions.Http.Resilience` standard
+  handler to the scripted downstream.
+- `tests/PackageSmoke` is a clean consumer that restores the packed package from an isolated local feed. It is
+  deliberately outside the solution.
+- `samples/KeelMatrix.ResilienceSpec.Sample` is a runnable walkthrough of the documented quick start.
+- `scripts` contains the repository gates: `Validate.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`, and
+  `Invoke-DependencyAudit.ps1`.
+- `docs/DEV.md` explains the local validation path; `README.md` and `src/KeelMatrix.ResilienceSpec/README.md` are the
+  user-facing documentation.
 
 ## Commands
 
 ```text
-dotnet restore ResilienceSpec.Probe.sln --configfile NuGet.config
-dotnet build ResilienceSpec.Probe.sln -c Release --no-restore
-dotnet run --project tests/ResilienceSpec.Probe.Runner -c Release --no-build
-dotnet run --project tests/ResilienceSpec.Probe.Runner -c Release -- chain truth
+pwsh -NoProfile -File scripts/Validate.ps1
+pwsh -NoProfile -File scripts/Validate.ps1 -Mode Focused -SkipPackage
+dotnet test tests/KeelMatrix.ResilienceSpec.Tests -c Release
+dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
+pwsh -NoProfile -File scripts/Invoke-PackageSmoke.ps1
 ```
 
 ## Invariants
 
-- Every project stays non-packable. No package, product public API, workflow, analyzer, or CLI belongs here.
-- The assembled client under test keeps its real handler chain; only the innermost network boundary is
-  replaced by the in-memory terminal handler. Never bypass or duplicate the resilience layer in a probe.
-- Only public APIs may be used. Never use reflection over Polly or Microsoft types, including for
-  diagnostics.
-- No probe may use a fixed sleep or an elapsed-time tolerance to make a timing claim true. Bounded observation
-  windows may only distinguish "completed" from "still pending"; wall-clock values are reference data.
-- Scripted requests target the reserved `.invalid` domain and are answered in memory. The probe must not
-  resolve names, open sockets, or bind listeners.
-- Attempt records stay minimal: ordinal, method, scripted outcome, and relative timing only. Never record
-  request or response payloads, headers, or query strings.
-- The runner must stay the single full-probe command and must fail when a hard expectation does not hold.
+- The terminal handler replaces only the network boundary. Never bypass, replace, or duplicate the resilience layer
+  of the client under test, and never depend on reflection over Polly or Microsoft internals for correctness.
+- The core package uses only `System.Net.Http`. `Microsoft.Extensions.Http.Resilience` and Polly belong to test and
+  sample projects only.
+- Scripts, attempt records, and diagnostics stay privacy-safe: ordinal, method, broad outcome, scripted status or
+  `Retry-After` value, and injected-clock timing only. Never record or echo URIs, query strings, headers, cookies,
+  authorization values, bodies, or exception messages.
+- Timing assertions run on an injected clock only. Never introduce a wall-clock sleep, an elapsed-time tolerance, or a
+  silent fallback that makes a timing claim true.
+- Parameterless scripts, attempt state, and timelines stay bounded, and one script keeps single-consumer semantics by
+  default.
+- Public API changes are recorded in the analyzer baseline next to the package project; new API goes to
+  `PublicAPI.Unshipped.txt` and is promoted to `PublicAPI.Shipped.txt` during release preparation.
+- The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is
+  allowed on the validation path.
+- Set `KEELMATRIX_NO_TELEMETRY=1` for local validation. Repository validation must never emit production telemetry.
 
 ## Validation
 
-Run the focused probe first while developing, then a Release build of the solution and the complete runner
-before handing evidence on. Probe output is the evidence; do not paste raw research notes into the repository.
-
-Repository validation is local by design; no automated workflow is configured here.
+Run the focused test project while developing, then `scripts/Validate.ps1` before handing work on. The script restores,
+verifies formatting, builds Release, runs both test projects, packs and inspects the package, and runs the clean
+consumer smoke from an isolated local feed. `-Mode Full` adds the dependency vulnerability audit. Package and
+validation output goes to the ignored `artifacts/` directory.

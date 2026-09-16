@@ -1,0 +1,116 @@
+#nullable enable
+const KeelMatrix.ResilienceSpec.HttpFaultScript.MaximumSteps = 512 -> int
+KeelMatrix.ResilienceSpec.ConcurrentScriptUseException
+KeelMatrix.ResilienceSpec.HttpAttempt
+KeelMatrix.ResilienceSpec.HttpAttempt.Duration.get -> System.TimeSpan?
+KeelMatrix.ResilienceSpec.HttpAttempt.Duration.init -> void
+KeelMatrix.ResilienceSpec.HttpAttempt.HttpAttempt(int Ordinal, System.Net.Http.HttpMethod! Method, KeelMatrix.ResilienceSpec.HttpAttemptOutcome Outcome, System.Net.HttpStatusCode? StatusCode, System.TimeSpan? RetryAfter, System.TimeSpan? StartedAfter, System.TimeSpan? Duration) -> void
+KeelMatrix.ResilienceSpec.HttpAttempt.Method.get -> System.Net.Http.HttpMethod!
+KeelMatrix.ResilienceSpec.HttpAttempt.Method.init -> void
+KeelMatrix.ResilienceSpec.HttpAttempt.Ordinal.get -> int
+KeelMatrix.ResilienceSpec.HttpAttempt.Ordinal.init -> void
+KeelMatrix.ResilienceSpec.HttpAttempt.Outcome.get -> KeelMatrix.ResilienceSpec.HttpAttemptOutcome
+KeelMatrix.ResilienceSpec.HttpAttempt.Outcome.init -> void
+KeelMatrix.ResilienceSpec.HttpAttempt.RetryAfter.get -> System.TimeSpan?
+KeelMatrix.ResilienceSpec.HttpAttempt.RetryAfter.init -> void
+KeelMatrix.ResilienceSpec.HttpAttempt.StartedAfter.get -> System.TimeSpan?
+KeelMatrix.ResilienceSpec.HttpAttempt.StartedAfter.init -> void
+KeelMatrix.ResilienceSpec.HttpAttempt.StatusCode.get -> System.Net.HttpStatusCode?
+KeelMatrix.ResilienceSpec.HttpAttempt.StatusCode.init -> void
+KeelMatrix.ResilienceSpec.HttpAttemptOutcome
+KeelMatrix.ResilienceSpec.HttpAttemptOutcome.Abandoned = 2 -> KeelMatrix.ResilienceSpec.HttpAttemptOutcome
+KeelMatrix.ResilienceSpec.HttpAttemptOutcome.NetworkError = 1 -> KeelMatrix.ResilienceSpec.HttpAttemptOutcome
+KeelMatrix.ResilienceSpec.HttpAttemptOutcome.Response = 0 -> KeelMatrix.ResilienceSpec.HttpAttemptOutcome
+KeelMatrix.ResilienceSpec.HttpAttemptOutcome.ScriptExhausted = 3 -> KeelMatrix.ResilienceSpec.HttpAttemptOutcome
+KeelMatrix.ResilienceSpec.HttpAttemptReport
+KeelMatrix.ResilienceSpec.HttpAttemptReport.AttemptCount.get -> int
+KeelMatrix.ResilienceSpec.HttpAttemptReport.Attempts.get -> System.Collections.Generic.IReadOnlyList<KeelMatrix.ResilienceSpec.HttpAttempt!>!
+KeelMatrix.ResilienceSpec.HttpAttemptReport.DescribeTimeline() -> string!
+KeelMatrix.ResilienceSpec.HttpAttemptReport.HasTiming.get -> bool
+KeelMatrix.ResilienceSpec.HttpAttemptReport.IsSettled.get -> bool
+KeelMatrix.ResilienceSpec.HttpAttemptReport.LastAttempt.get -> KeelMatrix.ResilienceSpec.HttpAttempt?
+KeelMatrix.ResilienceSpec.HttpAttemptReport.ObservationStep.get -> System.TimeSpan?
+KeelMatrix.ResilienceSpec.HttpAttemptReport.SettledVirtualElapsed.get -> System.TimeSpan?
+KeelMatrix.ResilienceSpec.HttpAttemptReport.Timeline.get -> System.Collections.Generic.IReadOnlyList<string!>!
+KeelMatrix.ResilienceSpec.HttpFault
+KeelMatrix.ResilienceSpec.HttpFault.RetryAfter.get -> System.TimeSpan?
+KeelMatrix.ResilienceSpec.HttpFaultScript
+KeelMatrix.ResilienceSpec.HttpFaultScript.StepCount.get -> int
+KeelMatrix.ResilienceSpec.MissingTimeProviderException
+KeelMatrix.ResilienceSpec.ResilienceAssertionException
+KeelMatrix.ResilienceSpec.ResilienceAssertions
+KeelMatrix.ResilienceSpec.ResilienceResult
+KeelMatrix.ResilienceSpec.ResilienceResult.Dispose() -> void
+KeelMatrix.ResilienceSpec.ResilienceResult.Exception.get -> System.Exception?
+KeelMatrix.ResilienceSpec.ResilienceResult.IsPending.get -> bool
+KeelMatrix.ResilienceSpec.ResilienceResult.Kind.get -> KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceResult.Report.get -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+KeelMatrix.ResilienceSpec.ResilienceResult.Response.get -> System.Net.Http.HttpResponseMessage?
+KeelMatrix.ResilienceSpec.ResilienceResult.StatusCode.get -> System.Net.HttpStatusCode?
+KeelMatrix.ResilienceSpec.ResilienceResult.VirtualElapsed.get -> System.TimeSpan
+KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceResultKind.Canceled = 2 -> KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceResultKind.ConcurrentUse = 5 -> KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceResultKind.DownstreamError = 3 -> KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceResultKind.Pending = 6 -> KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceResultKind.Response = 0 -> KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceResultKind.ScriptExhausted = 4 -> KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceResultKind.Timeout = 1 -> KeelMatrix.ResilienceSpec.ResilienceResultKind
+KeelMatrix.ResilienceSpec.ResilienceScenario
+KeelMatrix.ResilienceSpec.ResilienceScenario.Dispose() -> void
+KeelMatrix.ResilienceSpec.ResilienceScenario.Handler.get -> KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler!
+KeelMatrix.ResilienceSpec.ResilienceScenario.Options.get -> KeelMatrix.ResilienceSpec.ResilienceScenarioOptions!
+KeelMatrix.ResilienceSpec.ResilienceScenario.Report.get -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+KeelMatrix.ResilienceSpec.ResilienceScenario.ResilienceScenario(KeelMatrix.ResilienceSpec.HttpFaultScript! script, System.TimeProvider? timeProvider = null, System.Action<System.TimeSpan>? advanceTime = null, KeelMatrix.ResilienceSpec.ResilienceScenarioOptions? options = null) -> void
+KeelMatrix.ResilienceSpec.ResilienceScenario.Script.get -> KeelMatrix.ResilienceSpec.HttpFaultScript!
+KeelMatrix.ResilienceSpec.ResilienceScenario.SendAsync(System.Net.Http.HttpClient! client, System.Net.Http.HttpRequestMessage! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<KeelMatrix.ResilienceSpec.ResilienceResult!>!
+KeelMatrix.ResilienceSpec.ResilienceScenario.SupportsTiming.get -> bool
+KeelMatrix.ResilienceSpec.ResilienceScenario.TimeProvider.get -> System.TimeProvider?
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceClock.get -> bool
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceClock.init -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceStep.get -> System.TimeSpan
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceStep.init -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.Concurrency.get -> KeelMatrix.ResilienceSpec.ScriptConcurrency
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.Concurrency.init -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.ObservationWindow.get -> System.TimeSpan
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.ObservationWindow.init -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.PendingObservation.get -> System.TimeSpan
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.PendingObservation.init -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.RequireRegisteredTimeProvider.get -> bool
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.RequireRegisteredTimeProvider.init -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.ResilienceScenarioOptions() -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.VirtualBudget.get -> System.TimeSpan
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.VirtualBudget.init -> void
+KeelMatrix.ResilienceSpec.ResilienceSpecHttpClientBuilderExtensions
+KeelMatrix.ResilienceSpec.ScriptConcurrency
+KeelMatrix.ResilienceSpec.ScriptConcurrency.AllowConcurrent = 1 -> KeelMatrix.ResilienceSpec.ScriptConcurrency
+KeelMatrix.ResilienceSpec.ScriptConcurrency.SingleConsumer = 0 -> KeelMatrix.ResilienceSpec.ScriptConcurrency
+KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler
+KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler.Report.get -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler.ScriptedHttpMessageHandler(KeelMatrix.ResilienceSpec.HttpFaultScript! script, System.TimeProvider? timeProvider = null, KeelMatrix.ResilienceSpec.ResilienceScenarioOptions? options = null) -> void
+KeelMatrix.ResilienceSpec.ScriptExhaustedException
+override KeelMatrix.ResilienceSpec.HttpFault.ToString() -> string!
+override KeelMatrix.ResilienceSpec.HttpFaultScript.ToString() -> string!
+static KeelMatrix.ResilienceSpec.HttpFault.Delay(System.TimeSpan duration, KeelMatrix.ResilienceSpec.HttpFault! fault) -> KeelMatrix.ResilienceSpec.HttpFault!
+static KeelMatrix.ResilienceSpec.HttpFault.NetworkError() -> KeelMatrix.ResilienceSpec.HttpFault!
+static KeelMatrix.ResilienceSpec.HttpFault.Response(System.Net.HttpStatusCode statusCode, System.TimeSpan? retryAfter = null) -> KeelMatrix.ResilienceSpec.HttpFault!
+static KeelMatrix.ResilienceSpec.HttpFault.Success() -> KeelMatrix.ResilienceSpec.HttpFault!
+static KeelMatrix.ResilienceSpec.HttpFault.Timeout() -> KeelMatrix.ResilienceSpec.HttpFault!
+static KeelMatrix.ResilienceSpec.HttpFaultScript.Always(KeelMatrix.ResilienceSpec.HttpFault! fault) -> KeelMatrix.ResilienceSpec.HttpFaultScript!
+static KeelMatrix.ResilienceSpec.HttpFaultScript.Repeat(KeelMatrix.ResilienceSpec.HttpFault! fault, int count) -> KeelMatrix.ResilienceSpec.HttpFaultScript!
+static KeelMatrix.ResilienceSpec.HttpFaultScript.Sequence(params KeelMatrix.ResilienceSpec.HttpFault![]! faults) -> KeelMatrix.ResilienceSpec.HttpFaultScript!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldBePending(this KeelMatrix.ResilienceSpec.ResilienceResult! result) -> KeelMatrix.ResilienceSpec.ResilienceResult!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveAtMostAttempts(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report, int maximum) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveAttemptDuration(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report, int ordinal, System.TimeSpan expected) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveAttempts(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report, int expected) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveException<TException>(this KeelMatrix.ResilienceSpec.ResilienceResult! result) -> KeelMatrix.ResilienceSpec.ResilienceResult!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveKind(this KeelMatrix.ResilienceSpec.ResilienceResult! result, KeelMatrix.ResilienceSpec.ResilienceResultKind expected) -> KeelMatrix.ResilienceSpec.ResilienceResult!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveMethodSequence(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report, params System.Net.Http.HttpMethod![]! methods) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveRetryDelay(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report, System.TimeSpan expected) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveSettledAtVirtualTime(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report, System.TimeSpan expected) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldHaveStatus(this KeelMatrix.ResilienceSpec.ResilienceResult! result, System.Net.HttpStatusCode expected) -> KeelMatrix.ResilienceSpec.ResilienceResult!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldNotHaveRetried(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report, System.Net.Http.HttpMethod! method) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldRespectRetryAfter(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
+static KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.Default.get -> KeelMatrix.ResilienceSpec.ResilienceScenarioOptions!
+static KeelMatrix.ResilienceSpec.ResilienceSpecHttpClientBuilderExtensions.UseResilienceSpecDownstream(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder! builder, KeelMatrix.ResilienceSpec.ResilienceScenario! scenario) -> Microsoft.Extensions.DependencyInjection.IHttpClientBuilder!

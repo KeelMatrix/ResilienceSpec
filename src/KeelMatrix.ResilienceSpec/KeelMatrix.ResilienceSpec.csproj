@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>KeelMatrix.ResilienceSpec</AssemblyName>
+    <RootNamespace>KeelMatrix.ResilienceSpec</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>KeelMatrix.ResilienceSpec</PackageId>
+    <Description>Verify how your real .NET HttpClient resilience chain retries, delays, times out, and finishes under deterministic scripted failures for testing and CI.</Description>
+    <PackageTags>httpclient;resilience;retry;polly;testing;ci;retry-after;timeout;dotnet</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <Copyright>KeelMatrix</Copyright>
+    <RepositoryUrl>https://github.com/KeelMatrix/ResilienceSpec</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/KeelMatrix/ResilienceSpec#readme</PackageProjectUrl>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="README.md" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="KeelMatrix.Telemetry" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KeelMatrix.ResilienceSpec.Tests" />
+    <InternalsVisibleTo Include="KeelMatrix.ResilienceSpec.IntegrationTests" />
+  </ItemGroup>
+</Project>

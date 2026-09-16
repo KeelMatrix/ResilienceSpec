@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>KeelMatrix.ResilienceSpec.PackageSmoke</AssemblyName>
+    <RootNamespace>PackageSmoke</RootNamespace>
+    <Nullable>enable</Nullable>
+    <!--
+      This project is deliberately not part of the solution: it consumes the built package from an isolated local
+      feed instead of a project reference, so the normal repository build path never depends on a local feed.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="KeelMatrix.ResilienceSpec" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+</Project>

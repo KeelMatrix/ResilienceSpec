@@ -1,7 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <IsPackable>false</IsPackable>
-    <AssemblyName>ResilienceSpec.Probe.Core</AssemblyName>
-    <RootNamespace>ResilienceSpec.Probe</RootNamespace>
-  </PropertyGroup>
-</Project>

@@ -9,24 +9,50 @@ obj/
 *.user
 *.suo
 
-## Local probe output
+## Local validation output, package feeds, and package logs
 artifacts/
-probe-artifacts/
 TestResults/
+**/TestResults/
 *.trx
+*.coverage
+coverage*.xml
+coverage*.json
+
+## Local NuGet feeds
+local-feed/
+.local-feed/
+nuget-local/
 
 ## Environment and secrets
 .env
 .env.*
+!.env.example
+!.env.sample
+*.pfx
+*.p12
+*.key
+
+## Local telemetry configuration
+keelmatrix.telemetry.json
 
 ## Package output
 *.nupkg
 *.snupkg
+*.nuspec
 
 ## Host noise
 *.log
 *.cache
+.cache/
 *.tmp
+*.temp
 *.bak
+*.swp
+*~
 .DS_Store
 Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+## Restore-generated legacy files
+project.lock.json
