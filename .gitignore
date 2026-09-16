@@ -1,0 +1,32 @@
+## Build output
+bin/
+obj/
+
+## IDE files
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+
+## Local probe output
+artifacts/
+probe-artifacts/
+TestResults/
+*.trx
+
+## Environment and secrets
+.env
+.env.*
+
+## Package output
+*.nupkg
+*.snupkg
+
+## Host noise
+*.log
+*.cache
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db

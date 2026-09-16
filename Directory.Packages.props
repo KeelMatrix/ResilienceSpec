@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+    <!-- Probe-only dependency family. Pass ProbeResilienceVersion on the command line to measure another published version. -->
+    <ProbeResilienceVersion Condition="'$(ProbeResilienceVersion)' == ''">10.10.0</ProbeResilienceVersion>
+    <ProbeTimeProviderTestingVersion Condition="'$(ProbeTimeProviderTestingVersion)' == ''">10.10.0</ProbeTimeProviderTestingVersion>
+    <ProbeHttpVersion Condition="'$(ProbeHttpVersion)' == ''">8.0.1</ProbeHttpVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="$(ProbeHttpVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="$(ProbeResilienceVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="$(ProbeTimeProviderTestingVersion)" />
+  </ItemGroup>
+</Project>
