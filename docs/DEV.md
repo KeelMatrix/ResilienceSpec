@@ -49,17 +49,18 @@ bash ./scripts/validate-linux.sh
 ```
 
 The script restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core Release tests, and runs the
-integration Release tests when that project is present. It is independent of `scripts/Validate.ps1` and is not part
-of the Windows validation gate. The checked-in validation evidence includes Linux core and integration execution,
-including injected-clock timing tests; macOS execution and timing remain unverified.
+integration Release tests when that project is present. The hosted Linux job uses this script for core and integration
+validation, including injected-clock timing tests. It does not run package inspection, the clean consumer smoke test,
+or the sample; those package stages run on Windows and macOS through `scripts/Validate.ps1`.
 
 ## Hosted CI status
 
-Ordinary push and pull-request CI is intentionally absent while this repository is private and private GitHub Actions
-use is not approved. The repository contains only the tag-triggered release workflow at
-`.github/workflows/release.yml`; it cannot run from a normal `main` push or pull request. As a result, the validation
-evidence below is local-only: hosted runner behaviour and hosted CI checks remain unverified. Local Windows and Linux
-validation evidence exists; macOS execution and timing remain unverified.
+The repository contains `.github/workflows/validate.yml`, which runs on pushes to `main` and on manual dispatch with
+Windows, Ubuntu, and macOS hosted runners. At the candidate commit, all three jobs pass the core and integration
+suites, including injected-clock timing tests. The macOS result is evidence from a hosted, virtualized
+`macos-latest` runner, not physical macOS hardware. Only `net8.0` is exercised. The Linux job runs core and
+integration through `scripts/validate-linux.sh`; Windows and macOS also run package inspection, the clean consumer
+smoke test, and the sample, so Linux package-stage parity is not established by this workflow.
 
 Useful narrower variants:
 

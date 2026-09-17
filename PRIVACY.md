@@ -7,9 +7,11 @@ package can trigger.
 
 ## Platforms
 
-The package targets `net8.0`. Windows and Linux validation covers the core and integration suites, including
-injected-clock timing behaviour. macOS execution has not been performed, so macOS behaviour and timing remain
-unverified.
+The package targets `net8.0`. At the candidate commit, hosted validation passes the core and integration suites on
+Windows, Linux, and macOS, including injected-clock timing behaviour. The macOS evidence comes from a hosted,
+virtualized `macos-latest` runner, not physical macOS hardware. The Linux job runs core and integration validation
+through `scripts/validate-linux.sh`; Windows and macOS also run package inspection, the clean consumer smoke test,
+and the sample.
 
 ## Product data boundary
 

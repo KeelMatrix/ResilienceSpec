@@ -314,10 +314,11 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Platforms And Target Frameworks
 
 - Target framework: `net8.0`.
-- The package and its tests use portable .NET APIs. Windows and Linux validation includes the core and integration
-  suites, including injected-clock timing behaviour.
-- macOS execution has not been performed in this repository, so its behaviour—including timing behaviour—remains
-  unverified.
+- The package and its tests use portable .NET APIs. At the candidate commit, hosted validation passes the core and
+  integration suites on Windows, Linux, and macOS, including injected-clock timing behaviour.
+- The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical macOS hardware. Only
+  `net8.0` is exercised. The Linux job runs core and integration validation through `scripts/validate-linux.sh`;
+  Windows and macOS also run package inspection, the clean consumer smoke test, and the sample.
 
 ## Telemetry
 
