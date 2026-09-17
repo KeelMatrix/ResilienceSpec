@@ -1,0 +1,46 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  KEELMATRIX_NO_TELEMETRY: '1'
+
+jobs:
+  validate:
+    name: Validate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Run repository validation on Windows and macOS
+        if: runner.os != 'Linux'
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/Validate.ps1
+
+      - name: Run repository validation on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: ./scripts/validate-linux.sh
