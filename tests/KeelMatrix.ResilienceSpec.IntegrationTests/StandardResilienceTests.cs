@@ -195,7 +195,8 @@ public sealed class StandardResilienceTests
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
             clock,
-            clock.Advance);
+            clock.Advance,
+            new ResilienceScenarioOptions { ObservationWindow = TimeSpan.FromMilliseconds(250) });
         using var chain = StandardResilienceChains.Create(
             "orders",
             scenario,
