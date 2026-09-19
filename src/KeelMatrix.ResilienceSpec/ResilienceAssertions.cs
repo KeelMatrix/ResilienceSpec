@@ -145,23 +145,22 @@ public static class ResilienceAssertions
     }
 
     /// <summary>
-    /// Asserts that every scripted <c>Retry-After</c> delay was honoured: the following attempt waited for the
-    /// advertised injected-clock time.
+    /// Asserts that every scripted <c>Retry-After</c> delay was honoured as a minimum: the following attempt waited
+    /// at least the advertised injected-clock time. Use <see cref="ShouldHaveRetryDelay"/> for an exact delay.
     /// </summary>
     /// <param name="report">The attempt report to assert on.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
     /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
-    /// <exception cref="ResilienceAssertionException">No response advertised <c>Retry-After</c>, or it was not honoured.</exception>
+    /// <exception cref="ResilienceAssertionException">No response advertised <c>Retry-After</c>, no retry followed it, or it was not honoured.</exception>
     public static HttpAttemptReport ShouldRespectRetryAfter(this HttpAttemptReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
         report.RequireCompleteTimeline(nameof(ShouldRespectRetryAfter));
         RequireTiming(report, nameof(ShouldRespectRetryAfter));
 
-        var step = report.ObservationStep!.Value;
         var advertised = false;
-        for (var index = 0; index + 1 < report.AttemptCount; index++)
+        for (var index = 0; index < report.AttemptCount; index++)
         {
             if (report.Attempts[index].RetryAfter is not { } delay)
             {
@@ -169,8 +168,17 @@ public static class ResilienceAssertions
             }
 
             advertised = true;
+            if (index + 1 >= report.AttemptCount)
+            {
+                report.RecordAssertion(false);
+                throw Fail(
+                    report,
+                    $"a retry attempt to follow the Retry-After of {TimeFormat.Describe(delay)} on attempt #{report.Attempts[index].Ordinal}",
+                    "the response advertised Retry-After but no following attempt was observed");
+            }
+
             var observed = Interval(report.Attempts[index], report.Attempts[index + 1]);
-            if (observed < delay || observed > delay + step)
+            if (observed < delay)
             {
                 report.RecordAssertion(false);
                 throw Fail(
@@ -277,26 +285,28 @@ public static class ResilienceAssertions
                 $"it lasted {TimeFormat.Describe(observed)}");
     }
 
-    /// <summary>Asserts the total injected-clock time the run needed to settle.</summary>
+    /// <summary>Asserts the total injected-clock time a genuinely completed request or strategy timeout needed to settle.</summary>
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="expected">The expected injected-clock time until the run settled.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
     /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
-    /// <exception cref="ResilienceAssertionException">The run has not settled or settled at a different time.</exception>
+    /// <exception cref="ResilienceAssertionException">The run was cut off while pending or settled at a different time.</exception>
     public static HttpAttemptReport ShouldHaveSettledAtVirtualTime(this HttpAttemptReport report, TimeSpan expected)
     {
         ArgumentNullException.ThrowIfNull(report);
         report.RequireCompleteTimeline(nameof(ShouldHaveSettledAtVirtualTime));
         RequireTiming(report, nameof(ShouldHaveSettledAtVirtualTime));
 
-        if (!report.IsSettled || report.SettledVirtualElapsed is not { } observed)
+        if (!report.IsSettled || report.IsObservationCutoff || report.SettledVirtualElapsed is not { } observed)
         {
             report.RecordAssertion(false);
             throw Fail(
                 report,
                 "a finished scenario run before its total injected-clock time is asserted",
-                "the run has not finished yet");
+                report.IsObservationCutoff
+                    ? "observation stopped before the logical request settled"
+                    : "the run has not finished yet");
         }
 
         var step = report.ObservationStep!.Value;

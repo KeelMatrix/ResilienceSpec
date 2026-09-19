@@ -13,7 +13,13 @@ validation disables.
 
 ```text
 dotnet add package KeelMatrix.ResilienceSpec
+dotnet add package Microsoft.Extensions.Http.Resilience --version 10.10.0
+dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 ```
+
+The additional commands install the fake-clock and Microsoft standard-handler packages used by this example. They are
+not runtime dependencies of `KeelMatrix.ResilienceSpec`; use matching supported versions when testing another
+`Microsoft.Extensions.Http.Resilience` release.
 
 ## Quick Example
 
@@ -68,21 +74,25 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   Without one, timing assertions fail with `MissingTimeProviderException` instead of falling back to sleeps.
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
-- Timing observations are sampled at `ResilienceScenarioOptions.AdvanceStep` granularity, and each advance costs one
-  observation window of wall-clock time.
+- Timing observations wait for scripted-downstream progress after each injected-clock advance and are sampled at
+  `ResilienceScenarioOptions.AdvanceStep` granularity.
+- When the virtual budget or pending observation expires, `SendAsync` returns `Pending` and the report marks
+  `IsObservationCutoff`; `ShouldHaveSettledAtVirtualTime` accepts only genuine request settlement. Cleanup is bounded
+  by `ResilienceScenarioOptions.CleanupTimeout`; late completion is observed and late responses are disposed, but
+  arbitrary user code that ignores cancellation cannot be forcibly terminated.
 - One script serves one logical call. Concurrent use fails with `ConcurrentScriptUseException` unless
   `ScriptConcurrency.AllowConcurrent` is requested.
+- `ShouldRespectRetryAfter` verifies the advertised value as a minimum wait; use `ShouldHaveRetryDelay` for an exact
+  configured delay. A response that advertises `Retry-After` without a following retry produces a specific diagnostic.
 - The recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client whose
   retry predicate covers harness failures cannot grow attempt state inside the test process. Such a run reports
   `HttpAttemptReport.IsOverflowed` and fails attempt-state assertions with `AttemptStateOverflowException` instead of
   judging a partial timeline; result-level assertions remain evaluable. When overflowed, `LastAttempt` is the last
   recorded attempt rather than necessarily the final served attempt. A sufficiently long runaway retry loop may still
   return `Pending` when its observation window ends, with the exact served count and overflow state preserved.
-- The package targets `net8.0`. At the candidate commit, hosted validation passes the core and integration suites on
-  Windows, Linux, and macOS, including injected-clock timing behaviour. The macOS evidence comes from a hosted,
-  virtualized `macos-latest` runner, not physical macOS hardware. The Linux job runs core and integration validation
-  through `scripts/validate-linux.sh`; Windows and macOS also run package inspection, the clean consumer smoke test,
-  and the sample.
+- The package targets `net8.0`. Hosted validation is configured to run Full validation on Windows, Linux, and macOS
+  against `10.10.0`, followed by explicit integration runs against both `9.8.0` and `10.10.0`. The macOS evidence comes
+  from a hosted, virtualized `macos-latest` runner, not physical macOS hardware.
 
 ## Supported Integration Range
 

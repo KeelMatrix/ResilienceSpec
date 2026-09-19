@@ -26,16 +26,20 @@ public static class ResilienceSpecHttpClientBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(scenario);
 
-        var services = builder.Services;
-        builder.ConfigurePrimaryHttpMessageHandler(() =>
+        builder.ConfigurePrimaryHttpMessageHandler(serviceProvider =>
         {
-            if (scenario.TimeProvider is not null &&
-                scenario.Options.RequireRegisteredTimeProvider &&
-                !HasTimeProvider(services))
+            if (scenario.TimeProvider is not null && scenario.Options.RequireRegisteredTimeProvider)
             {
+                var resolvedTimeProvider = serviceProvider.GetService<TimeProvider>();
+                if (resolvedTimeProvider is not null && ReferenceEquals(resolvedTimeProvider, scenario.TimeProvider))
+                {
+                    scenario.MarkHttpClientFactoryIntegration();
+                    return scenario.Handler;
+                }
+
                 throw new MissingTimeProviderException(
-                    "The scenario expects its controllable clock to drive the resilience pipeline, but no TimeProvider is registered " +
-                    "in the service collection, so the pipeline would run on the system clock. Register the clock before the client is built, " +
+                    "The scenario expects its controllable clock to drive the resilience pipeline, but the resolved TimeProvider is " +
+                    "missing or is a different instance, so the pipeline would not run on the scenario clock. Register the same clock instance before the client is built, " +
                     "for example services.AddSingleton<TimeProvider>(clock), or set " +
                     "ResilienceScenarioOptions.RequireRegisteredTimeProvider to false when the pipeline time source is configured another way.");
             }
@@ -47,16 +51,4 @@ public static class ResilienceSpecHttpClientBuilderExtensions
         return builder;
     }
 
-    private static bool HasTimeProvider(IServiceCollection services)
-    {
-        foreach (var descriptor in services)
-        {
-            if (descriptor.ServiceType == typeof(TimeProvider))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

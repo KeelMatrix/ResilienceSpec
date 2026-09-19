@@ -9,8 +9,8 @@ public enum ResilienceResultKind
     Response,
 
     /// <summary>
-    /// The request ended by cancellation that the caller did not request, which is the observable signature of a
-    /// timeout strategy or of the client's own timeout. The attempt report shows which attempt was abandoned.
+    /// The request ended through a recognized timeout contract from the client or its resilience strategy, without
+    /// caller cancellation. The attempt report shows the work observed before that outcome.
     /// </summary>
     Timeout,
 
@@ -80,12 +80,12 @@ public sealed class ResilienceResult : IDisposable
         new(ResilienceResultKind.Response, response, null, virtualElapsed, report);
 
     internal static ResilienceResult ForException(Exception exception, bool callerCanceled, TimeSpan virtualElapsed, HttpAttemptReport report) =>
-        new(Classify(exception, callerCanceled, report), null, exception, virtualElapsed, report);
+        new(Classify(exception, callerCanceled), null, exception, virtualElapsed, report);
 
     internal static ResilienceResult Pending(TimeSpan virtualElapsed, HttpAttemptReport report) =>
         new(ResilienceResultKind.Pending, null, null, virtualElapsed, report);
 
-    private static ResilienceResultKind Classify(Exception exception, bool callerCanceled, HttpAttemptReport report)
+    private static ResilienceResultKind Classify(Exception exception, bool callerCanceled)
     {
         if (Inner<ScriptExhaustedException>(exception) is not null)
         {
@@ -102,19 +102,30 @@ public sealed class ResilienceResult : IDisposable
             return ResilienceResultKind.Canceled;
         }
 
-        if (exception is OperationCanceledException or TimeoutException)
-        {
-            return ResilienceResultKind.Timeout;
-        }
-
-        // A resilience strategy may surface its own timeout exception type. The attempt boundary still observed the
-        // abandonment, so an unrecognized exception that follows an abandoned attempt is reported as a timeout.
-        if (report.LastAttempt?.Outcome == HttpAttemptOutcome.Abandoned)
+        if (exception is OperationCanceledException or TimeoutException || IsSupportedStrategyTimeout(exception))
         {
             return ResilienceResultKind.Timeout;
         }
 
         return ResilienceResultKind.DownstreamError;
+    }
+
+    private static bool IsSupportedStrategyTimeout(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            // Microsoft.Extensions.Http.Resilience exposes Polly's public TimeoutRejectedException contract. Keep the
+            // core package free of a Polly runtime dependency while recognizing that documented integration outcome.
+            if (string.Equals(
+                    current.GetType().FullName,
+                    "Polly.Timeout.TimeoutRejectedException",
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static TException? Inner<TException>(Exception exception)

@@ -16,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   lookup, or hosted service.
 - An immutable attempt report and assertion helpers for exact and maximum attempt counts, method sequence,
   "this unsafe request was not retried", final response or exception, and cancellation outcomes, with failures that
-  print the observed timeline.
+  print the observed timeline; pending observation cutoffs remain distinct from genuine request settlement.
 - Deterministic timing assertions for retry delays, `Retry-After` deltas, per-attempt timeouts, and total-request
   timeouts, driven by an injected `TimeProvider`; timing assertions are unavailable, and fail with
   `MissingTimeProviderException`, when no controllable clock is supplied.

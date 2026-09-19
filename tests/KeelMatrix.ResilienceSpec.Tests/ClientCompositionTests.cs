@@ -120,7 +120,27 @@ public sealed class ClientCompositionTests
         var factory = provider.GetRequiredService<IHttpClientFactory>();
 
         var failure = Assert.Throws<MissingTimeProviderException>(() => factory.CreateClient("orders"));
-        Assert.Contains("no TimeProvider is registered", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("resolved TimeProvider is missing", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AdapterRejectsARegisteredButDifferentClockInstance()
+    {
+        var scenarioClock = Chains.CreateClock();
+        var registeredClock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            scenarioClock,
+            scenarioClock.Advance);
+        var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(registeredClock);
+        services.AddHttpClient("orders").UseResilienceSpecDownstream(scenario);
+
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IHttpClientFactory>();
+
+        var failure = Assert.Throws<MissingTimeProviderException>(() => factory.CreateClient("orders"));
+        Assert.Contains("different instance", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -206,5 +226,116 @@ public sealed class CancellationTests
         result.ShouldHaveKind(ResilienceResultKind.Canceled);
         Assert.NotNull(result.Exception);
         scenario.Report.ShouldHaveAttempts(1);
+    }
+
+    [Fact]
+    public async Task ASecondLogicalCallCannotConsumeTheScriptDuringRetryBackoff()
+    {
+        var clock = Chains.CreateClock();
+        var retryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success()),
+            clock,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                AdvanceStep = TimeSpan.FromSeconds(1),
+                VirtualBudget = TimeSpan.FromSeconds(2),
+                ObservationWindow = TimeSpan.FromMilliseconds(25),
+            });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries: 1,
+                delay: TimeSpan.FromSeconds(1),
+                timeProvider: clock,
+                shouldRetryResponse: Chains.IsRetryableStatus,
+                retryStarted: retryStarted,
+                retryRelease: retryRelease));
+        using var firstRequest = Chains.Request(HttpMethod.Get, "/orders/1");
+        using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/2");
+
+        var firstCall = scenario.SendAsync(client, firstRequest);
+        await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var failure = await Assert.ThrowsAsync<ConcurrentScriptUseException>(
+            () => scenario.SendAsync(client, secondRequest));
+        Assert.Contains("one logical request", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(1, scenario.Report.AttemptCount);
+
+        retryRelease.SetResult();
+        using var result = await firstCall;
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        scenario.Report.ShouldHaveAttempts(2);
+    }
+
+    [Fact]
+    public async Task UnrelatedFailureAfterAnAbandonedAttemptIsNotClassifiedAsTimeout()
+    {
+        using var scenario = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Timeout()));
+        using var client = Chains.CreateClient(scenario.Handler, new AbandonThenThrowHandler());
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.DownstreamError).ShouldHaveException<InvalidOperationException>();
+        Assert.Equal(HttpAttemptOutcome.Abandoned, scenario.Report.LastAttempt!.Outcome);
+    }
+
+    [Fact]
+    public async Task IgnoredCancellationCannotHangObservationCleanupAndLateResponsesAreDisposed()
+    {
+        var lateResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            clock,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                AdvanceClock = false,
+                PendingObservation = TimeSpan.FromMilliseconds(20),
+                CleanupTimeout = TimeSpan.FromMilliseconds(40),
+            });
+        using var stubborn = new IgnoreCancellationHandler(lateResponse);
+        using var client = Chains.CreateClient(scenario.Handler, stubborn);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        Assert.True(scenario.Report.IsObservationCutoff);
+
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("late response"),
+        };
+        var content = response.Content;
+        lateResponse.SetResult(response);
+        await SpinWaitForAsync(() =>
+        {
+            try
+            {
+                _ = content.ReadAsStringAsync().GetAwaiter().GetResult();
+                return false;
+            }
+            catch (ObjectDisposedException)
+            {
+                return true;
+            }
+        });
+    }
+
+    private static async Task SpinWaitForAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 100 && !condition(); attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.True(condition(), "The late response was not disposed by bounded cleanup observation.");
     }
 }

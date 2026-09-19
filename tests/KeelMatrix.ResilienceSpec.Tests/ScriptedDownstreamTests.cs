@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using Xunit;
 
@@ -154,5 +155,62 @@ public sealed class ScriptedDownstreamTests
 
         Assert.Equal(0, before.AttemptCount);
         Assert.Equal(1, scenario.Report.AttemptCount);
+    }
+
+    [Fact]
+    public async Task LiveSnapshotsNeverExposePartiallyPublishedResponseAttempts()
+    {
+        const int callCount = HttpAttemptReport.MaximumRecordedAttempts;
+        var errors = new ConcurrentQueue<Exception>();
+        var snapshotsFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new ResilienceScenarioOptions { Concurrency = ScriptConcurrency.AllowConcurrent };
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Repeat(HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)), callCount),
+            options: options);
+        using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
+
+        var snapshotter = Task.Run(() =>
+        {
+            try
+            {
+                while (!snapshotsFinished.Task.IsCompleted)
+                {
+                    _ = scenario.Report.Timeline;
+                    Thread.Yield();
+                }
+            }
+            catch (Exception exception)
+            {
+                errors.Enqueue(exception);
+            }
+        });
+
+        var sends = Enumerable.Range(0, callCount).Select(_ => SendOneAsync());
+        using var responses = new ResponseCollection(await Task.WhenAll(sends));
+        snapshotsFinished.SetResult();
+        await snapshotter;
+
+        Assert.Empty(errors);
+
+        async Task<HttpResponseMessage> SendOneAsync()
+        {
+            using var request = Chains.Request(HttpMethod.Get);
+            return await invoker.SendAsync(request, CancellationToken.None);
+        }
+    }
+}
+
+internal sealed class ResponseCollection : IDisposable
+{
+    private readonly IReadOnlyList<HttpResponseMessage> _responses;
+
+    internal ResponseCollection(IReadOnlyList<HttpResponseMessage> responses) => _responses = responses;
+
+    public void Dispose()
+    {
+        foreach (var response in _responses)
+        {
+            response.Dispose();
+        }
     }
 }

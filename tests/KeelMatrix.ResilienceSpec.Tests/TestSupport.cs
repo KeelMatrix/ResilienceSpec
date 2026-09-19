@@ -86,6 +86,9 @@ internal sealed class RetryHandler : DelegatingHandler
     private readonly bool _retryExceptions;
     private readonly bool _retryUnsafeMethods;
     private readonly bool _honorRetryAfter;
+    private readonly bool _yieldBeforeDelay;
+    private readonly TaskCompletionSource? _retryStarted;
+    private readonly TaskCompletionSource? _retryRelease;
 
     internal RetryHandler(
         int maximumRetries,
@@ -94,7 +97,10 @@ internal sealed class RetryHandler : DelegatingHandler
         Func<HttpResponseMessage, bool>? shouldRetryResponse = null,
         bool retryExceptions = false,
         bool retryUnsafeMethods = true,
-        bool honorRetryAfter = false)
+        bool honorRetryAfter = false,
+        bool yieldBeforeDelay = false,
+        TaskCompletionSource? retryStarted = null,
+        TaskCompletionSource? retryRelease = null)
     {
         _maximumRetries = maximumRetries;
         _delay = delay;
@@ -103,6 +109,9 @@ internal sealed class RetryHandler : DelegatingHandler
         _retryExceptions = retryExceptions;
         _retryUnsafeMethods = retryUnsafeMethods;
         _honorRetryAfter = honorRetryAfter;
+        _yieldBeforeDelay = yieldBeforeDelay;
+        _retryStarted = retryStarted;
+        _retryRelease = retryRelease;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -125,6 +134,17 @@ internal sealed class RetryHandler : DelegatingHandler
                     ? advertised
                     : _delay;
                 response.Dispose();
+                _retryStarted?.TrySetResult();
+                if (_retryRelease is not null)
+                {
+                    await _retryRelease.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                if (_yieldBeforeDelay)
+                {
+                    await Task.Yield();
+                }
+
                 await DelayAsync(delay, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (_retryExceptions && IsTransient(exception) && attempt < _maximumRetries && CanRetry(request.Method))
@@ -251,6 +271,45 @@ internal sealed class TotalTimeoutHandler : DelegatingHandler
         }
 
         return await send.ConfigureAwait(false);
+    }
+}
+
+/// <summary>Turns an abandoned terminal attempt into an unrelated downstream failure.</summary>
+internal sealed class AbandonThenThrowHandler : DelegatingHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        using var abandoned = new CancellationTokenSource();
+        var send = base.SendAsync(request, abandoned.Token);
+        await abandoned.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            return await send.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new InvalidOperationException("The downstream failed after an abandoned attempt.");
+        }
+    }
+}
+
+/// <summary>Ignores cancellation until the test releases a late response.</summary>
+internal sealed class IgnoreCancellationHandler : DelegatingHandler
+{
+    private readonly TaskCompletionSource<HttpResponseMessage> _lateResponse;
+
+    internal IgnoreCancellationHandler(TaskCompletionSource<HttpResponseMessage> lateResponse) => _lateResponse = lateResponse;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return await _lateResponse.Task.ConfigureAwait(false);
+        }
     }
 }
 

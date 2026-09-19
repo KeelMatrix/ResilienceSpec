@@ -49,18 +49,16 @@ bash ./scripts/validate-linux.sh
 ```
 
 The script restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core Release tests, and runs the
-integration Release tests when that project is present. The hosted Linux job uses this script for core and integration
-validation, including injected-clock timing tests. It does not run package inspection, the clean consumer smoke test,
-or the sample; those package stages run on Windows and macOS through `scripts/Validate.ps1`.
+integration Release tests when that project is present. It is a lightweight manual Linux check; hosted validation uses
+`scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0` on every runner, including package inspection, the clean
+consumer smoke test, the sample, and the required dependency audit.
 
 ## Hosted CI status
 
 The repository contains `.github/workflows/validate.yml`, which runs on pushes to `main` and on manual dispatch with
-Windows, Ubuntu, and macOS hosted runners. At the candidate commit, all three jobs pass the core and integration
-suites, including injected-clock timing tests. The macOS result is evidence from a hosted, virtualized
-`macos-latest` runner, not physical macOS hardware. Only `net8.0` is exercised. The Linux job runs core and
-integration through `scripts/validate-linux.sh`; Windows and macOS also run package inspection, the clean consumer
-smoke test, and the sample, so Linux package-stage parity is not established by this workflow.
+Windows, Ubuntu, and macOS hosted runners. Each runner invokes Full validation against `10.10.0`, then runs explicit
+integration jobs for both `9.8.0` and `10.10.0`. Only `net8.0` is exercised; a hosted result is evidence from the
+specific runner, not physical hardware.
 
 Useful narrower variants:
 
@@ -102,7 +100,7 @@ the sample with `--no-restore`. The temporary feed and cache are removed when th
 ## Integration range
 
 `Directory.Packages.props` pins `Microsoft.Extensions.Http.Resilience` through the `ResilienceVersion` property. Run
-the integration suite once per supported end of the range:
+the integration suite once per supported end of the range; hosted validation runs both endpoints explicitly:
 
 ```powershell
 dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
@@ -113,10 +111,9 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 
 Timing assertions require a scenario created with a controllable `TimeProvider` and the operation that advances it.
 The scenario advances that clock in `ResilienceScenarioOptions.AdvanceStep` increments while a request is pending and
-waits one `ObservationWindow` for the pipeline to react, so the wall-clock cost of a run is
-`(virtual budget / advance step) * observation window`. Lower `AdvanceStep` for finer observation, and keep
-`ObservationWindow` comfortably above thread-pool scheduling latency so a continuation is always observed at the
-advance that released it.
+waits for scripted-downstream progress after each advance. The observation window bounds that progress wait; it is not
+a timing measurement. A virtual-budget or no-advance cutoff returns `Pending` and is not reported as request
+settlement. Cancellation cleanup is separately bounded by `ResilienceScenarioOptions.CleanupTimeout`.
 
 `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
 the wait runs on the injected clock, so it is deliberately not exposed.

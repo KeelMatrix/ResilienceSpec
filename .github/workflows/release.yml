@@ -160,6 +160,7 @@ jobs:
         run: >-
           dotnet nuget push
           ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ needs.verify.outputs.version }}.nupkg
+          --no-symbols
           --source https://api.nuget.org/v3/index.json
           --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
 

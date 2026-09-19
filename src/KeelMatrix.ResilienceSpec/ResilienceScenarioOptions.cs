@@ -46,6 +46,12 @@ public sealed class ResilienceScenarioOptions
     public TimeSpan PendingObservation { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
+    /// Gets the maximum wall-clock time spent waiting for cancellation callbacks and an abandoned request to
+    /// cooperate before the scenario reports a pending observation cutoff. Defaults to 1 second.
+    /// </summary>
+    public TimeSpan CleanupTimeout { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
     /// Gets a value indicating whether the scenario advances the injected clock. Set to <see langword="false"/>
     /// to observe a pending request without advancing time, which documents "clock not advanced, still pending".
     /// Defaults to <see langword="true"/>.
@@ -85,6 +91,11 @@ public sealed class ResilienceScenarioOptions
         if (PendingObservation <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(PendingObservation), PendingObservation, "A pending observation window must be greater than zero.");
+        }
+
+        if (CleanupTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(CleanupTimeout), CleanupTimeout, "A cleanup timeout must be greater than zero.");
         }
     }
 }

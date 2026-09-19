@@ -5,6 +5,7 @@ namespace KeelMatrix.ResilienceSpec;
 /// <summary>Mutable state of one attempt while the scripted downstream is producing its outcome.</summary>
 internal sealed class AttemptEntry
 {
+    private readonly object _gate = new();
     private HttpAttemptOutcome? _outcome;
     private HttpStatusCode? _statusCode;
     private TimeSpan? _retryAfter;
@@ -28,21 +29,36 @@ internal sealed class AttemptEntry
 
     internal void Complete(HttpAttemptOutcome outcome, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null)
     {
-        _outcome = outcome;
-        _statusCode = statusCode;
-        _retryAfter = retryAfter;
+        lock (_gate)
+        {
+            _outcome = outcome;
+            _statusCode = statusCode;
+            _retryAfter = retryAfter;
+        }
     }
 
-    internal void Finish(TimeSpan? duration) => _duration = duration;
+    internal void Finish(TimeSpan? duration)
+    {
+        lock (_gate)
+        {
+            _duration = duration;
+        }
+    }
 
-    internal HttpAttempt ToAttempt() => new(
-        Ordinal,
-        Method,
-        _outcome ?? HttpAttemptOutcome.Abandoned,
-        _statusCode,
-        _retryAfter,
-        StartedAfter,
-        _duration);
+    internal HttpAttempt ToAttempt()
+    {
+        lock (_gate)
+        {
+            return new HttpAttempt(
+                Ordinal,
+                Method,
+                _outcome ?? HttpAttemptOutcome.Abandoned,
+                _statusCode,
+                _retryAfter,
+                StartedAfter,
+                _duration);
+        }
+    }
 }
 
 /// <summary>Scopes one attempt so that the timeline is finalized exactly once.</summary>
@@ -74,6 +90,26 @@ internal sealed class AttemptScope : IDisposable
     }
 }
 
+/// <summary>Holds a script's single-consumer lease for one complete logical client call.</summary>
+internal sealed class LogicalCallScope : IDisposable
+{
+    private readonly ScenarioObserver _observer;
+    private bool _disposed;
+
+    internal LogicalCallScope(ScenarioObserver observer) => _observer = observer;
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _observer.EndLogicalCall();
+    }
+}
+
 /// <summary>
 /// Owns the bounded attempt timeline of one scripted downstream: attempt numbering, injected-clock timing,
 /// single-consumer enforcement, and the activation signal.
@@ -89,6 +125,10 @@ internal sealed class ScenarioObserver
     private int _inFlight;
     private int _ordinal;
     private bool _overflowed;
+    private int _logicalCalls;
+    private bool _observationCutoff;
+    private long _progressVersion;
+    private TaskCompletionSource<bool> _progress = NewProgressSource();
     private bool _settled;
     private TimeSpan? _settledVirtualElapsed;
 
@@ -102,6 +142,23 @@ internal sealed class ScenarioObserver
     }
 
     internal ScenarioTelemetry Telemetry { get; }
+
+    internal LogicalCallScope BeginLogicalCall()
+    {
+        lock (_gate)
+        {
+            if (_options.Concurrency == ScriptConcurrency.SingleConsumer && _logicalCalls > 0)
+            {
+                throw new ConcurrentScriptUseException(
+                    "The scripted downstream is already serving one logical request, so a second request cannot consume the script deterministically. " +
+                    "Create one scenario per logical call, or use ScriptConcurrency.AllowConcurrent when the scenario under test is genuinely concurrent.");
+            }
+
+            _logicalCalls++;
+        }
+
+        return new LogicalCallScope(this);
+    }
 
     internal int StepCount => _script.StepCount;
 
@@ -150,6 +207,8 @@ internal sealed class ScenarioObserver
             }
         }
 
+        SignalProgress();
+
         return new AttemptScope(this, entry);
     }
 
@@ -167,6 +226,8 @@ internal sealed class ScenarioObserver
             failed = entry.Fault?.IsFailure == true;
         }
 
+        SignalProgress();
+
         if (failed)
         {
             Telemetry.RecordFailure();
@@ -178,7 +239,58 @@ internal sealed class ScenarioObserver
         lock (_gate)
         {
             _settled = true;
+            _observationCutoff = false;
             _settledVirtualElapsed = virtualElapsed;
+        }
+
+        SignalProgress();
+    }
+
+    internal void MarkObservationCutoff()
+    {
+        lock (_gate)
+        {
+            _settled = false;
+            _observationCutoff = true;
+            _settledVirtualElapsed = null;
+        }
+
+        SignalProgress();
+    }
+
+    internal long ProgressVersion
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _progressVersion;
+            }
+        }
+    }
+
+    internal async Task<bool> WaitForProgressAsync(long observedVersion, TimeSpan timeout)
+    {
+        Task progress;
+        lock (_gate)
+        {
+            if (_progressVersion != observedVersion)
+            {
+                return true;
+            }
+
+            progress = _progress.Task;
+        }
+
+        var completed = await Task.WhenAny(progress, Task.Delay(timeout)).ConfigureAwait(false);
+        return ReferenceEquals(completed, progress);
+    }
+
+    internal void EndLogicalCall()
+    {
+        lock (_gate)
+        {
+            _logicalCalls--;
         }
     }
 
@@ -197,6 +309,7 @@ internal sealed class ScenarioObserver
                 _ordinal,
                 _overflowed,
                 _settled,
+                _observationCutoff,
                 _settledVirtualElapsed,
                 _clock is null ? null : _options.AdvanceStep,
                 Telemetry);
@@ -204,4 +317,20 @@ internal sealed class ScenarioObserver
     }
 
     private TimeSpan? Elapsed() => _clock?.GetElapsedTime(_startTimestamp);
+
+    private void SignalProgress()
+    {
+        TaskCompletionSource<bool> previous;
+        lock (_gate)
+        {
+            _progressVersion++;
+            previous = _progress;
+            _progress = NewProgressSource();
+        }
+
+        previous.TrySetResult(true);
+    }
+
+    private static TaskCompletionSource<bool> NewProgressSource() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

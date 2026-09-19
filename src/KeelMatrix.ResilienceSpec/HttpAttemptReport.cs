@@ -27,6 +27,7 @@ public sealed class HttpAttemptReport
         int attemptCount,
         bool overflowed,
         bool settled,
+        bool observationCutoff,
         TimeSpan? settledVirtualElapsed,
         TimeSpan? observationStep,
         ScenarioTelemetry telemetry)
@@ -35,6 +36,7 @@ public sealed class HttpAttemptReport
         AttemptCount = attemptCount;
         IsOverflowed = overflowed;
         IsSettled = settled;
+        IsObservationCutoff = observationCutoff;
         SettledVirtualElapsed = settledVirtualElapsed;
         ObservationStep = observationStep;
         Telemetry = telemetry;
@@ -68,6 +70,12 @@ public sealed class HttpAttemptReport
 
     /// <summary>Gets a value indicating whether the scenario run that produced this report has finished.</summary>
     public bool IsSettled { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether observation stopped before the logical request genuinely settled. A cutoff is
+    /// not evidence that a resilience timeout or completed request occurred.
+    /// </summary>
+    public bool IsObservationCutoff { get; }
 
     /// <summary>
     /// Gets the injected-clock time the scenario advanced before the run finished, or <see langword="null"/> when

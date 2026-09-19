@@ -245,6 +245,35 @@ public sealed class StandardResilienceTests
     }
 
     [Fact]
+    public async Task TotalTimeoutDuringRetryBackoffIsClassifiedFromTheStrategyOutcome()
+    {
+        var clock = StandardResilienceChains.CreateClock();
+        var total = TimeSpan.FromSeconds(3);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(5))),
+            clock,
+            clock.Advance,
+            new ResilienceScenarioOptions { ObservationWindow = TimeSpan.FromMilliseconds(100) });
+        using var chain = StandardResilienceChains.Create(
+            "orders",
+            scenario,
+            options =>
+            {
+                StandardResilienceChains.UseConstantRetry(options, TimeSpan.FromSeconds(1));
+                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(1);
+                options.TotalRequestTimeout.Timeout = total;
+            });
+        using var request = StandardResilienceChains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(chain.Client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        scenario.Report.ShouldHaveAttempts(1).ShouldHaveSettledAtVirtualTime(total);
+        Assert.Equal(HttpAttemptOutcome.Response, scenario.Report.LastAttempt!.Outcome);
+    }
+
+    [Fact]
     public async Task ScriptedNetworkFailureSurfacesAfterTheRetryBudget()
     {
         var clock = StandardResilienceChains.CreateClock();

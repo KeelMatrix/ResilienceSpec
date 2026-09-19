@@ -51,6 +51,22 @@ public sealed class ReleaseContractTests
         Assert.Contains("Release contract passed", result.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ReleaseWorkflowPublishesTheSymbolArtifactExactlyOnce()
+    {
+        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "release.yml"));
+        var packageStart = workflow.IndexOf("name: Publish package", StringComparison.Ordinal);
+        var symbolsStart = workflow.IndexOf("name: Publish symbols", StringComparison.Ordinal);
+
+        Assert.True(packageStart >= 0 && symbolsStart > packageStart, "The release workflow publish steps were not found.");
+        var packageStep = workflow[packageStart..symbolsStart];
+        var symbolsStep = workflow[symbolsStart..];
+
+        Assert.Contains("--no-symbols", packageStep, StringComparison.Ordinal);
+        Assert.DoesNotContain(".snupkg", packageStep, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(symbolsStep, ".snupkg"));
+    }
+
     private static ContractResult RunContract(
         string tag,
         string packageVersion,
@@ -134,6 +150,17 @@ public sealed class ReleaseContractTests
         }
 
         throw new DirectoryNotFoundException("Could not locate the repository root for the release contract test.");
+    }
+
+    private static int CountOccurrences(string value, string search)
+    {
+        var count = 0;
+        for (var index = 0; (index = value.IndexOf(search, index, StringComparison.Ordinal)) >= 0; index += search.Length)
+        {
+            count++;
+        }
+
+        return count;
     }
 
     private sealed record ContractResult(int ExitCode, string Output);

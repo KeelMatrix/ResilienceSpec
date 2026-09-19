@@ -31,6 +31,7 @@ KeelMatrix.ResilienceSpec.HttpAttemptReport.DescribeTimeline() -> string!
 KeelMatrix.ResilienceSpec.HttpAttemptReport.HasTiming.get -> bool
 KeelMatrix.ResilienceSpec.HttpAttemptReport.IsSettled.get -> bool
 KeelMatrix.ResilienceSpec.HttpAttemptReport.IsOverflowed.get -> bool
+KeelMatrix.ResilienceSpec.HttpAttemptReport.IsObservationCutoff.get -> bool
 KeelMatrix.ResilienceSpec.HttpAttemptReport.LastAttempt.get -> KeelMatrix.ResilienceSpec.HttpAttempt?
 KeelMatrix.ResilienceSpec.HttpAttemptReport.ObservationStep.get -> System.TimeSpan?
 KeelMatrix.ResilienceSpec.HttpAttemptReport.SettledVirtualElapsed.get -> System.TimeSpan?
@@ -76,6 +77,8 @@ KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceStep.get -> System.Ti
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceStep.init -> void
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.Concurrency.get -> KeelMatrix.ResilienceSpec.ScriptConcurrency
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.Concurrency.init -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.CleanupTimeout.get -> System.TimeSpan
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.CleanupTimeout.init -> void
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.ObservationWindow.get -> System.TimeSpan
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.ObservationWindow.init -> void
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.PendingObservation.get -> System.TimeSpan

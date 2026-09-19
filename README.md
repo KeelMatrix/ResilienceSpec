@@ -15,7 +15,13 @@ behaviour that KeelMatrix validation disables.
 
 ```text
 dotnet add package KeelMatrix.ResilienceSpec
+dotnet add package Microsoft.Extensions.Http.Resilience --version 10.10.0
+dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 ```
+
+The second and third commands install the optional example prerequisites. The core package does not bring in the
+Microsoft resilience integration or fake-clock test package; choose matching supported versions when testing another
+`Microsoft.Extensions.Http.Resilience` release.
 
 ## Quick Start
 
@@ -107,7 +113,7 @@ using var request = new HttpRequestMessage(HttpMethod.Get, "https://orders.inval
 using var result = await scenario.SendAsync(client, request);
 
 result.ShouldHaveStatus(HttpStatusCode.OK);
-scenario.Report.ShouldHaveAttempts(2).ShouldHaveRetryDelay(TimeSpan.FromSeconds(1));
+scenario.Report.ShouldHaveAttempts(2).ShouldHaveRetryDelay(TimeSpan.FromSeconds(2));
 ```
 
 ## POST Must Not Be Retried
@@ -203,26 +209,27 @@ var scenario = new ResilienceScenario(script, clock, clock.Advance);
 ```
 
 The same clock instance must drive the resilience pipeline, which is what `services.AddSingleton<TimeProvider>(clock)`
-does for `Microsoft.Extensions.Http.Resilience`. The adapter fails configuration with a
-`MissingTimeProviderException` when a scenario was created with a clock but no `TimeProvider` is registered, so a
-timing assertion can never silently observe a pipeline that still runs on the system clock.
+does for `Microsoft.Extensions.Http.Resilience`. The adapter resolves the registered service and fails configuration
+with a `MissingTimeProviderException` when the scenario clock is missing or a different `TimeProvider` instance is
+registered, so a timing assertion can never silently observe a pipeline that runs on another clock.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances the injected clock in `AdvanceStep` increments and
-waits one `ObservationWindow` for the pipeline to react. Timing assertions compare the observed injected-clock value
-with the expected value and tolerate at most one advance step, which is the sampling granularity reported by
-`HttpAttemptReport.ObservationStep`. Nothing is measured with the wall clock and there are no elapsed-time tolerances.
+waits for the scripted downstream's progress signal before considering another advance. Timing assertions compare the
+observed injected-clock value with the expected value and allow the declared sampling granularity reported by
+`HttpAttemptReport.ObservationStep`; nothing is measured with the wall clock and there are no elapsed-time tolerances.
 
 Assertions that ship with the timing subset:
 
 | Assertion | What it proves |
 | --- | --- |
-| `ShouldRespectRetryAfter()` | Every scripted `Retry-After` delta was honoured by the next attempt |
+| `ShouldRespectRetryAfter()` | Every scripted `Retry-After` delta was honoured as the minimum wait before the next attempt |
 | `ShouldHaveRetryDelay(expected)` | Every inter-attempt delay matches the configured backoff |
 | `ShouldHaveAttemptDuration(ordinal, expected)` | One attempt lasted the configured per-attempt timeout |
 | `ShouldHaveSettledAtVirtualTime(expected)` | The request settled at the configured total timeout |
 
-Timing assertions throw `MissingTimeProviderException` when the scenario has no controllable clock. The package never
-falls back to sleeps or tolerances.
+Timing assertions throw `MissingTimeProviderException` when the scenario has no controllable clock. A request that is
+still pending when observation stops is not a settled request: its report marks `IsObservationCutoff`, and
+`ShouldHaveSettledAtVirtualTime` rejects it. The package never falls back to sleeps or tolerances.
 
 The "clock not advanced" control is part of the same contract. Set `AdvanceClock` to `false` to observe a pending
 request without moving time:
@@ -245,6 +252,12 @@ var scenario = new ResilienceScenario(
 result.ShouldBePending();
 scenario.Report.ShouldHaveAttempts(1);
 ```
+
+When observation ends because `VirtualBudget` is exhausted or `AdvanceClock` is disabled, the result remains
+`Pending` and the report marks `IsObservationCutoff`. That cutoff is not settlement evidence, so
+`ShouldHaveSettledAtVirtualTime` rejects it. Cancellation cleanup is bounded by
+`ResilienceScenarioOptions.CleanupTimeout`; late faults are observed and late responses are disposed, but arbitrary
+user code that ignores cancellation cannot be forcibly terminated.
 
 ### Timing Limitations
 
@@ -314,11 +327,10 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Platforms And Target Frameworks
 
 - Target framework: `net8.0`.
-- The package and its tests use portable .NET APIs. At the candidate commit, hosted validation passes the core and
-  integration suites on Windows, Linux, and macOS, including injected-clock timing behaviour.
-- The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical macOS hardware. Only
-  `net8.0` is exercised. The Linux job runs core and integration validation through `scripts/validate-linux.sh`;
-  Windows and macOS also run package inspection, the clean consumer smoke test, and the sample.
+- The package and its tests use portable .NET APIs. Hosted validation is configured to run Full validation on Windows,
+  Linux, and macOS against `10.10.0`, followed by explicit integration runs against both `9.8.0` and `10.10.0`.
+- Only `net8.0` is exercised. The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical
+  macOS hardware.
 
 ## Telemetry
 

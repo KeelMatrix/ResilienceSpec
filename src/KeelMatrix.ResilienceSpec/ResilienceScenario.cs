@@ -88,7 +88,11 @@ public sealed class ResilienceScenario : IDisposable
     /// <param name="client">The configured client whose real handler chain must stay in place.</param>
     /// <param name="request">The request to send.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
-    /// <returns>The outcome of the run, including the final response or exception and the attempt report.</returns>
+    /// <returns>
+    /// The outcome of the run, including the final response or exception and the attempt report. If observation or
+    /// bounded cancellation cleanup expires first, the outcome is <see cref="ResilienceResultKind.Pending"/> and the
+    /// report marks <see cref="HttpAttemptReport.IsObservationCutoff"/> rather than claiming request settlement.
+    /// </returns>
     public async Task<ResilienceResult> SendAsync(
         HttpClient client,
         HttpRequestMessage request,
@@ -98,6 +102,7 @@ public sealed class ResilienceScenario : IDisposable
         ArgumentNullException.ThrowIfNull(request);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        using var logicalCall = Handler.Observer.BeginLogicalCall();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var pending = client.SendAsync(request, linked.Token);
         var virtualElapsed = TimeSpan.Zero;
@@ -109,8 +114,14 @@ public sealed class ResilienceScenario : IDisposable
             {
                 while (!settled && virtualElapsed < Options.VirtualBudget)
                 {
+                    var progressVersion = Handler.Observer.ProgressVersion;
                     _advanceTime(Options.AdvanceStep);
                     virtualElapsed += Options.AdvanceStep;
+
+                    // A clock advance may release a retry timer whose continuation still has to schedule the next
+                    // operation. Wait for a report-progress signal (or the bounded observation window) before the
+                    // next advance, so the loop cannot outrun the supported pipeline's continuation chain.
+                    await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow).ConfigureAwait(false);
                     settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
                 }
             }
@@ -122,9 +133,8 @@ public sealed class ResilienceScenario : IDisposable
 
         if (!settled)
         {
-            await linked.CancelAsync().ConfigureAwait(false);
-            await IgnoreCancellationAsync(pending).ConfigureAwait(false);
-            Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
+            await BoundCleanupAsync(linked, pending, Options.CleanupTimeout).ConfigureAwait(false);
+            Handler.Observer.MarkObservationCutoff();
             return ResilienceResult.Pending(virtualElapsed, Handler.Report);
         }
 
@@ -168,17 +178,52 @@ public sealed class ResilienceScenario : IDisposable
         return ReferenceEquals(completed, task);
     }
 
-    private static async Task IgnoreCancellationAsync(Task task)
+    private static async Task BoundCleanupAsync(
+        CancellationTokenSource cancellation,
+        Task<HttpResponseMessage> pending,
+        TimeSpan timeout)
+    {
+        var cancel = ObserveCancellationAsync(cancellation);
+        var request = ObserveResponseAsync(pending);
+        var cleanup = Task.WhenAll(cancel, request);
+        var completed = await Task.WhenAny(cleanup, Task.Delay(timeout)).ConfigureAwait(false);
+        if (ReferenceEquals(completed, cleanup))
+        {
+            await cleanup.ConfigureAwait(false);
+            return;
+        }
+
+        // The caller gets an honest Pending result at the cleanup deadline. The abandoned work is still observed in
+        // the background so a late exception is not unobserved and a late response is not leaked.
+        _ = cleanup;
+    }
+
+    private static async Task ObserveCancellationAsync(CancellationTokenSource cancellation)
     {
         try
         {
-            await task.ConfigureAwait(false);
+            await cancellation.CancelAsync().ConfigureAwait(false);
         }
 #pragma warning disable CA1031 // The pending request was cancelled by this scenario; its outcome is deliberately not surfaced.
         catch (Exception)
 #pragma warning restore CA1031
         {
-            // Nothing to do: the caller receives a pending result instead of the cancellation of the abandoned request.
+            // Cancellation cleanup is best effort and is bounded by the caller's cleanup deadline.
+        }
+    }
+
+    private static async Task ObserveResponseAsync(Task<HttpResponseMessage> pending)
+    {
+        try
+        {
+            var response = await pending.ConfigureAwait(false);
+            response.Dispose();
+        }
+#pragma warning disable CA1031 // Late cleanup is observed so it cannot become an unobserved task fault.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            // The caller already received Pending; late faults are deliberately observed and not rethrown.
         }
     }
 }

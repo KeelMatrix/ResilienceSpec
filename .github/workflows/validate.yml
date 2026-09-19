@@ -35,12 +35,20 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Run repository validation on Windows and macOS
+      - name: Run full repository validation on Windows and macOS
         if: runner.os != 'Linux'
         shell: pwsh
-        run: pwsh -NoProfile -File scripts/Validate.ps1
+        run: pwsh -NoProfile -File scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0
 
-      - name: Run repository validation on Linux
+      - name: Run full repository validation on Linux
         if: runner.os == 'Linux'
-        shell: bash
-        run: ./scripts/validate-linux.sh
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0
+
+      - name: Run integration endpoint 9.8.0
+        shell: pwsh
+        run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
+
+      - name: Run integration endpoint 10.10.0
+        shell: pwsh
+        run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0
