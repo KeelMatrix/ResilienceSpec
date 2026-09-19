@@ -49,16 +49,16 @@ bash ./scripts/validate-linux.sh
 ```
 
 The script restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core Release tests, and runs the
-integration Release tests when that project is present. It is a lightweight manual Linux check; hosted validation uses
-`scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0` on every runner, including package inspection, the clean
-consumer smoke test, the sample, and the required dependency audit.
+integration Release tests when that project is present. The hosted Linux job uses this lightweight path; it does not run
+package inspection, the clean consumer smoke test, or the sample. Windows and macOS use
+`scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0`, including those package stages and the required audit.
 
 ## Hosted CI status
 
 The repository contains `.github/workflows/validate.yml`, which runs on pushes to `main` and on manual dispatch with
-Windows, Ubuntu, and macOS hosted runners. Each runner invokes Full validation against `10.10.0`, then runs explicit
-integration jobs for both `9.8.0` and `10.10.0`. Only `net8.0` is exercised; a hosted result is evidence from the
-specific runner, not physical hardware.
+Windows, Ubuntu, and macOS hosted runners. Windows and macOS invoke Full validation against `10.10.0`; Linux runs its
+portable core/integration script. Every runner then runs explicit integration jobs for both `9.8.0` and `10.10.0`. Only
+`net8.0` is exercised; a hosted result is evidence from the specific runner, not physical hardware.
 
 Useful narrower variants:
 

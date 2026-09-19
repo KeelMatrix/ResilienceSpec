@@ -90,9 +90,10 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   judging a partial timeline; result-level assertions remain evaluable. When overflowed, `LastAttempt` is the last
   recorded attempt rather than necessarily the final served attempt. A sufficiently long runaway retry loop may still
   return `Pending` when its observation window ends, with the exact served count and overflow state preserved.
-- The package targets `net8.0`. Hosted validation is configured to run Full validation on Windows, Linux, and macOS
-  against `10.10.0`, followed by explicit integration runs against both `9.8.0` and `10.10.0`. The macOS evidence comes
-  from a hosted, virtualized `macos-latest` runner, not physical macOS hardware.
+- The package targets `net8.0`. Hosted validation runs Full validation on Windows and macOS against `10.10.0`; Linux runs
+  the portable core/integration script. Every runner then runs explicit integration checks against both `9.8.0` and
+  `10.10.0`. The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical macOS hardware.
+- Linux package-stage parity is not established by this workflow.
 
 ## Supported Integration Range
 

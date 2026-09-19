@@ -40,10 +40,10 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0
 
-      - name: Run full repository validation on Linux
+      - name: Run repository validation on Linux
         if: runner.os == 'Linux'
-        shell: pwsh
-        run: pwsh -NoProfile -File scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0
+        shell: bash
+        run: ./scripts/validate-linux.sh
 
       - name: Run integration endpoint 9.8.0
         shell: pwsh

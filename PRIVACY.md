@@ -7,9 +7,10 @@ package can trigger.
 
 ## Platforms
 
-The package targets `net8.0`. Hosted validation is configured to run Full validation on Windows, Linux, and macOS
-against `10.10.0`, followed by explicit integration checks against both `9.8.0` and `10.10.0`. The macOS evidence comes
-from a hosted, virtualized `macos-latest` runner, not physical macOS hardware.
+The package targets `net8.0`. Hosted validation runs Full validation on Windows and macOS against `10.10.0`; Linux runs
+the portable core/integration script. Every runner then runs explicit integration checks against both `9.8.0` and
+`10.10.0`. The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical macOS hardware.
+Linux package-stage parity is not established by this workflow.
 
 ## Product data boundary
 
