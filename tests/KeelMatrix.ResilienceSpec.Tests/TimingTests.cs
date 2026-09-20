@@ -119,6 +119,87 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public async Task PostTimerContinuationUsesTheQuiescenceContractBeforeTheNextAdvance()
+    {
+        var clock = Chains.CreateClock();
+        var delay = TimeSpan.FromSeconds(1);
+        var timerFired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continuationRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success()),
+            clock,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                VirtualBudget = TimeSpan.FromSeconds(2),
+                ObservationWindow = TimeSpan.FromMilliseconds(25),
+                WaitForPipelineProgress = async virtualElapsed =>
+                {
+                    if (virtualElapsed >= delay)
+                    {
+                        await timerFired.Task;
+                        await continuationRelease.Task;
+                    }
+                },
+            });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new DelayedPostTimerRetryHandler(delay, clock, timerFired, continuationRelease));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var run = scenario.SendAsync(client, request);
+        await timerFired.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        continuationRelease.SetResult();
+
+        using var result = await run;
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        scenario.Report.ShouldHaveAttempts(2).ShouldHaveRetryDelay(delay).ShouldHaveSettledAtVirtualTime(delay);
+    }
+
+    [Fact]
+    public async Task UncompletedQuiescenceContractProducesPendingWithoutAnExtraAdvance()
+    {
+        var clock = Chains.CreateClock();
+        var delay = TimeSpan.FromSeconds(1);
+        var timerFired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continuationRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success()),
+            clock,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                VirtualBudget = TimeSpan.FromSeconds(2),
+                ObservationWindow = TimeSpan.FromMilliseconds(25),
+                CleanupTimeout = TimeSpan.FromMilliseconds(50),
+                WaitForPipelineProgress = async virtualElapsed =>
+                {
+                    if (virtualElapsed >= delay)
+                    {
+                        await timerFired.Task;
+                        await continuationRelease.Task;
+                    }
+                },
+            });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new DelayedPostTimerRetryHandler(delay, clock, timerFired, continuationRelease));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        Assert.Equal(1, result.VirtualElapsed.TotalSeconds);
+        Assert.True(scenario.Report.IsObservationCutoff);
+        Assert.Equal(1, scenario.Report.AttemptCount);
+    }
+
+    [Fact]
     public async Task RetryAfterWithoutAFollowingRetryHasATruthfulDiagnostic()
     {
         var clock = Chains.CreateClock();
@@ -263,6 +344,31 @@ public sealed class DeterministicTimingTests
         var failure = Assert.Throws<ResilienceAssertionException>(
             () => scenario.Report.ShouldHaveSettledAtVirtualTime(TimeSpan.FromSeconds(1)));
         Assert.Contains("observation stopped", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FinalAdvanceIsCappedAtTheVirtualBudget()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            clock,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                AdvanceStep = TimeSpan.FromMilliseconds(600),
+                VirtualBudget = TimeSpan.FromSeconds(1),
+                ObservationWindow = TimeSpan.FromMilliseconds(10),
+                CleanupTimeout = TimeSpan.FromMilliseconds(50),
+            });
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        Assert.Equal(TimeSpan.FromSeconds(1), result.VirtualElapsed);
+        Assert.True(scenario.Report.IsObservationCutoff);
     }
 
     [Fact]

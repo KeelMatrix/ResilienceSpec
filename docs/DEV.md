@@ -111,9 +111,11 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 
 Timing assertions require a scenario created with a controllable `TimeProvider` and the operation that advances it.
 The scenario advances that clock in `ResilienceScenarioOptions.AdvanceStep` increments while a request is pending and
-waits for scripted-downstream progress after each advance. The observation window bounds that progress wait; it is not
-a timing measurement. A virtual-budget or no-advance cutoff returns `Pending` and is not reported as request
-settlement. Cancellation cleanup is separately bounded by `ResilienceScenarioOptions.CleanupTimeout`.
+waits for scripted-downstream progress after each advance. An adapter that can hold a continuation after a timer fires
+must set `ResilienceScenarioOptions.WaitForPipelineProgress`; the callback is bounded by `ObservationWindow` and an
+incomplete callback returns `Pending` without another virtual advance. The observation window is not a timing
+measurement. A virtual-budget or no-advance cutoff returns `Pending` and is not reported as request settlement.
+Cancellation cleanup is separately bounded by `ResilienceScenarioOptions.CleanupTimeout`.
 
 `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
 the wait runs on the injected clock, so it is deliberately not exposed.

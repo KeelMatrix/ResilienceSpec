@@ -1,1 +1,3 @@
 #nullable enable
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.WaitForPipelineProgress.get -> System.Func<System.TimeSpan, System.Threading.Tasks.ValueTask>?
+KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.WaitForPipelineProgress.init -> void

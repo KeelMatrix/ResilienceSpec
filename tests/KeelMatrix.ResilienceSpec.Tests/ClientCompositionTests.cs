@@ -286,6 +286,18 @@ public sealed class CancellationTests
     }
 
     [Fact]
+    public async Task UnrelatedCancellationExceptionIsNotClassifiedAsStrategyTimeout()
+    {
+        using var scenario = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Success()));
+        using var client = Chains.CreateClient(scenario.Handler, new UnrelatedCancellationHandler());
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.DownstreamError).ShouldHaveException<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task IgnoredCancellationCannotHangObservationCleanupAndLateResponsesAreDisposed()
     {
         var lateResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -327,6 +339,36 @@ public sealed class CancellationTests
                 return true;
             }
         });
+    }
+
+    [Fact]
+    public async Task StalledCancellationCleanupIsBounded()
+    {
+        var cancellationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            clock,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                AdvanceClock = false,
+                PendingObservation = TimeSpan.FromMilliseconds(20),
+                CleanupTimeout = TimeSpan.FromMilliseconds(40),
+            });
+        using var stalled = new StalledCancellationHandler(cancellationStarted, releaseCancellation);
+        using var client = Chains.CreateClient(scenario.Handler, stalled);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var run = scenario.SendAsync(client, request);
+        await cancellationStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        using var result = await run;
+
+        result.ShouldBePending();
+        Assert.True(scenario.Report.IsObservationCutoff);
+
+        releaseCancellation.SetResult();
     }
 
     private static async Task SpinWaitForAsync(Func<bool> condition)

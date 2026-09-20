@@ -214,9 +214,13 @@ with a `MissingTimeProviderException` when the scenario clock is missing or a di
 registered, so a timing assertion can never silently observe a pipeline that runs on another clock.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances the injected clock in `AdvanceStep` increments and
-waits for the scripted downstream's progress signal before considering another advance. Timing assertions compare the
-observed injected-clock value with the expected value and allow the declared sampling granularity reported by
-`HttpAttemptReport.ObservationStep`; nothing is measured with the wall clock and there are no elapsed-time tolerances.
+waits for the scripted downstream's progress signal before considering another advance. A pipeline adapter that can
+hold a continuation after a timer fires must also set `ResilienceScenarioOptions.WaitForPipelineProgress`; its callback
+receives the cumulative virtual time and must complete when that advance's pipeline continuations have finished
+progressing. The callback is bounded by `ObservationWindow`; an incomplete callback returns `Pending` and prevents a
+further advance. Timing assertions compare the observed injected-clock value with the expected value and allow the
+declared sampling granularity reported by `HttpAttemptReport.ObservationStep`; nothing is measured with the wall clock
+and there are no elapsed-time tolerances.
 
 Assertions that ship with the timing subset:
 
@@ -269,6 +273,10 @@ user code that ignores cancellation cannot be forcibly terminated.
 - **Timing observations are sampled.** The clock advances in `AdvanceStep` increments, so the observed value can lag
   the exact release instant by at most one step. Lower `AdvanceStep` for finer observation; each advance costs one
   observation window of wall-clock time.
+- **Delayed pipeline continuations need an explicit quiescence callback.** Set
+  `ResilienceScenarioOptions.WaitForPipelineProgress` when an adapter can hold work after a virtual timer fires. The
+  callback must complete after that work has progressed; if it remains incomplete for `ObservationWindow`, the scenario
+  returns `Pending` at the current virtual time instead of advancing again and claiming a deterministic result.
 - **`Retry-After` is asserted for delta responses only.** A response without `Retry-After` is governed by the
   configured backoff, which `ShouldHaveRetryDelay` verifies.
 

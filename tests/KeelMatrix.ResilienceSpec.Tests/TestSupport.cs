@@ -293,6 +293,13 @@ internal sealed class AbandonThenThrowHandler : DelegatingHandler
     }
 }
 
+/// <summary>Surfaces an unrelated cancellation-shaped downstream failure without caller cancellation.</summary>
+internal sealed class UnrelatedCancellationHandler : DelegatingHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromException<HttpResponseMessage>(new OperationCanceledException("The downstream reported an unrelated cancellation."));
+}
+
 /// <summary>Ignores cancellation until the test releases a late response.</summary>
 internal sealed class IgnoreCancellationHandler : DelegatingHandler
 {
@@ -310,6 +317,67 @@ internal sealed class IgnoreCancellationHandler : DelegatingHandler
         {
             return await _lateResponse.Task.ConfigureAwait(false);
         }
+    }
+}
+
+/// <summary>Stalls one cancellation callback until the test releases it.</summary>
+internal sealed class StalledCancellationHandler : DelegatingHandler
+{
+    private readonly TaskCompletionSource _cancellationStarted;
+    private readonly TaskCompletionSource _releaseCancellation;
+
+    internal StalledCancellationHandler(TaskCompletionSource cancellationStarted, TaskCompletionSource releaseCancellation)
+    {
+        _cancellationStarted = cancellationStarted;
+        _releaseCancellation = releaseCancellation;
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        using var registration = cancellationToken.Register(static state =>
+        {
+            var handler = (StalledCancellationHandler)state!;
+            handler._cancellationStarted.TrySetResult();
+            handler._releaseCancellation.Task.GetAwaiter().GetResult();
+        }, this);
+
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+}
+
+/// <summary>Holds a retry continuation after its injected timer fires until the scenario releases it.</summary>
+internal sealed class DelayedPostTimerRetryHandler : DelegatingHandler
+{
+    private readonly TimeSpan _delay;
+    private readonly TimeProvider _timeProvider;
+    private readonly TaskCompletionSource _timerFired;
+    private readonly TaskCompletionSource _continuationRelease;
+    private int _attempt;
+
+    internal DelayedPostTimerRetryHandler(
+        TimeSpan delay,
+        TimeProvider timeProvider,
+        TaskCompletionSource timerFired,
+        TaskCompletionSource continuationRelease)
+    {
+        _delay = delay;
+        _timeProvider = timeProvider;
+        _timerFired = timerFired;
+        _continuationRelease = continuationRelease;
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (Interlocked.Increment(ref _attempt) == 1)
+        {
+            var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response.Dispose();
+            await Task.Delay(_delay, _timeProvider, cancellationToken).ConfigureAwait(false);
+            _timerFired.TrySetResult();
+            await _continuationRelease.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 

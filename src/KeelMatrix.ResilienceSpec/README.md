@@ -75,7 +75,9 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
 - Timing observations wait for scripted-downstream progress after each injected-clock advance and are sampled at
-  `ResilienceScenarioOptions.AdvanceStep` granularity.
+  `ResilienceScenarioOptions.AdvanceStep` granularity. An adapter that can hold a continuation after a timer fires
+  must set `ResilienceScenarioOptions.WaitForPipelineProgress`; an incomplete callback returns `Pending` at the
+  current virtual time instead of allowing another advance.
 - When the virtual budget or pending observation expires, `SendAsync` returns `Pending` and the report marks
   `IsObservationCutoff`; `ShouldHaveSettledAtVirtualTime` accepts only genuine request settlement. Cleanup is bounded
   by `ResilienceScenarioOptions.CleanupTimeout`; late completion is observed and late responses are disposed, but

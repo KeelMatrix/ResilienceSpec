@@ -115,12 +115,23 @@ public sealed class ResilienceScenario : IDisposable
                 while (!settled && virtualElapsed < Options.VirtualBudget)
                 {
                     var progressVersion = Handler.Observer.ProgressVersion;
-                    _advanceTime(Options.AdvanceStep);
-                    virtualElapsed += Options.AdvanceStep;
+                    var remainingBudget = Options.VirtualBudget - virtualElapsed;
+                    var advance = remainingBudget < Options.AdvanceStep ? remainingBudget : Options.AdvanceStep;
+                    _advanceTime(advance);
+                    virtualElapsed += advance;
 
                     // A clock advance may release a retry timer whose continuation still has to schedule the next
-                    // operation. Wait for a report-progress signal (or the bounded observation window) before the
-                    // next advance, so the loop cannot outrun the supported pipeline's continuation chain.
+                    // operation. First honor the explicit adapter quiescence contract, when supplied. If it does not
+                    // complete within the observation window, stop honestly instead of advancing past a continuation
+                    // that has not finished progressing.
+                    var quiescent = await WaitForPipelineProgressAsync(virtualElapsed).ConfigureAwait(false);
+                    if (!quiescent)
+                    {
+                        break;
+                    }
+
+                    // The terminal handler's progress signal covers ordinary handler chains. It is deliberately
+                    // bounded: a pipeline that neither settles nor reaches the scripted downstream remains pending.
                     await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow).ConfigureAwait(false);
                     settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
                 }
@@ -176,6 +187,40 @@ public sealed class ResilienceScenario : IDisposable
 
         var completed = await Task.WhenAny(task, Task.Delay(window)).ConfigureAwait(false);
         return ReferenceEquals(completed, task);
+    }
+
+    private async Task<bool> WaitForPipelineProgressAsync(TimeSpan virtualElapsed)
+    {
+        if (Options.WaitForPipelineProgress is not { } callback)
+        {
+            return true;
+        }
+
+        var callbackTask = callback(virtualElapsed).AsTask();
+        var completed = await Task.WhenAny(callbackTask, Task.Delay(Options.ObservationWindow)).ConfigureAwait(false);
+        if (ReferenceEquals(completed, callbackTask))
+        {
+            await callbackTask.ConfigureAwait(false);
+            return true;
+        }
+
+        // Do not leave a late callback fault unobserved after returning an honest cutoff.
+        _ = ObserveCallbackAsync(callbackTask);
+        return false;
+    }
+
+    private static async Task ObserveCallbackAsync(Task callback)
+    {
+        try
+        {
+            await callback.ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // A late adapter callback is observed after the scenario returned Pending.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            // The callback's late failure cannot change the already returned observation cutoff.
+        }
     }
 
     private static async Task BoundCleanupAsync(

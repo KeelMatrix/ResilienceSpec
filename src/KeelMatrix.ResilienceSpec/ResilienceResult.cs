@@ -17,7 +17,7 @@ public enum ResilienceResultKind
     /// <summary>The caller's cancellation token was cancelled when the run ended, so cancellation is reported.</summary>
     Canceled,
 
-    /// <summary>A scripted or downstream exception surfaced to the caller without a response.</summary>
+    /// <summary>A scripted or downstream exception surfaced to the caller without a response, including unrelated cancellation-shaped failures.</summary>
     DownstreamError,
 
     /// <summary>The scripted downstream was called more times than the script provides steps.</summary>
@@ -102,7 +102,7 @@ public sealed class ResilienceResult : IDisposable
             return ResilienceResultKind.Canceled;
         }
 
-        if (exception is OperationCanceledException or TimeoutException || IsSupportedStrategyTimeout(exception))
+        if (exception is TimeoutException || IsSupportedStrategyTimeout(exception))
         {
             return ResilienceResultKind.Timeout;
         }
