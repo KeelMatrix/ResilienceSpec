@@ -320,6 +320,39 @@ internal sealed class IgnoreCancellationHandler : DelegatingHandler
     }
 }
 
+/// <summary>Turns a cancellation after the cleanup deadline into an observed late downstream fault.</summary>
+internal sealed class LateFaultHandler : DelegatingHandler
+{
+    private readonly TaskCompletionSource _releaseFault;
+    private readonly TaskCompletionSource _faultObserved;
+    private int _calls;
+
+    internal LateFaultHandler(TaskCompletionSource releaseFault, TaskCompletionSource faultObserved)
+    {
+        _releaseFault = releaseFault;
+        _faultObserved = faultObserved;
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (Interlocked.Increment(ref _calls) > 1)
+        {
+            return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await _releaseFault.Task.ConfigureAwait(false);
+            _faultObserved.TrySetResult();
+            throw new InvalidOperationException("The downstream faulted after cancellation cleanup was bounded.");
+        }
+    }
+}
+
 /// <summary>Stalls one cancellation callback until the test releases it.</summary>
 internal sealed class StalledCancellationHandler : DelegatingHandler
 {

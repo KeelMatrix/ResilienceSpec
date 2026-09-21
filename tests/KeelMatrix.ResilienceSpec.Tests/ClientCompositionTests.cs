@@ -365,6 +365,58 @@ public sealed class CancellationTests
     }
 
     [Fact]
+    public async Task LateFaultAfterCleanupDeadlineIsObservedAndScenarioCanBeReused()
+    {
+        var releaseFault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var faultObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
+            clock,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                AdvanceClock = false,
+                PendingObservation = TimeSpan.FromMilliseconds(20),
+                CleanupTimeout = TimeSpan.FromMilliseconds(40),
+            });
+        using var lateFault = new LateFaultHandler(releaseFault, faultObserved);
+        using var client = Chains.CreateClient(scenario.Handler, lateFault);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        Assert.True(scenario.Report.IsObservationCutoff);
+
+        using var overlappingRequest = Chains.Request(HttpMethod.Get, "/orders/overlap");
+        await Assert.ThrowsAsync<ConcurrentScriptUseException>(
+            () => scenario.SendAsync(client, overlappingRequest));
+
+        releaseFault.SetResult();
+        await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var reused = false;
+        for (var attempt = 0; attempt < 100 && !reused; attempt++)
+        {
+            try
+            {
+                using var reusableRequest = Chains.Request(HttpMethod.Get, "/orders/reused");
+                using var reusableResult = await scenario.SendAsync(client, reusableRequest);
+                reusableResult.ShouldHaveStatus(HttpStatusCode.OK);
+                reused = true;
+            }
+            catch (ConcurrentScriptUseException)
+            {
+                await Task.Delay(10);
+            }
+        }
+
+        Assert.True(reused, "The single-consumer lease was not released after the late fault was observed.");
+        scenario.Report.ShouldHaveAttempts(2);
+    }
+
+    [Fact]
     public async Task StalledCancellationCleanupIsBounded()
     {
         var cancellationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

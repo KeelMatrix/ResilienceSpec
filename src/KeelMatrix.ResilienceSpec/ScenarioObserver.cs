@@ -2,19 +2,46 @@ using System.Net;
 
 namespace KeelMatrix.ResilienceSpec;
 
+internal enum AttemptPublicationPoint
+{
+    AfterCompletionPublication,
+    BeforeSnapshotRead,
+}
+
+/// <summary>Provides a deterministic internal seam for publication-boundary tests.</summary>
+internal sealed class AttemptPublicationSeam
+{
+    private readonly Action<AttemptPublicationPoint> _observe;
+
+    internal AttemptPublicationSeam(Action<AttemptPublicationPoint> observe)
+    {
+        ArgumentNullException.ThrowIfNull(observe);
+        _observe = observe;
+    }
+
+    internal void Observe(AttemptPublicationPoint point) => _observe(point);
+}
+
 /// <summary>Mutable state of one attempt while the scripted downstream is producing its outcome.</summary>
 internal sealed class AttemptEntry
 {
     private readonly object _gate = new();
+    private readonly AttemptPublicationSeam? _publicationSeam;
     private Completion? _completion;
     private TimeSpan? _duration;
 
-    internal AttemptEntry(int ordinal, HttpMethod method, HttpFault? fault, TimeSpan? startedAfter)
+    internal AttemptEntry(
+        int ordinal,
+        HttpMethod method,
+        HttpFault? fault,
+        TimeSpan? startedAfter,
+        AttemptPublicationSeam? publicationSeam = null)
     {
         Ordinal = ordinal;
         Method = method;
         Fault = fault;
         StartedAfter = startedAfter;
+        _publicationSeam = publicationSeam;
     }
 
     internal int Ordinal { get; }
@@ -31,6 +58,7 @@ internal sealed class AttemptEntry
         // the pre-completion Abandoned placeholder or the complete response record, never an outcome with missing
         // status or Retry-After metadata.
         Volatile.Write(ref _completion, new Completion(outcome, statusCode, retryAfter));
+        _publicationSeam?.Observe(AttemptPublicationPoint.AfterCompletionPublication);
     }
 
     internal void Finish(TimeSpan? duration)
@@ -43,6 +71,7 @@ internal sealed class AttemptEntry
 
     internal HttpAttempt ToAttempt()
     {
+        _publicationSeam?.Observe(AttemptPublicationPoint.BeforeSnapshotRead);
         var completion = Volatile.Read(ref _completion);
         TimeSpan? duration;
         lock (_gate)

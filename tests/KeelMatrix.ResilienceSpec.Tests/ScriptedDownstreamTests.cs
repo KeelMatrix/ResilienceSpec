@@ -158,6 +158,42 @@ public sealed class ScriptedDownstreamTests
     }
 
     [Fact]
+    public async Task AtomicCompletionPublicationSurvivesAPausedPublicationBoundary()
+    {
+        var publicationReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePublication = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var seam = new AttemptPublicationSeam(point =>
+        {
+            if (point == AttemptPublicationPoint.AfterCompletionPublication)
+            {
+                publicationReached.TrySetResult();
+                releasePublication.Task.GetAwaiter().GetResult();
+            }
+        });
+        var entry = new AttemptEntry(
+            1,
+            HttpMethod.Get,
+            HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)),
+            startedAfter: null,
+            seam);
+
+        var completion = Task.Run(() => entry.Complete(
+            HttpAttemptOutcome.Response,
+            HttpStatusCode.ServiceUnavailable,
+            TimeSpan.FromSeconds(1)));
+        await publicationReached.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var snapshot = entry.ToAttempt();
+
+        releasePublication.SetResult();
+        await completion;
+
+        Assert.Equal(HttpAttemptOutcome.Response, snapshot.Outcome);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, snapshot.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(1), snapshot.RetryAfter);
+    }
+
+    [Fact]
     public async Task LiveSnapshotsNeverExposePartiallyPublishedResponseAttempts()
     {
         const int callCount = HttpAttemptReport.MaximumRecordedAttempts;
