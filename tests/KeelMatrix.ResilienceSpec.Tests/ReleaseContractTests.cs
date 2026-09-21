@@ -52,6 +52,21 @@ public sealed class ReleaseContractTests
     }
 
     [Fact]
+    public void FinalizedChangelogAllowsPendingOutcomeLanguage()
+    {
+        var changelog = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "CHANGELOG.md"));
+        changelog = changelog.Replace(
+            "## [0.1.0] - Planned",
+            "## [0.1.0] - 2026-09-16",
+            StringComparison.Ordinal);
+
+        var result = RunContractWithChangelog("v0.1.0", "0.1.0", changelog);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Release contract passed", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReleaseWorkflowPublishesTheSymbolArtifactExactlyOnce()
     {
         var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "release.yml"));
@@ -73,6 +88,29 @@ public sealed class ReleaseContractTests
         string releaseState,
         params string[] additionalEntryLines)
     {
+        var releaseHeading = releaseState == "Planned"
+            ? "## [0.1.0] - Planned"
+            : "## [0.1.0] - 2026-09-16";
+        var entry = new List<string>
+        {
+            "# Changelog",
+            "",
+            "## [Unreleased]",
+            "",
+            releaseHeading,
+            "",
+            "### Added",
+            "- Provides the initial package contract."
+        };
+        entry.AddRange(additionalEntryLines);
+        return RunContractWithChangelog(tag, packageVersion, string.Join(Environment.NewLine, entry));
+    }
+
+    private static ContractResult RunContractWithChangelog(
+        string tag,
+        string packageVersion,
+        string changelog)
+    {
         var repositoryRoot = FindRepositoryRoot();
         var tempDirectory = Directory.CreateTempSubdirectory("resilience-release-contract-");
         try
@@ -84,22 +122,7 @@ public sealed class ReleaseContractTests
                 $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework><PackageId>KeelMatrix.ResilienceSpec</PackageId><Version>{packageVersion}</Version><IsPackable>true</IsPackable></PropertyGroup></Project>",
                 new UTF8Encoding(false));
 
-            var releaseHeading = releaseState == "Planned"
-                ? "## [0.1.0] - Planned"
-                : "## [0.1.0] - 2026-09-16";
-            var entry = new List<string>
-            {
-                "# Changelog",
-                "",
-                "## [Unreleased]",
-                "",
-                releaseHeading,
-                "",
-                "### Added",
-                "- Provides the initial package contract."
-            };
-            entry.AddRange(additionalEntryLines);
-            File.WriteAllLines(changelogPath, entry, new UTF8Encoding(false));
+            File.WriteAllText(changelogPath, changelog, new UTF8Encoding(false));
 
             var scriptPath = Path.Combine(repositoryRoot, "scripts", "Validate-ReleaseContract.ps1");
             var startInfo = new ProcessStartInfo

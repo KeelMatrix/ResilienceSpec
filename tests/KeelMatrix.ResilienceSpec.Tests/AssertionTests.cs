@@ -29,11 +29,11 @@ public sealed class AssertionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new RetryHandler(1, TimeSpan.Zero, clock, Chains.IsRetryableStatus));
+            new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));
         using var request = Chains.Request(HttpMethod.Get);
         using var result = await scenario.SendAsync(client, request);
 
@@ -51,11 +51,11 @@ public sealed class AssertionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new RetryHandler(1, TimeSpan.Zero, clock, Chains.IsRetryableStatus));
+            new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));
         using var request = Chains.Request(HttpMethod.Get);
         using var result = await scenario.SendAsync(client, request);
 
@@ -74,11 +74,11 @@ public sealed class AssertionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new RetryHandler(1, TimeSpan.Zero, clock, Chains.IsRetryableStatus));
+            new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));
         using var request = Chains.Request(HttpMethod.Post);
         using var result = await scenario.SendAsync(client, request);
 

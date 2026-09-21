@@ -76,11 +76,12 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   the wrapper, timing scenarios fail with `MissingTimeProviderException` instead of falling back to sleeps.
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
-- Timing observations wait for scripted-downstream progress after each injected-clock advance and are sampled at
-  `ResilienceScenarioOptions.AdvanceStep` granularity. `ResilienceScenarioClock` records provider timers that fire;
-  when a timer fires but downstream progress does not arrive within `ObservationWindow`, the scenario returns
-  `Pending` at the current virtual time instead of allowing another advance. Intermediate virtual delays remain
-  supported because a step before a timer is due does not require terminal progress.
+- Timing observations use `ResilienceScenarioOptions.AdvanceStep` only as a fallback when no provider timer deadline
+  is available. When the supported tracking clock exposes a timer deadline, the scenario advances directly to that
+  deadline; `ResilienceScenarioClock` records provider timers that fire. If a fired timer's continuation does not
+  reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` at the current virtual
+  time instead of allowing another advance. Intermediate virtual delays stay wall-clock cheap because they do not
+  require a watchdog wait before a timer fires.
 - When the virtual budget or pending observation expires, `SendAsync` returns `Pending` and the report marks
   `IsObservationCutoff`; `ShouldHaveSettledAtVirtualTime` accepts only genuine request settlement. Cleanup is bounded
   by `ResilienceScenarioOptions.CleanupTimeout`; late completion is observed and late responses are disposed, but

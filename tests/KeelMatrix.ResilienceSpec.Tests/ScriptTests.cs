@@ -102,7 +102,7 @@ public sealed class ResilienceScenarioConfigurationTests
     public void ControllableClockRequiresItsAdvanceOperation()
     {
         var clock = Chains.CreateClock();
-        Assert.Throws<MissingTimeProviderException>(() => new ResilienceScenario(Script(), clock));
+        Assert.Throws<MissingTimeProviderException>(() => new ResilienceScenario(Script(), clock.TimeProvider));
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public sealed class ResilienceScenarioConfigurationTests
     {
         var clock = Chains.CreateClock();
         var options = new ResilienceScenarioOptions { AdvanceStep = TimeSpan.FromMilliseconds(milliseconds) };
-        Assert.Throws<ArgumentOutOfRangeException>(() => new ResilienceScenario(Script(), clock, clock.Advance, options));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ResilienceScenario(Script(), clock.TimeProvider, clock.Advance, options));
     }
 
     [Fact]
@@ -129,19 +129,32 @@ public sealed class ResilienceScenarioConfigurationTests
         var clock = Chains.CreateClock();
         Assert.Throws<ArgumentOutOfRangeException>(() => new ResilienceScenario(
             Script(),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions { ObservationWindow = TimeSpan.Zero }));
         Assert.Throws<ArgumentOutOfRangeException>(() => new ResilienceScenario(
             Script(),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions { PendingObservation = TimeSpan.Zero }));
         Assert.Throws<ArgumentOutOfRangeException>(() => new ResilienceScenario(
             Script(),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions { VirtualBudget = TimeSpan.FromSeconds(-1) }));
+    }
+
+    [Fact]
+    public void ObservationWindowsRejectTaskDelayUnsupportedValuesBeforeARequestStarts()
+    {
+        var clock = Chains.CreateClock();
+        var unsupported = TimeSpan.FromMilliseconds(int.MaxValue) + TimeSpan.FromMilliseconds(1);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ResilienceScenario(
+            Script(),
+            clock.TimeProvider,
+            clock.Advance,
+            new ResilienceScenarioOptions { ObservationWindow = unsupported }));
     }
 
     [Fact]

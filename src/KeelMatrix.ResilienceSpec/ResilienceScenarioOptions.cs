@@ -17,9 +17,10 @@ public sealed class ResilienceScenarioOptions
     public static ResilienceScenarioOptions Default { get; } = new();
 
     /// <summary>
-    /// Gets the amount of injected-clock time added for every observation step while a request is pending. The
-    /// value is also the granularity reported by <see cref="HttpAttemptReport.ObservationStep"/> and used by the
-    /// timing assertions. Defaults to 100 milliseconds.
+    /// Gets the fallback amount of injected-clock time added while a request is pending when the tracking clock has no
+    /// scheduled timer to target. The value is also the maximum granularity reported by
+    /// <see cref="HttpAttemptReport.ObservationStep"/> and used by timing assertions. When a supported tracking
+    /// clock exposes a timer deadline, the scenario advances directly to that deadline. Defaults to 100 milliseconds.
     /// </summary>
     public TimeSpan AdvanceStep { get; init; } = TimeSpan.FromMilliseconds(100);
 
@@ -30,12 +31,10 @@ public sealed class ResilienceScenarioOptions
     public TimeSpan VirtualBudget { get; init; } = TimeSpan.FromSeconds(15);
 
     /// <summary>
-    /// Gets the wall-clock window in which the scenario waits for progress after each clock advance. This window
-    /// only distinguishes "the request settled or produced an attempt" from "nothing happened yet"; it is never
-    /// used as a timing measurement. It is also the window in which a pipeline continuation has to run after the
-    /// clock advanced, so it must stay comfortably above ordinary thread-pool scheduling latency. The wall-clock
-    /// cost of a run is the virtual budget divided by the advance step, multiplied by this window. Defaults to
-    /// 50 milliseconds.
+    /// Gets the bounded wall-clock watchdog used after a provider timer fires and its continuation must reach the
+    /// scripted downstream. It only distinguishes "the request settled or made progress" from "the pipeline is
+    /// stalled"; it is never used as a timing measurement. Ordinary virtual advances with no fired timer do not wait
+    /// for this window. Defaults to 50 milliseconds.
     /// </summary>
     public TimeSpan ObservationWindow { get; init; } = TimeSpan.FromMilliseconds(50);
 
@@ -88,14 +87,31 @@ public sealed class ResilienceScenarioOptions
             throw new ArgumentOutOfRangeException(nameof(ObservationWindow), ObservationWindow, "An observation window must be greater than zero.");
         }
 
+        ValidateTaskDelayWindow(nameof(ObservationWindow), ObservationWindow);
+
         if (PendingObservation <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(PendingObservation), PendingObservation, "A pending observation window must be greater than zero.");
         }
 
+        ValidateTaskDelayWindow(nameof(PendingObservation), PendingObservation);
+
         if (CleanupTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(CleanupTimeout), CleanupTimeout, "A cleanup timeout must be greater than zero.");
+        }
+
+        ValidateTaskDelayWindow(nameof(CleanupTimeout), CleanupTimeout);
+    }
+
+    private static void ValidateTaskDelayWindow(string name, TimeSpan value)
+    {
+        if (value > TimeSpan.FromMilliseconds(int.MaxValue))
+        {
+            throw new ArgumentOutOfRangeException(
+                name,
+                value,
+                "The observation window exceeds the maximum duration supported by Task.Delay.");
         }
     }
 }

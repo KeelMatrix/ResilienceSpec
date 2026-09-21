@@ -101,8 +101,9 @@ try {
         Fail-Contract "Version $tagVersion has no release entry."
     }
 
-    $preReleasePattern = '(?im)\b(?:planned|tbd|unreleased|not\s+yet\s+published|not\s+published|pending)\b'
-    if ($target.Text -match $preReleasePattern -or $entry -match $preReleasePattern) {
+    $preReleaseHeadingPattern = '(?im)\b(?:planned|tbd|unreleased|not\s+yet\s+published|not\s+published|pending)\b'
+    $preReleaseEntryPattern = '(?im)\b(?:planned|tbd|unreleased|not\s+yet\s+published|not\s+published)\b'
+    if ($target.Text -match $preReleaseHeadingPattern -or $entry -match $preReleaseEntryPattern) {
         Fail-Contract "Version $tagVersion is still marked as planned, unreleased, TBD, pending, or equivalent."
     }
 

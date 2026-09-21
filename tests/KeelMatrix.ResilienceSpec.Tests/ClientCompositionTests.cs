@@ -16,12 +16,12 @@ public sealed class ClientCompositionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RecordingHandler(observer, "outer"),
-            new RetryHandler(1, TimeSpan.FromSeconds(1), clock, Chains.IsRetryableStatus),
+            new RetryHandler(1, TimeSpan.FromSeconds(1), clock.TimeProvider, Chains.IsRetryableStatus),
             new RecordingHandler(observer, "inner"));
         using var request = Chains.Request(HttpMethod.Get);
 
@@ -52,12 +52,12 @@ public sealed class ClientCompositionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
-        using var billing = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Success()), clock, clock.Advance);
+        using var billing = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Success()), clock.TimeProvider, clock.Advance);
 
         services.AddHttpClient("orders")
-            .AddHttpMessageHandler(() => new RetryHandler(1, TimeSpan.FromSeconds(1), clock, Chains.IsRetryableStatus))
+            .AddHttpMessageHandler(() => new RetryHandler(1, TimeSpan.FromSeconds(1), clock.TimeProvider, Chains.IsRetryableStatus))
             .UseResilienceSpecDownstream(orders);
         services.AddHttpClient("billing").UseResilienceSpecDownstream(billing);
 
@@ -89,11 +89,11 @@ public sealed class ClientCompositionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
 
         services.AddHttpClient<OrdersClient>()
-            .AddHttpMessageHandler(() => new RetryHandler(1, TimeSpan.FromSeconds(1), clock, Chains.IsRetryableStatus))
+            .AddHttpMessageHandler(() => new RetryHandler(1, TimeSpan.FromSeconds(1), clock.TimeProvider, Chains.IsRetryableStatus))
             .UseResilienceSpecDownstream(scenario);
 
         using var provider = services.BuildServiceProvider();
@@ -111,7 +111,7 @@ public sealed class ClientCompositionTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         var services = new ServiceCollection();
         services.AddHttpClient("orders").UseResilienceSpecDownstream(scenario);
@@ -130,10 +130,10 @@ public sealed class ClientCompositionTests
         var registeredClock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Success()),
-            scenarioClock,
+            scenarioClock.TimeProvider,
             scenarioClock.Advance);
         var services = new ServiceCollection();
-        services.AddSingleton<TimeProvider>(registeredClock);
+        services.AddSingleton<TimeProvider>(registeredClock.TimeProvider);
         services.AddHttpClient("orders").UseResilienceSpecDownstream(scenario);
 
         using var provider = services.BuildServiceProvider();
@@ -168,7 +168,7 @@ public sealed class CancellationTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {
@@ -194,11 +194,11 @@ public sealed class CancellationTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock));
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider));
         using var request = Chains.Request(HttpMethod.Get);
 
         using var result = await scenario.SendAsync(client, request);
@@ -214,11 +214,11 @@ public sealed class CancellationTests
         using var caller = new CancellationTokenSource();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock, caller));
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider, caller));
         using var request = Chains.Request(HttpMethod.Get);
 
         using var result = await scenario.SendAsync(client, request, caller.Token);
@@ -238,7 +238,7 @@ public sealed class CancellationTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {
@@ -251,7 +251,7 @@ public sealed class CancellationTests
             new RetryHandler(
                 maximumRetries: 1,
                 delay: TimeSpan.FromSeconds(1),
-                timeProvider: clock,
+                timeProvider: clock.TimeProvider,
                 shouldRetryResponse: Chains.IsRetryableStatus,
                 retryStarted: retryStarted,
                 retryRelease: retryRelease));
@@ -304,7 +304,7 @@ public sealed class CancellationTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {
@@ -372,7 +372,7 @@ public sealed class CancellationTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {
@@ -424,7 +424,7 @@ public sealed class CancellationTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {

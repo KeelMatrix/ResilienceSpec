@@ -217,11 +217,11 @@ ordinary intermediate delay from a timer whose continuation has not reached the 
 fails configuration with a `MissingTimeProviderException` when the scenario clock is missing or a different provider
 instance is registered.
 
-While a request is pending, `ResilienceScenario.SendAsync` advances the injected clock in `AdvanceStep` increments and
-waits for the scripted downstream's progress after each advance. When the wrapped provider reports that a timer fired,
-the scenario requires downstream progress within `ObservationWindow`; if progress does not arrive, it returns
-`Pending` without another advance. This is the fail-closed quiescence boundary and preserves ordinary intermediate
-virtual delays because advances before a timer is due do not require terminal progress. Timing assertions compare the
+While a request is pending, `ResilienceScenario.SendAsync` advances to the next tracked provider timer when one is
+available and otherwise uses `AdvanceStep` as a fallback. It waits for scripted-downstream progress only after a timer
+fires, using `ObservationWindow` as a bounded watchdog; if progress does not arrive, it returns `Pending` without
+another advance. This is the fail-closed quiescence boundary and keeps ordinary virtual delays wall-clock cheap.
+Timing assertions compare the
 observed injected-clock value with the expected value and allow the declared sampling granularity reported by
 `HttpAttemptReport.ObservationStep`; nothing is measured with the wall clock and there are no elapsed-time tolerances.
 
@@ -275,9 +275,9 @@ its single-consumer lease until the late request and cancellation callbacks fini
   responses therefore carry the delta-seconds form only, and `HttpFault.Response` has no HTTP-date overload.
 - **Timing assertions need an injected clock.** Without one, attempt, method, outcome, and unsafe-method assertions
   still work, and timing assertions fail with an actionable configuration error.
-- **Timing observations are sampled.** The clock advances in `AdvanceStep` increments, so the observed value can lag
-  the exact release instant by at most one step. Lower `AdvanceStep` for finer observation; each advance costs one
-  observation window of wall-clock time.
+- **Timing observations target supported timer deadlines.** `ResilienceScenarioClock` lets the scenario advance
+  directly to the next provider timer, so supported retry/delay observations are not rounded up by the fallback
+  `AdvanceStep`. When no timer deadline is available, the fallback step remains the documented observation bound.
 - **Timing scenarios require `ResilienceScenarioClock`.** Wrap the controllable provider used by the pipeline and
   register `clock.TimeProvider`. A raw provider cannot prove which timers fired during an advance, so the scenario
   rejects it instead of claiming a deterministic timing result.
@@ -367,7 +367,7 @@ evidence covers the verification path and not the optional telemetry transport.
 | `ConcurrentScriptUseException` | Two in-flight requests consumed one script. Create one scenario per logical call, or opt in to `ScriptConcurrency.AllowConcurrent`. |
 | `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |
 | `AttemptStateOverflowException` | The client under test served more attempts than `HttpAttemptReport.MaximumRecordedAttempts`, so the recorded timeline is incomplete and cannot judge attempt state. Lower the client's configured maximum attempts; a script cannot describe more attempts than `HttpFaultScript.MaximumSteps` steps. |
-| A timing assertion fails by less than one advance step | The observation granularity is `ResilienceScenarioOptions.AdvanceStep`. Lower it for finer observation. |
+| A timing assertion fails | Supported provider timers are targeted exactly; inspect the observed timeline and use `AdvanceStep` only as the fallback granularity for work that does not expose a provider timer. |
 | A request never settles | The script contains a step that waits for the clock or never answers. Check that the injected clock is registered and that `AdvanceClock` is enabled, or assert `ShouldBePending()`. |
 
 ## Documentation

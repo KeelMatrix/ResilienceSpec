@@ -53,7 +53,7 @@ public sealed class ResilienceScenario : IDisposable
         {
             throw new MissingTimeProviderException(
                 "A controllable clock must be supplied together with the operation that advances it, for example " +
-                "new ResilienceScenario(script, clock, clock.Advance), where clock is a ResilienceScenarioClock. " +
+                "new ResilienceScenario(script, clock.TimeProvider, clock.Advance), where clock is a ResilienceScenarioClock. " +
                 "Timing assertions never fall back to the wall clock.");
         }
 
@@ -115,9 +115,19 @@ public sealed class ResilienceScenario : IDisposable
         var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var cleanupOwnsLease = false;
         var virtualElapsed = TimeSpan.Zero;
+        Task<HttpResponseMessage> pending = null!;
         try
         {
-            var pending = client.SendAsync(request, linked.Token);
+            try
+            {
+                pending = client.SendAsync(request, linked.Token);
+            }
+            catch (Exception exception)
+            {
+                Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
+                return ResilienceResult.ForException(exception, cancellationToken.IsCancellationRequested, virtualElapsed, Handler.Report);
+            }
+
             var settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
 
             if (!settled)
@@ -129,24 +139,48 @@ public sealed class ResilienceScenario : IDisposable
                         var progressVersion = Handler.Observer.ProgressVersion;
                         var timerVersion = GetTimerCallbackVersion();
                         var remainingBudget = Options.VirtualBudget - virtualElapsed;
-                        var advance = remainingBudget < Options.AdvanceStep ? remainingBudget : Options.AdvanceStep;
+                        var nextTimerDue = GetNextTimerDue();
+                        if (nextTimerDue is { } due && due <= TimeSpan.Zero)
+                        {
+                            var progressed = await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow)
+                                .ConfigureAwait(false);
+                            settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
+                            if (settled || !progressed)
+                            {
+                                break;
+                            }
+
+                            continue;
+                        }
+
+                        var advance = nextTimerDue is { } timer && timer < remainingBudget
+                            ? timer
+                            : remainingBudget < Options.AdvanceStep ? remainingBudget : Options.AdvanceStep;
                         _advanceTime(advance);
                         virtualElapsed += advance;
 
                         // A clock advance may release a retry timer whose continuation still has to schedule the next
-                        // operation. A timer callback is the supported quiescence boundary: if it fired but the actual
-                        // pipeline did not reach the scripted downstream within the observation window, stop honestly
-                        // instead of advancing past a continuation that has not finished progressing.
+                        // operation. A timer callback is the supported quiescence boundary: if it fired, wait for the
+                        // continuation with the bounded watchdog. Ordinary advances with no fired timer yield once so
+                        // asynchronous continuations can schedule their timers without paying a wall-clock wait.
                         var timerFired = HasTimerCallbackSince(timerVersion);
-                        var progressed = await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow)
-                            .ConfigureAwait(false);
-                        // A terminal strategy timeout can settle the client task without another scripted attempt.
-                        // Observe that completion before applying the no-progress cutoff; only an unsettled request
-                        // whose fired timer produced no downstream progress is unsafe to advance again.
-                        settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
-                        if (settled || (timerFired && !progressed))
+                        if (timerFired)
                         {
-                            break;
+                            var progressed = await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow)
+                                .ConfigureAwait(false);
+                            // A terminal strategy timeout can settle the client task without another scripted attempt.
+                            // Observe that completion before applying the no-progress cutoff; only an unsettled request
+                            // whose fired timer produced no downstream progress is unsafe to advance again.
+                            settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
+                            if (settled || !progressed)
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            await Task.Yield();
+                            settled = pending.IsCompleted;
                         }
                     }
                 }
@@ -177,14 +211,23 @@ public sealed class ResilienceScenario : IDisposable
                 return ResilienceResult.Pending(virtualElapsed, Handler.Report);
             }
 
-            var response = await pending.ConfigureAwait(false);
-            Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
-            return ResilienceResult.ForResponse(response, virtualElapsed, Handler.Report);
+            try
+            {
+                var response = await pending.ConfigureAwait(false);
+                Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
+                return ResilienceResult.ForResponse(response, virtualElapsed, Handler.Report);
+            }
+            catch (Exception exception)
+            {
+                Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
+                return ResilienceResult.ForException(exception, cancellationToken.IsCancellationRequested, virtualElapsed, Handler.Report);
+            }
         }
-        catch (Exception exception)
+        catch
         {
-            Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
-            return ResilienceResult.ForException(exception, cancellationToken.IsCancellationRequested, virtualElapsed, Handler.Report);
+            cleanupOwnsLease = await CleanupPendingAsync(logicalCall, linked, pending).ConfigureAwait(false);
+            Handler.Observer.MarkObservationCutoff();
+            throw;
         }
         finally
         {
@@ -230,6 +273,28 @@ public sealed class ResilienceScenario : IDisposable
 
     private bool HasTimerCallbackSince(long version) =>
         GetTimerCallbackVersion() != version;
+
+    private TimeSpan? GetNextTimerDue() =>
+        TimeProvider is { } provider && ResilienceScenarioClock.IsTrackingProvider(provider)
+            ? ResilienceScenarioClock.GetNextTimerDue(provider)
+            : null;
+
+    private async Task<bool> CleanupPendingAsync(
+        LogicalCallScope logicalCall,
+        CancellationTokenSource linked,
+        Task<HttpResponseMessage> pending)
+    {
+        var cleanup = BeginCleanup(linked, pending);
+        var cleanupCompleted = await CompleteWithinAsync(cleanup, Options.CleanupTimeout).ConfigureAwait(false);
+        if (!cleanupCompleted)
+        {
+            _ = ReleaseLeaseAfterCleanupAsync(logicalCall, linked, cleanup);
+            return true;
+        }
+
+        await cleanup.ConfigureAwait(false);
+        return false;
+    }
 
     private static Task BeginCleanup(
         CancellationTokenSource cancellation,

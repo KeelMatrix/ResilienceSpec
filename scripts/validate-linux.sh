@@ -23,3 +23,6 @@ dotnet test tests/KeelMatrix.ResilienceSpec.Tests -c Release --no-restore
 if [[ -f tests/KeelMatrix.ResilienceSpec.IntegrationTests/KeelMatrix.ResilienceSpec.IntegrationTests.csproj ]]; then
     dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release --no-restore
 fi
+
+pwsh -NoProfile -File scripts/Invoke-PackageSmoke.ps1
+pwsh -NoProfile -File scripts/Run-Sample.ps1

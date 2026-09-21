@@ -20,7 +20,7 @@ public sealed class StandardResilienceTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",
@@ -62,7 +62,7 @@ public sealed class StandardResilienceTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",
@@ -94,7 +94,7 @@ public sealed class StandardResilienceTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",
@@ -116,7 +116,7 @@ public sealed class StandardResilienceTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",
@@ -142,7 +142,7 @@ public sealed class StandardResilienceTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",
@@ -169,7 +169,7 @@ public sealed class StandardResilienceTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: advertised),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",
@@ -194,7 +194,7 @@ public sealed class StandardResilienceTests
         var attemptTimeout = TimeSpan.FromSeconds(1);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions { ObservationWindow = TimeSpan.FromMilliseconds(250) });
         using var chain = StandardResilienceChains.Create(
@@ -224,7 +224,7 @@ public sealed class StandardResilienceTests
         var total = TimeSpan.FromSeconds(3);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Always(HttpFault.Timeout()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",
@@ -252,7 +252,7 @@ public sealed class StandardResilienceTests
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(5))),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions { ObservationWindow = TimeSpan.FromMilliseconds(100) });
         using var chain = StandardResilienceChains.Create(
@@ -279,7 +279,7 @@ public sealed class StandardResilienceTests
         var clock = StandardResilienceChains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Always(HttpFault.NetworkError()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",
@@ -299,7 +299,7 @@ public sealed class StandardResilienceTests
         var clock = StandardResilienceChains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions { AdvanceClock = false, PendingObservation = TimeSpan.FromMilliseconds(200) });
         using var chain = StandardResilienceChains.Create(
@@ -325,7 +325,7 @@ public sealed class StandardResilienceTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var chain = StandardResilienceChains.Create(
             "orders",

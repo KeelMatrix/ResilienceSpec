@@ -15,14 +15,14 @@ public sealed class DeterministicTimingTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: advertised),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(
                 maximumRetries: 1,
                 delay: TimeSpan.FromMilliseconds(100),
-                timeProvider: clock,
+                timeProvider: clock.TimeProvider,
                 shouldRetryResponse: Chains.IsRetryableStatus,
                 honorRetryAfter: true));
         using var request = Chains.Request(HttpMethod.Get);
@@ -47,14 +47,14 @@ public sealed class DeterministicTimingTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.TooManyRequests, retryAfter: TimeSpan.FromSeconds(2)),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(
                 maximumRetries: 1,
                 delay: TimeSpan.FromSeconds(1),
-                timeProvider: clock,
+                timeProvider: clock.TimeProvider,
                 shouldRetryResponse: Chains.IsRetryableStatus,
                 honorRetryAfter: false));
         using var request = Chains.Request(HttpMethod.Get);
@@ -67,6 +67,36 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public async Task EarlyRetryScheduleDoesNotPassRetryAfterMinimumWithDefaultOptions()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.TooManyRequests, retryAfter: TimeSpan.FromSeconds(2)),
+                HttpFault.Success()),
+            clock.TimeProvider,
+            clock.Advance);
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries: 1,
+                delay: TimeSpan.FromMilliseconds(1_950),
+                timeProvider: clock.TimeProvider,
+                shouldRetryResponse: Chains.IsRetryableStatus,
+                honorRetryAfter: false));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        Assert.Throws<ResilienceAssertionException>(() => scenario.Report.ShouldRespectRetryAfter());
+        Assert.Throws<ResilienceAssertionException>(() => scenario.Report.ShouldHaveRetryDelay(TimeSpan.FromSeconds(2)));
+        Assert.Equal(TimeSpan.FromMilliseconds(1_950),
+            scenario.Report.Attempts[1].StartedAfter!.Value -
+            (scenario.Report.Attempts[0].StartedAfter!.Value + scenario.Report.Attempts[0].Duration!.Value));
+    }
+
+    [Fact]
     public async Task RetryAfterLongerWaitStillRespectsTheMinimum()
     {
         var clock = Chains.CreateClock();
@@ -74,14 +104,14 @@ public sealed class DeterministicTimingTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.TooManyRequests, retryAfter: TimeSpan.FromSeconds(2)),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(
                 maximumRetries: 1,
                 delay: TimeSpan.FromSeconds(3),
-                timeProvider: clock,
+                timeProvider: clock.TimeProvider,
                 shouldRetryResponse: Chains.IsRetryableStatus));
         using var request = Chains.Request(HttpMethod.Get);
 
@@ -100,14 +130,14 @@ public sealed class DeterministicTimingTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(
                 maximumRetries: 1,
                 delay,
-                clock,
+                clock.TimeProvider,
                 Chains.IsRetryableStatus,
                 yieldBeforeDelay: true));
         using var request = Chains.Request(HttpMethod.Get);
@@ -129,7 +159,7 @@ public sealed class DeterministicTimingTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {
@@ -138,7 +168,7 @@ public sealed class DeterministicTimingTests
             });
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new DelayedPostTimerRetryHandler(delay, clock, timerFired, continuationRelease));
+            new DelayedPostTimerRetryHandler(delay, clock.TimeProvider, timerFired, continuationRelease));
         using var request = Chains.Request(HttpMethod.Get);
 
         var run = scenario.SendAsync(client, request);
@@ -161,7 +191,7 @@ public sealed class DeterministicTimingTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {
@@ -171,7 +201,7 @@ public sealed class DeterministicTimingTests
             });
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new DelayedPostTimerRetryHandler(delay, clock, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), continuationRelease));
+            new DelayedPostTimerRetryHandler(delay, clock.TimeProvider, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), continuationRelease));
         using var request = Chains.Request(HttpMethod.Get);
 
         using var result = await scenario.SendAsync(client, request);
@@ -188,7 +218,7 @@ public sealed class DeterministicTimingTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2))),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(scenario.Handler);
         using var request = Chains.Request(HttpMethod.Get);
@@ -212,7 +242,7 @@ public sealed class DeterministicTimingTests
         };
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(2), HttpFault.Success())),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             options);
         using var client = Chains.CreateClient(scenario.Handler);
@@ -236,7 +266,7 @@ public sealed class DeterministicTimingTests
         var delay = TimeSpan.FromSeconds(2);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Delay(delay, HttpFault.Success())),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(scenario.Handler);
         using var request = Chains.Request(HttpMethod.Get);
@@ -259,12 +289,12 @@ public sealed class DeterministicTimingTests
         var attemptTimeout = TimeSpan.FromSeconds(1);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new RetryHandler(1, TimeSpan.FromMilliseconds(100), clock, Chains.IsRetryableStatus, retryExceptions: true),
-            new AttemptTimeoutHandler(attemptTimeout, clock));
+            new RetryHandler(1, TimeSpan.FromMilliseconds(100), clock.TimeProvider, Chains.IsRetryableStatus, retryExceptions: true),
+            new AttemptTimeoutHandler(attemptTimeout, clock.TimeProvider));
         using var request = Chains.Request(HttpMethod.Get);
 
         using var result = await scenario.SendAsync(client, request);
@@ -284,13 +314,13 @@ public sealed class DeterministicTimingTests
         var total = TimeSpan.FromSeconds(3);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Always(HttpFault.Timeout()),
-            clock,
+            clock.TimeProvider,
             clock.Advance);
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new TotalTimeoutHandler(total, clock),
-            new RetryHandler(1, TimeSpan.FromSeconds(1), clock, Chains.IsRetryableStatus, retryExceptions: true),
-            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock));
+            new TotalTimeoutHandler(total, clock.TimeProvider),
+            new RetryHandler(1, TimeSpan.FromSeconds(1), clock.TimeProvider, Chains.IsRetryableStatus, retryExceptions: true),
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider));
         using var request = Chains.Request(HttpMethod.Get);
 
         using var result = await scenario.SendAsync(client, request);
@@ -308,7 +338,7 @@ public sealed class DeterministicTimingTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {
@@ -335,7 +365,7 @@ public sealed class DeterministicTimingTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout()),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             new ResilienceScenarioOptions
             {
@@ -380,7 +410,7 @@ public sealed class DeterministicTimingTests
         var virtualWait = TimeSpan.FromSeconds(10);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Delay(virtualWait, HttpFault.Success())),
-            clock,
+            clock.TimeProvider,
             clock.Advance,
             options);
         using var client = Chains.CreateClient(scenario.Handler);
@@ -395,5 +425,53 @@ public sealed class DeterministicTimingTests
         Assert.True(
             stopwatch.Elapsed < TimeSpan.FromSeconds(5),
             $"a virtual wait of {virtualWait} took {stopwatch.Elapsed} of wall-clock time");
+    }
+
+    [Fact]
+    public async Task DefaultOptionsKeepLongVirtualWaitsCheapAndRepeatable()
+    {
+        var elapsed = new List<TimeSpan>();
+        for (var run = 0; run < 2; run++)
+        {
+            var clock = Chains.CreateClock();
+            var virtualWait = TimeSpan.FromSeconds(10);
+            using var scenario = new ResilienceScenario(
+                HttpFaultScript.Sequence(HttpFault.Delay(virtualWait, HttpFault.Success())),
+                clock.TimeProvider,
+                clock.Advance);
+            using var client = Chains.CreateClient(scenario.Handler);
+            using var request = Chains.Request(HttpMethod.Get);
+
+            var stopwatch = Stopwatch.StartNew();
+            using var result = await scenario.SendAsync(client, request);
+            stopwatch.Stop();
+
+            result.ShouldHaveStatus(HttpStatusCode.OK);
+            scenario.Report.ShouldHaveSettledAtVirtualTime(virtualWait);
+            elapsed.Add(stopwatch.Elapsed);
+        }
+
+        Assert.All(elapsed, duration => Assert.True(
+            duration < TimeSpan.FromSeconds(3),
+            $"a virtual wait took {duration} of wall-clock time"));
+    }
+
+    [Fact]
+    public async Task ThrowingAdvanceIsAHarnessFailureAndCleansUpPendingRequest()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromHours(1), HttpFault.Success())),
+            clock.TimeProvider,
+            _ => throw new InvalidOperationException("advance failed"));
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => scenario.SendAsync(client, request));
+
+        Assert.Equal("advance failed", failure.Message);
+        Assert.False(scenario.Report.IsSettled);
+        Assert.True(scenario.Report.IsObservationCutoff);
+        Assert.Equal(HttpAttemptOutcome.Abandoned, scenario.Report.Attempts[0].Outcome);
     }
 }

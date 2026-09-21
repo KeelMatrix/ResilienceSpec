@@ -120,3 +120,7 @@ static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldNotHaveRetried(this 
 static KeelMatrix.ResilienceSpec.ResilienceAssertions.ShouldRespectRetryAfter(this KeelMatrix.ResilienceSpec.HttpAttemptReport! report) -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
 static KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.Default.get -> KeelMatrix.ResilienceSpec.ResilienceScenarioOptions!
 static KeelMatrix.ResilienceSpec.ResilienceSpecHttpClientBuilderExtensions.UseResilienceSpecDownstream(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder! builder, KeelMatrix.ResilienceSpec.ResilienceScenario! scenario) -> Microsoft.Extensions.DependencyInjection.IHttpClientBuilder!
+KeelMatrix.ResilienceSpec.ResilienceScenarioClock
+KeelMatrix.ResilienceSpec.ResilienceScenarioClock.Advance(System.TimeSpan amount) -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioClock.ResilienceScenarioClock(System.TimeProvider! inner, System.Action<System.TimeSpan>! advanceInner) -> void
+KeelMatrix.ResilienceSpec.ResilienceScenarioClock.TimeProvider.get -> System.TimeProvider!

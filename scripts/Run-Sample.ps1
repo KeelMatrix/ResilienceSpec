@@ -153,7 +153,7 @@ try {
         Where-Object { $_.Name -eq $PackageVersion } |
         Select-Object -First 1
     Assert-Contract ($null -ne $restoredVersion) "The sample did not restore version $PackageVersion."
-    $restoredArtifact = Join-Path $restoredVersion.FullName $nupkgName
+    $restoredArtifact = Join-Path $restoredVersion.FullName $nupkgName.ToLowerInvariant()
     Assert-Contract (Test-Path -LiteralPath $restoredArtifact -PathType Leaf) 'The restored sample package artifact was not retained in the isolated cache.'
     Assert-Contract ((Get-FileHash -LiteralPath $restoredArtifact -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath $nupkg -Algorithm SHA256).Hash) 'The sample did not restore the freshly packed artifact.'
     Write-Output 'Sample restored the exact packed artifact from the isolated local feed.'

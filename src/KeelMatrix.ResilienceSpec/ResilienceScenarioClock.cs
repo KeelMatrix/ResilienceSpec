@@ -52,27 +52,68 @@ public sealed class ResilienceScenarioClock
         _advanceInner(amount);
     }
 
-#pragma warning disable RS0016 // PublicApiAnalyzers does not represent conversion operators in this baseline format.
-    /// <summary>Converts the wrapper to the tracking provider used by the client pipeline.</summary>
-    public static implicit operator TimeProvider(ResilienceScenarioClock clock) =>
-        clock?.TimeProvider ?? throw new ArgumentNullException(nameof(clock));
-#pragma warning restore RS0016
-
     internal static bool IsTrackingProvider(TimeProvider provider) => provider is TrackingTimeProvider;
 
     internal static long GetTimerCallbackVersion(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).TimerCallbackVersion;
 
+    internal static TimeSpan? GetNextTimerDue(TimeProvider provider) =>
+        ((TrackingTimeProvider)provider).NextTimerDue;
+
     private sealed class TrackingTimeProvider : TimeProvider
     {
+        private readonly object _gate = new();
         private readonly TimeProvider _inner;
+        private readonly List<TrackedTimer> _timers = new();
         private long _timerCallbackVersion;
 
         internal TrackingTimeProvider(TimeProvider inner) => _inner = inner;
 
         internal long TimerCallbackVersion => Interlocked.Read(ref _timerCallbackVersion);
 
-        internal void MarkTimerCallback() => Interlocked.Increment(ref _timerCallbackVersion);
+        internal TimeSpan? NextTimerDue
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    var now = _inner.GetTimestamp();
+                    TimeSpan? next = null;
+                    foreach (var timer in _timers)
+                    {
+                        if (timer.DueTimestamp is not { } due)
+                        {
+                            continue;
+                        }
+
+                        var remaining = due <= now ? TimeSpan.Zero : _inner.GetElapsedTime(now, due);
+                        if (next is null || remaining < next.Value)
+                        {
+                            next = remaining;
+                        }
+                    }
+
+                    return next;
+                }
+            }
+        }
+
+        internal void MarkTimerCallback(TrackedTimer timer)
+        {
+            lock (_gate)
+            {
+                if (timer.Period == Timeout.InfiniteTimeSpan)
+                {
+                    timer.DueTimestamp = null;
+                }
+                else
+                {
+                    timer.DueTimestamp = TimestampAfter(_inner.GetTimestamp(), timer.Period);
+                }
+
+                _timerCallbackVersion++;
+            }
+        }
 
         public override DateTimeOffset GetUtcNow() => _inner.GetUtcNow();
 
@@ -91,8 +132,64 @@ public sealed class ResilienceScenarioClock
             ArgumentNullException.ThrowIfNull(callback);
 
             var timer = new TrackedTimer(this, callback, state);
-            timer.InnerTimer = _inner.CreateTimer(timer.Invoke, null, dueTime, period);
+            timer.SetSchedule(dueTime, period);
+            lock (_gate)
+            {
+                _timers.Add(timer);
+            }
+
+            try
+            {
+                timer.InnerTimer = _inner.CreateTimer(timer.Invoke, null, dueTime, period);
+            }
+            catch
+            {
+                lock (_gate)
+                {
+                    _timers.Remove(timer);
+                }
+
+                throw;
+            }
+
             return timer;
+        }
+
+        internal void ChangeTimer(TrackedTimer timer, TimeSpan dueTime, TimeSpan period)
+        {
+            lock (_gate)
+            {
+                timer.SetSchedule(dueTime, period);
+            }
+        }
+
+        internal void RemoveTimer(TrackedTimer timer)
+        {
+            lock (_gate)
+            {
+                _timers.Remove(timer);
+            }
+        }
+
+        internal long? TimestampAfterForTimer(TimeSpan duration) =>
+            TimestampAfter(_inner.GetTimestamp(), duration);
+
+        private long? TimestampAfter(long start, TimeSpan duration)
+        {
+            if (duration == Timeout.InfiniteTimeSpan)
+            {
+                return null;
+            }
+
+            var normalized = duration < TimeSpan.Zero ? TimeSpan.Zero : duration;
+            var delta = (decimal)normalized.Ticks * _inner.TimestampFrequency / TimeSpan.TicksPerSecond;
+            if (delta >= long.MaxValue)
+            {
+                return long.MaxValue;
+            }
+
+            var deltaTimestamp = (long)Math.Ceiling(delta);
+            return start > long.MaxValue - deltaTimestamp ? long.MaxValue : start + deltaTimestamp;
         }
     }
 
@@ -111,18 +208,46 @@ public sealed class ResilienceScenarioClock
 
         internal ITimer? InnerTimer { get; set; }
 
-        public bool Change(TimeSpan dueTime, TimeSpan period) =>
-            InnerTimer?.Change(dueTime, period) ?? false;
+        internal long? DueTimestamp { get; set; }
 
-        public void Dispose() => InnerTimer?.Dispose();
+        internal TimeSpan Period { get; private set; }
 
-        public ValueTask DisposeAsync() =>
-            InnerTimer is { } timer ? timer.DisposeAsync() : ValueTask.CompletedTask;
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            var changed = InnerTimer?.Change(dueTime, period) ?? false;
+            if (changed)
+            {
+                _owner.ChangeTimer(this, dueTime, period);
+            }
+
+            return changed;
+        }
+
+        public void Dispose()
+        {
+            _owner.RemoveTimer(this);
+            InnerTimer?.Dispose();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            _owner.RemoveTimer(this);
+            if (InnerTimer is { } timer)
+            {
+                await timer.DisposeAsync().ConfigureAwait(false);
+            }
+        }
 
         internal void Invoke(object? _)
         {
-            _owner.MarkTimerCallback();
+            _owner.MarkTimerCallback(this);
             _callback(_state);
+        }
+
+        internal void SetSchedule(TimeSpan dueTime, TimeSpan period)
+        {
+            Period = period;
+            DueTimestamp = _owner.TimestampAfterForTimer(dueTime);
         }
     }
 }

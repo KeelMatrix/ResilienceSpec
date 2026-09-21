@@ -1,5 +1,1 @@
 #nullable enable
-KeelMatrix.ResilienceSpec.ResilienceScenarioClock
-KeelMatrix.ResilienceSpec.ResilienceScenarioClock.Advance(System.TimeSpan amount) -> void
-KeelMatrix.ResilienceSpec.ResilienceScenarioClock.ResilienceScenarioClock(System.TimeProvider! inner, System.Action<System.TimeSpan>! advanceInner) -> void
-KeelMatrix.ResilienceSpec.ResilienceScenarioClock.TimeProvider.get -> System.TimeProvider!
