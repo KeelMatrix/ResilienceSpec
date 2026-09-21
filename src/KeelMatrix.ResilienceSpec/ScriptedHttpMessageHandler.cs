@@ -44,8 +44,8 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
         {
             throw new MissingTimeProviderException(
                 "The script contains a delay step, which is only deterministic on an injected clock. " +
-                "Create the scenario with a controllable clock and its advance operation, for example " +
-                "new ResilienceScenario(script, clock, clock.Advance).");
+                "Wrap the controllable provider in ResilienceScenarioClock and create the scenario with " +
+                "clock.TimeProvider and clock.Advance.");
         }
 
         _timeProvider = timeProvider;

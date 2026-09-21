@@ -162,6 +162,7 @@ public sealed class ScriptedDownstreamTests
     {
         const int callCount = HttpAttemptReport.MaximumRecordedAttempts;
         var errors = new ConcurrentQueue<Exception>();
+        var snapshotStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var snapshotsFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var options = new ResilienceScenarioOptions { Concurrency = ScriptConcurrency.AllowConcurrent };
         using var scenario = new ResilienceScenario(
@@ -175,7 +176,19 @@ public sealed class ScriptedDownstreamTests
             {
                 while (!snapshotsFinished.Task.IsCompleted)
                 {
-                    _ = scenario.Report.Timeline;
+                    snapshotStarted.TrySetResult();
+                    var report = scenario.Report;
+                    foreach (var attempt in report.Attempts)
+                    {
+                        if (attempt.Outcome == HttpAttemptOutcome.Response &&
+                            (attempt.StatusCode != HttpStatusCode.ServiceUnavailable ||
+                             attempt.RetryAfter != TimeSpan.FromSeconds(1)))
+                        {
+                            errors.Enqueue(new InvalidOperationException(
+                                "A live response attempt exposed incomplete status or retry metadata."));
+                        }
+                    }
+
                     Thread.Yield();
                 }
             }
@@ -185,12 +198,21 @@ public sealed class ScriptedDownstreamTests
             }
         });
 
+        await snapshotStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         var sends = Enumerable.Range(0, callCount).Select(_ => SendOneAsync());
         using var responses = new ResponseCollection(await Task.WhenAll(sends));
         snapshotsFinished.SetResult();
         await snapshotter;
 
         Assert.Empty(errors);
+        var final = scenario.Report;
+        final.ShouldHaveAttempts(callCount);
+        Assert.All(final.Attempts, attempt =>
+        {
+            Assert.Equal(HttpAttemptOutcome.Response, attempt.Outcome);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, attempt.StatusCode);
+            Assert.Equal(TimeSpan.FromSeconds(1), attempt.RetryAfter);
+        });
 
         async Task<HttpResponseMessage> SendOneAsync()
         {

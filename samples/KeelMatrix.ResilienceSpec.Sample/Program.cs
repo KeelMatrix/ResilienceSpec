@@ -9,16 +9,17 @@ var failures = 0;
 
 await RunAsync("GET 503 -> 200 with the standard resilience handler", async () =>
 {
-    var clock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    var underlyingClock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    var clock = new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance);
     using var scenario = new ResilienceScenario(
         HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
             HttpFault.Success()),
-        clock,
+        clock.TimeProvider,
         clock.Advance);
 
     var services = new ServiceCollection();
-    services.AddSingleton<TimeProvider>(clock);
+    services.AddSingleton<TimeProvider>(clock.TimeProvider);
     services.AddHttpClient("orders")
         .UseResilienceSpecDownstream(scenario)
         .AddStandardResilienceHandler()
@@ -47,16 +48,17 @@ await RunAsync("GET 503 -> 200 with the standard resilience handler", async () =
 
 await RunAsync("POST must not be retried when unsafe retries are disabled", async () =>
 {
-    var clock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    var underlyingClock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    var clock = new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance);
     using var scenario = new ResilienceScenario(
         HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable),
             HttpFault.Success()),
-        clock,
+        clock.TimeProvider,
         clock.Advance);
 
     var services = new ServiceCollection();
-    services.AddSingleton<TimeProvider>(clock);
+    services.AddSingleton<TimeProvider>(clock.TimeProvider);
     services.AddHttpClient("payments")
         .UseResilienceSpecDownstream(scenario)
         .AddStandardResilienceHandler()

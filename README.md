@@ -36,17 +36,18 @@ using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Time.Testing;
 using Polly;
 
-var clock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+var underlyingClock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+var clock = new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance);
 
 var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(
         HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
         HttpFault.Success()),
-    clock,
+    clock.TimeProvider,
     clock.Advance);
 
 var services = new ServiceCollection();
-services.AddSingleton<TimeProvider>(clock);
+services.AddSingleton<TimeProvider>(clock.TimeProvider);
 services.AddHttpClient("orders")
     .UseResilienceSpecDownstream(scenario)
     .AddStandardResilienceHandler()
@@ -204,23 +205,25 @@ Timing assertions are available only when a scenario is created with a controlla
 that advances it:
 
 ```csharp
-var clock = new FakeTimeProvider();
-var scenario = new ResilienceScenario(script, clock, clock.Advance);
+var underlyingClock = new FakeTimeProvider();
+var clock = new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance);
+var scenario = new ResilienceScenario(script, clock.TimeProvider, clock.Advance);
 ```
 
-The same clock instance must drive the resilience pipeline, which is what `services.AddSingleton<TimeProvider>(clock)`
-does for `Microsoft.Extensions.Http.Resilience`. The adapter resolves the registered service and fails configuration
-with a `MissingTimeProviderException` when the scenario clock is missing or a different `TimeProvider` instance is
-registered, so a timing assertion can never silently observe a pipeline that runs on another clock.
+`ResilienceScenarioClock` must wrap the controllable provider used by the resilience pipeline. Register its
+`TimeProvider` property with `services.AddSingleton<TimeProvider>(clock.TimeProvider)` and pass that same property to
+the scenario. The wrapper records which provider timers fire during each advance, so the scenario can distinguish an
+ordinary intermediate delay from a timer whose continuation has not reached the scripted downstream. The adapter
+fails configuration with a `MissingTimeProviderException` when the scenario clock is missing or a different provider
+instance is registered.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances the injected clock in `AdvanceStep` increments and
-waits for the scripted downstream's progress signal before considering another advance. A pipeline adapter that can
-hold a continuation after a timer fires must also set `ResilienceScenarioOptions.WaitForPipelineProgress`; its callback
-receives the cumulative virtual time and must complete when that advance's pipeline continuations have finished
-progressing. The callback is bounded by `ObservationWindow`; an incomplete callback returns `Pending` and prevents a
-further advance. Timing assertions compare the observed injected-clock value with the expected value and allow the
-declared sampling granularity reported by `HttpAttemptReport.ObservationStep`; nothing is measured with the wall clock
-and there are no elapsed-time tolerances.
+waits for the scripted downstream's progress after each advance. When the wrapped provider reports that a timer fired,
+the scenario requires downstream progress within `ObservationWindow`; if progress does not arrive, it returns
+`Pending` without another advance. This is the fail-closed quiescence boundary and preserves ordinary intermediate
+virtual delays because advances before a timer is due do not require terminal progress. Timing assertions compare the
+observed injected-clock value with the expected value and allow the declared sampling granularity reported by
+`HttpAttemptReport.ObservationStep`; nothing is measured with the wall clock and there are no elapsed-time tolerances.
 
 Assertions that ship with the timing subset:
 
@@ -261,7 +264,9 @@ When observation ends because `VirtualBudget` is exhausted or `AdvanceClock` is 
 `Pending` and the report marks `IsObservationCutoff`. That cutoff is not settlement evidence, so
 `ShouldHaveSettledAtVirtualTime` rejects it. Cancellation cleanup is bounded by
 `ResilienceScenarioOptions.CleanupTimeout`; late faults are observed and late responses are disposed, but arbitrary
-user code that ignores cancellation cannot be forcibly terminated.
+user code that ignores cancellation cannot be forcibly terminated. If cleanup outlives that bound, the scenario retains
+its single-consumer lease until the late request and cancellation callbacks finish. A second logical call fails with
+`ConcurrentScriptUseException` during that period; the scenario becomes reusable only after cleanup completes.
 
 ### Timing Limitations
 
@@ -273,10 +278,9 @@ user code that ignores cancellation cannot be forcibly terminated.
 - **Timing observations are sampled.** The clock advances in `AdvanceStep` increments, so the observed value can lag
   the exact release instant by at most one step. Lower `AdvanceStep` for finer observation; each advance costs one
   observation window of wall-clock time.
-- **Delayed pipeline continuations need an explicit quiescence callback.** Set
-  `ResilienceScenarioOptions.WaitForPipelineProgress` when an adapter can hold work after a virtual timer fires. The
-  callback must complete after that work has progressed; if it remains incomplete for `ObservationWindow`, the scenario
-  returns `Pending` at the current virtual time instead of advancing again and claiming a deterministic result.
+- **Timing scenarios require `ResilienceScenarioClock`.** Wrap the controllable provider used by the pipeline and
+  register `clock.TimeProvider`. A raw provider cannot prove which timers fired during an advance, so the scenario
+  rejects it instead of claiming a deterministic timing result.
 - **`Retry-After` is asserted for delta responses only.** A response without `Retry-After` is governed by the
   configured backoff, which `ShouldHaveRetryDelay` verifies.
 
@@ -358,8 +362,8 @@ evidence covers the verification path and not the optional telemetry transport.
 
 | Symptom | Cause and next step |
 | --- | --- |
-| `MissingTimeProviderException` when creating a client | The scenario has a controllable clock but the container has no `TimeProvider`. Register the same instance with `services.AddSingleton<TimeProvider>(clock)`, or set `RequireRegisteredTimeProvider` to `false` when the pipeline time source is configured another way. |
-| `MissingTimeProviderException` from a timing assertion | The scenario was created without a clock. Create it with `new ResilienceScenario(script, clock, clock.Advance)`. |
+| `MissingTimeProviderException` when creating a client | The scenario has a controllable clock but the container has no matching tracking provider. Register `clock.TimeProvider` with `services.AddSingleton<TimeProvider>(clock.TimeProvider)`, or set `RequireRegisteredTimeProvider` to `false` when the pipeline time source is configured another way. |
+| `MissingTimeProviderException` from a timing scenario | Wrap the controllable provider with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)` and pass `clock.TimeProvider` plus `clock.Advance` to the scenario. |
 | `ConcurrentScriptUseException` | Two in-flight requests consumed one script. Create one scenario per logical call, or opt in to `ScriptConcurrency.AllowConcurrent`. |
 | `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |
 | `AttemptStateOverflowException` | The client under test served more attempts than `HttpAttemptReport.MaximumRecordedAttempts`, so the recorded timeline is incomplete and cannot judge attempt state. Lower the client's configured maximum attempts; a script cannot describe more attempts than `HttpFaultScript.MaximumSteps` steps. |

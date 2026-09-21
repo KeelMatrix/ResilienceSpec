@@ -40,7 +40,7 @@ public static class ResilienceSpecHttpClientBuilderExtensions
                 throw new MissingTimeProviderException(
                     "The scenario expects its controllable clock to drive the resilience pipeline, but the resolved TimeProvider is " +
                     "missing or is a different instance, so the pipeline would not run on the scenario clock. Register the same clock instance before the client is built, " +
-                    "for example services.AddSingleton<TimeProvider>(clock), or set " +
+                    "for example services.AddSingleton<TimeProvider>(clock.TimeProvider), or set " +
                     "ResilienceScenarioOptions.RequireRegisteredTimeProvider to false when the pipeline time source is configured another way.");
             }
 

@@ -30,16 +30,17 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Time.Testing;
 
-var clock = new FakeTimeProvider();
+var underlyingClock = new FakeTimeProvider();
+var clock = new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance);
 var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(
         HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
         HttpFault.Success()),
-    clock,
+    clock.TimeProvider,
     clock.Advance);
 
 var services = new ServiceCollection();
-services.AddSingleton<TimeProvider>(clock);
+services.AddSingleton<TimeProvider>(clock.TimeProvider);
 services.AddHttpClient("orders")
     .UseResilienceSpecDownstream(scenario)
     .AddStandardResilienceHandler();
@@ -70,18 +71,21 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 
 - The package verifies behaviour; it does not add resilience, recommend retry values, or inspect Polly pipeline
   descriptors.
-- Timing assertions require a scenario created with a controllable `TimeProvider` and the operation that advances it.
-  Without one, timing assertions fail with `MissingTimeProviderException` instead of falling back to sleeps.
+- Timing assertions require a `ResilienceScenarioClock` that wraps the controllable `TimeProvider`. Register its
+  `TimeProvider` property in the client pipeline and pass that property plus `clock.Advance` to the scenario. Without
+  the wrapper, timing scenarios fail with `MissingTimeProviderException` instead of falling back to sleeps.
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
 - Timing observations wait for scripted-downstream progress after each injected-clock advance and are sampled at
-  `ResilienceScenarioOptions.AdvanceStep` granularity. An adapter that can hold a continuation after a timer fires
-  must set `ResilienceScenarioOptions.WaitForPipelineProgress`; an incomplete callback returns `Pending` at the
-  current virtual time instead of allowing another advance.
+  `ResilienceScenarioOptions.AdvanceStep` granularity. `ResilienceScenarioClock` records provider timers that fire;
+  when a timer fires but downstream progress does not arrive within `ObservationWindow`, the scenario returns
+  `Pending` at the current virtual time instead of allowing another advance. Intermediate virtual delays remain
+  supported because a step before a timer is due does not require terminal progress.
 - When the virtual budget or pending observation expires, `SendAsync` returns `Pending` and the report marks
   `IsObservationCutoff`; `ShouldHaveSettledAtVirtualTime` accepts only genuine request settlement. Cleanup is bounded
   by `ResilienceScenarioOptions.CleanupTimeout`; late completion is observed and late responses are disposed, but
-  arbitrary user code that ignores cancellation cannot be forcibly terminated.
+  arbitrary user code that ignores cancellation cannot be forcibly terminated. The single-consumer lease remains held
+  until late cleanup completes, so reuse fails clearly during that window and is safe only afterward.
 - One script serves one logical call. Concurrent use fails with `ConcurrentScriptUseException` unless
   `ScriptConcurrency.AllowConcurrent` is requested.
 - `ShouldRespectRetryAfter` verifies the advertised value as a minimum wait; use `ShouldHaveRetryDelay` for an exact

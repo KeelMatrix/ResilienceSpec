@@ -135,14 +135,6 @@ public sealed class DeterministicTimingTests
             {
                 VirtualBudget = TimeSpan.FromSeconds(2),
                 ObservationWindow = TimeSpan.FromMilliseconds(25),
-                WaitForPipelineProgress = async virtualElapsed =>
-                {
-                    if (virtualElapsed >= delay)
-                    {
-                        await timerFired.Task;
-                        await continuationRelease.Task;
-                    }
-                },
             });
         using var client = Chains.CreateClient(
             scenario.Handler,
@@ -164,7 +156,6 @@ public sealed class DeterministicTimingTests
     {
         var clock = Chains.CreateClock();
         var delay = TimeSpan.FromSeconds(1);
-        var timerFired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var continuationRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(
@@ -177,18 +168,10 @@ public sealed class DeterministicTimingTests
                 VirtualBudget = TimeSpan.FromSeconds(2),
                 ObservationWindow = TimeSpan.FromMilliseconds(25),
                 CleanupTimeout = TimeSpan.FromMilliseconds(50),
-                WaitForPipelineProgress = async virtualElapsed =>
-                {
-                    if (virtualElapsed >= delay)
-                    {
-                        await timerFired.Task;
-                        await continuationRelease.Task;
-                    }
-                },
             });
         using var client = Chains.CreateClient(
             scenario.Handler,
-            new DelayedPostTimerRetryHandler(delay, clock, timerFired, continuationRelease));
+            new DelayedPostTimerRetryHandler(delay, clock, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), continuationRelease));
         using var request = Chains.Request(HttpMethod.Get);
 
         using var result = await scenario.SendAsync(client, request);

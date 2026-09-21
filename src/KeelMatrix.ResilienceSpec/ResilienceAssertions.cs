@@ -427,8 +427,8 @@ public static class ResilienceAssertions
 
         report.RecordAssertion(false);
         throw new MissingTimeProviderException(
-            $"{assertion} requires an injected clock and at least one timed attempt. Create the scenario with a controllable clock and " +
-            "its advance operation, for example new ResilienceScenario(script, clock, clock.Advance), and let the same clock drive the " +
+            $"{assertion} requires an injected clock and at least one timed attempt. Create a ResilienceScenarioClock around the " +
+            "controllable provider, pass clock.TimeProvider and clock.Advance to the scenario, and let the same clock drive the " +
             "resilience pipeline. The package never falls back to wall-clock sleeps or elapsed-time tolerances.");
     }
 

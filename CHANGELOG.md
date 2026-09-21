@@ -20,8 +20,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Deterministic timing assertions for retry delays, `Retry-After` deltas, per-attempt timeouts, and total-request
   timeouts, driven by an injected `TimeProvider`; timing assertions are unavailable, and fail with
   `MissingTimeProviderException`, when no controllable clock is supplied.
-- A bounded virtual-time progress contract for adapters with delayed post-timer continuations; an incomplete progress
-  callback yields an honest pending observation instead of advancing past work that has not progressed.
+- A fail-closed virtual-time progress contract based on `ResilienceScenarioClock`: when a provider timer fires but its
+  continuation does not reach the scripted downstream within the observation window, the scenario returns an honest
+  pending observation instead of advancing past work that has not progressed.
+- Bounded cancellation cleanup that retains the single-consumer lease through late completion, plus atomic publication
+  of response outcome, status, and `Retry-After` metadata in live attempt snapshots.
 - An `IHttpClientFactory` adapter that composes the scripted downstream with the client's existing resilience and
   delegating handlers, while the core API stays usable without dependency injection.
 - Attempt records and diagnostics that exclude URIs, query strings, headers, cookies, authorization values, bodies,

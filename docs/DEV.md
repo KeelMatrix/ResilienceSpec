@@ -109,13 +109,15 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 
 ## Deterministic timing contract
 
-Timing assertions require a scenario created with a controllable `TimeProvider` and the operation that advances it.
-The scenario advances that clock in `ResilienceScenarioOptions.AdvanceStep` increments while a request is pending and
-waits for scripted-downstream progress after each advance. An adapter that can hold a continuation after a timer fires
-must set `ResilienceScenarioOptions.WaitForPipelineProgress`; the callback is bounded by `ObservationWindow` and an
-incomplete callback returns `Pending` without another virtual advance. The observation window is not a timing
-measurement. A virtual-budget or no-advance cutoff returns `Pending` and is not reported as request settlement.
-Cancellation cleanup is separately bounded by `ResilienceScenarioOptions.CleanupTimeout`.
+Timing assertions require a `ResilienceScenarioClock` around the controllable `TimeProvider` used by the client
+pipeline. Register `clock.TimeProvider` and pass that provider plus `clock.Advance` to the scenario. The scenario
+advances the clock in `ResilienceScenarioOptions.AdvanceStep` increments while a request is pending and waits for
+scripted-downstream progress after each advance. The wrapper records provider timers that fire; if a fired timer's
+continuation does not reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending`
+without another virtual advance. Steps before a timer is due remain valid intermediate virtual delays. The observation
+window is not a timing measurement. A virtual-budget or no-advance cutoff returns `Pending` and is not reported as
+request settlement. Cancellation cleanup is separately bounded by `ResilienceScenarioOptions.CleanupTimeout`; the
+single-consumer lease remains held until late cleanup finishes.
 
 `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
 the wait runs on the injected clock, so it is deliberately not exposed.

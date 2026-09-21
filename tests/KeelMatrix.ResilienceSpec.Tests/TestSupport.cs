@@ -387,7 +387,11 @@ internal static class Chains
 
     internal static Uri RequestUri(string path) => new($"https://orders.invalid{path}");
 
-    internal static FakeTimeProvider CreateClock() => new(ClockStart);
+    internal static ResilienceScenarioClock CreateClock()
+    {
+        var inner = new FakeTimeProvider(ClockStart);
+        return new ResilienceScenarioClock(inner, inner.Advance);
+    }
 
     /// <summary>Assembles a client whose chain is exactly the given handlers above the given terminal handler.</summary>
     internal static HttpClient CreateClient(HttpMessageHandler terminal, params DelegatingHandler[] handlers)

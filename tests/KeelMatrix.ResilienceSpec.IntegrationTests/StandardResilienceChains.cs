@@ -78,7 +78,11 @@ internal static class StandardResilienceChains
 {
     internal static readonly DateTimeOffset ClockStart = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-    internal static FakeTimeProvider CreateClock() => new(ClockStart);
+    internal static ResilienceScenarioClock CreateClock()
+    {
+        var inner = new FakeTimeProvider(ClockStart);
+        return new ResilienceScenarioClock(inner, inner.Advance);
+    }
 
     internal static StandardClient Create(
         string name,
@@ -91,7 +95,7 @@ internal static class StandardResilienceChains
         services.AddMetrics();
         if (scenario.TimeProvider is { } clock)
         {
-            services.AddSingleton<TimeProvider>(clock);
+            services.AddSingleton<TimeProvider>(clock.TimeProvider);
         }
 
         var observer = new ChainObserver();

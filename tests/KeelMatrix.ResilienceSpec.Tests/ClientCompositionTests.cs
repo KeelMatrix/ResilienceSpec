@@ -46,7 +46,7 @@ public sealed class ClientCompositionTests
     {
         var clock = Chains.CreateClock();
         var services = new ServiceCollection();
-        services.AddSingleton<TimeProvider>(clock);
+        services.AddSingleton<TimeProvider>(clock.TimeProvider);
 
         using var orders = new ResilienceScenario(
             HttpFaultScript.Sequence(
@@ -83,7 +83,7 @@ public sealed class ClientCompositionTests
     {
         var clock = Chains.CreateClock();
         var services = new ServiceCollection();
-        services.AddSingleton<TimeProvider>(clock);
+        services.AddSingleton<TimeProvider>(clock.TimeProvider);
 
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(
@@ -303,7 +303,7 @@ public sealed class CancellationTests
         var lateResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
-            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
             clock,
             clock.Advance,
             new ResilienceScenarioOptions
@@ -320,6 +320,10 @@ public sealed class CancellationTests
 
         result.ShouldBePending();
         Assert.True(scenario.Report.IsObservationCutoff);
+
+        using var overlappingRequest = Chains.Request(HttpMethod.Get, "/orders/overlap");
+        await Assert.ThrowsAsync<ConcurrentScriptUseException>(
+            () => scenario.SendAsync(client, overlappingRequest));
 
         using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -339,6 +343,25 @@ public sealed class CancellationTests
                 return true;
             }
         });
+
+        var reused = false;
+        for (var attempt = 0; attempt < 100 && !reused; attempt++)
+        {
+            try
+            {
+                using var reusableRequest = Chains.Request(HttpMethod.Get, "/orders/reused");
+                using var reusableResult = await scenario.SendAsync(client, reusableRequest);
+                reusableResult.ShouldHaveStatus(HttpStatusCode.OK);
+                reused = true;
+            }
+            catch (ConcurrentScriptUseException)
+            {
+                await Task.Delay(10);
+            }
+        }
+
+        Assert.True(reused, "The single-consumer lease was not released after late cleanup completed.");
+        scenario.Report.ShouldHaveAttempts(2);
     }
 
     [Fact]

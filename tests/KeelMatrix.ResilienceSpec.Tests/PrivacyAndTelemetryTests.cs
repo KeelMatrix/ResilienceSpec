@@ -215,7 +215,7 @@ public sealed class TelemetryTests
         var clock = Chains.CreateClock();
         var sink = new RecordingTelemetrySink();
         var services = new ServiceCollection();
-        services.AddSingleton<TimeProvider>(clock);
+        services.AddSingleton<TimeProvider>(clock.TimeProvider);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),

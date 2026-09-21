@@ -52,25 +52,6 @@ public sealed class ResilienceScenarioOptions
     public TimeSpan CleanupTimeout { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Gets an optional callback that establishes pipeline quiescence after each clock advance.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The callback receives the cumulative injected-clock time after the advance and must complete only after the
-    /// resilience pipeline has finished progressing all continuations released by that advance. This is the supported
-    /// coordination point for a pipeline adapter that deliberately delays a post-timer continuation. The scenario
-    /// bounds the callback by <see cref="ObservationWindow"/>; a callback that does not complete produces an
-    /// observation cutoff and the scenario never performs another advance.
-    /// </para>
-    /// <para>
-    /// When no callback is supplied, the scenario uses the scripted downstream's progress signal and the configured
-    /// observation window. That default is sufficient for ordinary handler chains; adapters with an explicit
-    /// continuation or scheduler gate should supply this callback so the timing contract is fail-closed.
-    /// </para>
-    /// </remarks>
-    public Func<TimeSpan, ValueTask>? WaitForPipelineProgress { get; init; }
-
-    /// <summary>
     /// Gets a value indicating whether the scenario advances the injected clock. Set to <see langword="false"/>
     /// to observe a pending request without advancing time, which documents "clock not advanced, still pending".
     /// Defaults to <see langword="true"/>.

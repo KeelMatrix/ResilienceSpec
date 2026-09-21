@@ -6,9 +6,7 @@ namespace KeelMatrix.ResilienceSpec;
 internal sealed class AttemptEntry
 {
     private readonly object _gate = new();
-    private HttpAttemptOutcome? _outcome;
-    private HttpStatusCode? _statusCode;
-    private TimeSpan? _retryAfter;
+    private Completion? _completion;
     private TimeSpan? _duration;
 
     internal AttemptEntry(int ordinal, HttpMethod method, HttpFault? fault, TimeSpan? startedAfter)
@@ -29,12 +27,10 @@ internal sealed class AttemptEntry
 
     internal void Complete(HttpAttemptOutcome outcome, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null)
     {
-        lock (_gate)
-        {
-            _outcome = outcome;
-            _statusCode = statusCode;
-            _retryAfter = retryAfter;
-        }
+        // Publish all response metadata through one immutable reference. A live report can therefore observe either
+        // the pre-completion Abandoned placeholder or the complete response record, never an outcome with missing
+        // status or Retry-After metadata.
+        Volatile.Write(ref _completion, new Completion(outcome, statusCode, retryAfter));
     }
 
     internal void Finish(TimeSpan? duration)
@@ -47,18 +43,27 @@ internal sealed class AttemptEntry
 
     internal HttpAttempt ToAttempt()
     {
+        var completion = Volatile.Read(ref _completion);
+        TimeSpan? duration;
         lock (_gate)
         {
-            return new HttpAttempt(
-                Ordinal,
-                Method,
-                _outcome ?? HttpAttemptOutcome.Abandoned,
-                _statusCode,
-                _retryAfter,
-                StartedAfter,
-                _duration);
+            duration = _duration;
         }
+
+        return new HttpAttempt(
+            Ordinal,
+            Method,
+            completion?.Outcome ?? HttpAttemptOutcome.Abandoned,
+            completion?.StatusCode,
+            completion?.RetryAfter,
+            StartedAfter,
+            duration);
     }
+
+    private sealed record Completion(
+        HttpAttemptOutcome Outcome,
+        HttpStatusCode? StatusCode,
+        TimeSpan? RetryAfter);
 }
 
 /// <summary>Scopes one attempt so that the timeline is finalized exactly once.</summary>
