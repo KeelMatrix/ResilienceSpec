@@ -95,7 +95,7 @@ internal static class StandardResilienceChains
         services.AddMetrics();
         if (scenario.TimeProvider is { } clock)
         {
-            services.AddSingleton<TimeProvider>(clock.TimeProvider);
+            services.AddSingleton<TimeProvider>(clock);
         }
 
         var observer = new ChainObserver();
