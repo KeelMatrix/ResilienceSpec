@@ -140,12 +140,14 @@ public sealed class ResilienceScenario : IDisposable
                         var timerFired = HasTimerCallbackSince(timerVersion);
                         var progressed = await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow)
                             .ConfigureAwait(false);
-                        if (timerFired && !progressed)
+                        // A terminal strategy timeout can settle the client task without another scripted attempt.
+                        // Observe that completion before applying the no-progress cutoff; only an unsettled request
+                        // whose fired timer produced no downstream progress is unsafe to advance again.
+                        settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
+                        if (settled || (timerFired && !progressed))
                         {
                             break;
                         }
-
-                        settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
                     }
                 }
                 else
