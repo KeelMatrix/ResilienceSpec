@@ -78,6 +78,8 @@ public sealed class ResilienceScenarioClock
 
         public override long GetTimestamp() => _inner.GetTimestamp();
 
+        public override long TimestampFrequency => _inner.TimestampFrequency;
+
         public override TimeZoneInfo LocalTimeZone => _inner.LocalTimeZone;
 
         public override ITimer CreateTimer(
