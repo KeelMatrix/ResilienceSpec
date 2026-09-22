@@ -1,7 +1,8 @@
 namespace KeelMatrix.ResilienceSpec;
 
 /// <summary>
-/// Wraps a controllable <see cref="TimeProvider"/> and records timers that fire during a virtual-time advance.
+/// Wraps the supported <c>Microsoft.Extensions.Time.Testing.FakeTimeProvider</c> and records timers that fire during
+/// a virtual-time advance.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -10,9 +11,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// delay from a timer that fired but whose continuation has not reached the scripted downstream yet.
 /// </para>
 /// <para>
-/// The wrapped provider's advance operation must synchronously dispatch the timers released by an advance. This is the
-/// contract of the supported controllable providers used with the package, including
-/// <c>Microsoft.Extensions.TimeProvider.Testing.FakeTimeProvider</c>.
+/// The wrapped provider's advance operation must synchronously dispatch the timers released by an advance. The package
+/// supports the exact <c>Microsoft.Extensions.Time.Testing.FakeTimeProvider</c> type; derived or delegating providers
+/// are rejected because they cannot prove that their time source is controllable.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenarioClock
@@ -23,7 +24,7 @@ public sealed class ResilienceScenarioClock
     /// <summary>Initializes a clock wrapper around a controllable provider.</summary>
     /// <param name="inner">The controllable provider that owns the virtual time.</param>
     /// <param name="advanceInner">The operation that advances <paramref name="inner"/>.</param>
-    /// <exception cref="ArgumentException"><paramref name="inner"/> is <see cref="TimeProvider.System"/> or is already tracking another clock.</exception>
+    /// <exception cref="ArgumentException"><paramref name="inner"/> is <see cref="TimeProvider.System"/>, is not the exact supported <c>FakeTimeProvider</c> type, or is already tracking another clock.</exception>
     public ResilienceScenarioClock(TimeProvider inner, Action<TimeSpan> advanceInner)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -38,7 +39,15 @@ public sealed class ResilienceScenarioClock
         {
             throw new ArgumentException(
                 "TimeProvider.System is a wall-clock provider and cannot be wrapped as a controllable clock. " +
-                "Use a supported controllable provider such as FakeTimeProvider.",
+                "Use Microsoft.Extensions.Time.Testing.FakeTimeProvider.",
+                nameof(inner));
+        }
+
+        if (!IsSupportedControllableProvider(inner))
+        {
+            throw new ArgumentException(
+                "Timing scenarios require an exact Microsoft.Extensions.Time.Testing.FakeTimeProvider instance. " +
+                "Derived or delegating TimeProvider wrappers cannot prove deterministic timing.",
                 nameof(inner));
         }
 
@@ -62,6 +71,13 @@ public sealed class ResilienceScenarioClock
     }
 
     internal static bool IsTrackingProvider(TimeProvider provider) => provider is TrackingTimeProvider;
+
+    private static bool IsSupportedControllableProvider(TimeProvider provider)
+    {
+        var type = provider.GetType();
+        return string.Equals(type.FullName, "Microsoft.Extensions.Time.Testing.FakeTimeProvider", StringComparison.Ordinal) &&
+            string.Equals(type.Assembly.GetName().Name, "Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal);
+    }
 
     internal static long GetTimerCallbackVersion(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).TimerCallbackVersion;

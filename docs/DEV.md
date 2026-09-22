@@ -109,8 +109,10 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 
 ## Deterministic timing contract
 
-Timing assertions require a `ResilienceScenarioClock` around the controllable `TimeProvider` used by the client
-pipeline. Register `clock.TimeProvider` and pass that provider plus `clock.Advance` to the scenario. The scenario
+Timing assertions require a `ResilienceScenarioClock` around an exact
+`Microsoft.Extensions.Time.Testing.FakeTimeProvider` used by the client pipeline. Register `clock.TimeProvider` and
+pass that provider plus `clock.Advance` to the scenario. Derived or delegating providers, including wrappers around
+`TimeProvider.System`, are rejected so the scenario
 advances directly to the next tracked provider timer when available and uses `AdvanceStep` only when no timer deadline
 is available. It waits for scripted-downstream progress only after a timer fires; if a fired timer's continuation does
 not reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` without another virtual

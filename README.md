@@ -201,8 +201,8 @@ was consumed by two in-flight requests.
 
 ## Deterministic Timing
 
-Timing assertions are available only when a scenario is created with a controllable `TimeProvider` and the operation
-that advances it:
+Timing assertions are available only when a scenario is created with an exact
+`Microsoft.Extensions.Time.Testing.FakeTimeProvider` instance and the operation that advances it:
 
 ```csharp
 var underlyingClock = new FakeTimeProvider();
@@ -215,8 +215,10 @@ var scenario = new ResilienceScenario(script, clock.TimeProvider, clock.Advance)
 the scenario. The wrapper records which provider timers fire during each advance, so the scenario can distinguish an
 ordinary intermediate delay from a timer whose continuation has not reached the scripted downstream. The adapter
 fails configuration with a `MissingTimeProviderException` when the scenario clock is missing or a different provider
-instance is registered. `ResilienceScenarioClock` rejects `TimeProvider.System`, because wall-clock timestamps cannot
-produce deterministic timing evidence.
+instance is registered. `ResilienceScenarioClock` rejects `TimeProvider.System` and every derived or delegating
+`TimeProvider`, including wrappers that forward to the system clock. This closed admission rule ensures that timing
+eligibility cannot be obtained from a wall-clock provider or a subclass spoof; unsupported providers cannot produce a
+timing-eligible report.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances to the next tracked provider timer when one is
 available and otherwise uses `AdvanceStep` as a fallback. It waits for scripted-downstream progress only after a timer
@@ -281,9 +283,10 @@ its single-consumer lease until the late request and cancellation callbacks fini
 - **Timing observations target supported timer deadlines.** `ResilienceScenarioClock` lets the scenario advance
   directly to the next provider timer, so supported retry/delay observations are not rounded up by the fallback
   `AdvanceStep`. When no timer deadline is available, the fallback step remains the documented observation bound.
-- **Timing scenarios require `ResilienceScenarioClock`.** Wrap the controllable provider used by the pipeline and
-  register `clock.TimeProvider`. A raw provider cannot prove which timers fired during an advance, so the scenario
-  rejects it instead of claiming a deterministic timing result.
+- **Timing scenarios require the exact supported provider.** Wrap an exact
+  `Microsoft.Extensions.Time.Testing.FakeTimeProvider` instance with `ResilienceScenarioClock` and register
+  `clock.TimeProvider`. Raw, derived, and delegating providers are rejected instead of claiming a deterministic timing
+  result.
 - **`Retry-After` is asserted for delta responses only.** A response without `Retry-After` is governed by the
   configured backoff, which `ShouldHaveRetryDelay` verifies.
 
@@ -366,7 +369,7 @@ evidence covers the verification path and not the optional telemetry transport.
 | Symptom | Cause and next step |
 | --- | --- |
 | `MissingTimeProviderException` when creating a client | The scenario has a controllable clock but the container has no matching tracking provider. Register `clock.TimeProvider` with `services.AddSingleton<TimeProvider>(clock.TimeProvider)`, or set `RequireRegisteredTimeProvider` to `false` when the pipeline time source is configured another way. |
-| `MissingTimeProviderException` from a timing scenario | Wrap the controllable provider with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)` and pass `clock.TimeProvider` plus `clock.Advance` to the scenario. |
+| `MissingTimeProviderException` from a timing scenario | Use an exact `Microsoft.Extensions.Time.Testing.FakeTimeProvider`, wrap it with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)`, and pass `clock.TimeProvider` plus `clock.Advance` to the scenario. Derived and delegating providers are rejected. |
 | `ConcurrentScriptUseException` | Two in-flight requests consumed one script. Create one scenario per logical call, or opt in to `ScriptConcurrency.AllowConcurrent`. |
 | `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |
 | `AttemptStateOverflowException` | The client under test served more attempts than `HttpAttemptReport.MaximumRecordedAttempts`, so the recorded timeline is incomplete and cannot judge attempt state. Lower the client's configured maximum attempts; a script cannot describe more attempts than `HttpFaultScript.MaximumSteps` steps. |

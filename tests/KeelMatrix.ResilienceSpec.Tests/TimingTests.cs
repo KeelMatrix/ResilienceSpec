@@ -492,6 +492,24 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public void PublicSystemClockWrapperCannotBeWrappedAsADeterministicClock()
+    {
+        var failure = Assert.Throws<ArgumentException>(
+            () => new ResilienceScenarioClock(new SystemDelegatingTimeProvider(), static _ => { }));
+
+        Assert.Contains("deterministic timing", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SupportedProviderSubclassCannotSpoofTimingAdmission()
+    {
+        var failure = Assert.Throws<ArgumentException>(
+            () => new ResilienceScenarioClock(new FakeTimeProviderSubclass(), static _ => { }));
+
+        Assert.Contains("exact", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task SupportedControllableClockRemainsTimingEligible()
     {
         var clock = Chains.CreateClock();

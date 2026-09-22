@@ -15,8 +15,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   distinct.
 - Direct scripted-handler use now rejects untracked time providers instead of presenting wall-clock timing as
   deterministic.
-- `ResilienceScenarioClock` now rejects `TimeProvider.System`, including the public wrapper path, so wall-clock timing
-  cannot be presented as deterministic timing evidence.
+- `ResilienceScenarioClock` accepts only the exact supported `FakeTimeProvider` and rejects system-clock providers,
+  including derived and delegating wrappers, so wall-clock timing cannot be presented as deterministic evidence.
 - Standard validation runs the core and integration test projects sequentially, avoiding cross-project scheduler
   contention while preserving the bounded fail-closed timing watchdog.
 - Corrected the root README examples to pass the tracked `clock.TimeProvider`.
@@ -32,8 +32,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   "this unsafe request was not retried", final response or exception, and cancellation outcomes, with failures that
   print the observed timeline; pending observation cutoffs remain distinct from genuine request settlement.
 - Deterministic timing assertions for retry delays, `Retry-After` deltas, per-attempt timeouts, and total-request
-  timeouts, driven by an injected `TimeProvider`; timing assertions are unavailable, and fail with
-  `MissingTimeProviderException`, when no controllable clock is supplied.
+  timeouts, driven by the exact supported `FakeTimeProvider`; timing assertions are unavailable, and fail with
+  `MissingTimeProviderException`, when no supported fake clock is supplied.
 - A fail-closed virtual-time progress contract based on `ResilienceScenarioClock`: when a provider timer fires but its
   continuation does not reach the scripted downstream within the observation window, the scenario returns an honest
   pending observation instead of advancing past work that has not progressed.
