@@ -77,7 +77,7 @@ try {
             $false)
         try {
             foreach ($entry in ($source.Entries | Sort-Object FullName)) {
-                $normalized = $destination.CreateEntry($entry.FullName, [IO.Compression.CompressionLevel]::Optimal)
+                $normalized = $destination.CreateEntry($entry.FullName, [IO.Compression.CompressionLevel]::NoCompression)
                 $normalized.LastWriteTime = $fixedTimestamp
 
                 $input = $entry.Open()
@@ -104,7 +104,7 @@ try {
     Assert-SameManifest -Expected $manifest -Actual $normalizedManifest
     Move-Item -LiteralPath $temporaryPath -Destination $resolvedPath -Force
 
-    Write-Output ("Normalized archive: {0} entries={1} timestamp={2} ZIP-local-time" -f $resolvedPath, $manifest.Count, $fixedTimestamp.ToString('yyyy-MM-dd HH:mm:ss'))
+    Write-Output ("Normalized archive: {0} entries={1} timestamp={2} ZIP-local-time storage=uncompressed" -f $resolvedPath, $manifest.Count, $fixedTimestamp.ToString('yyyy-MM-dd HH:mm:ss'))
 }
 catch {
     if ($temporaryPath -and (Test-Path -LiteralPath $temporaryPath)) {

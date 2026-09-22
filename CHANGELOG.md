@@ -21,7 +21,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Standard validation runs the core and integration test projects sequentially, avoiding cross-project scheduler
   contention while preserving the bounded fail-closed timing watchdog.
 - Package validation produces byte-identical `.nupkg` and `.snupkg` artifacts for a fixed commit by normalizing ZIP
-  entry timestamps, comparing two consecutive packs, and inspecting the normalized artifacts before consumer smoke.
+  entry timestamps and entry storage, comparing two consecutive packs, and inspecting the normalized artifacts before
+  consumer smoke.
 - Corrected the root README examples to pass the tracked `clock.TimeProvider`.
 
 ## [0.1.0] - Planned

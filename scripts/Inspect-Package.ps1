@@ -157,6 +157,17 @@ function Assert-ArchiveTimestamps {
     }
 }
 
+function Assert-ArchiveStorage {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.Compression.ZipArchive]$Archive,
+        [Parameter(Mandatory = $true)][string]$ArchiveDescription
+    )
+
+    foreach ($entry in $Archive.Entries) {
+        Assert-Contract ($entry.CompressedLength -eq $entry.Length) "$ArchiveDescription entry '$($entry.FullName)' is compressed instead of stored."
+    }
+}
+
 function Assert-PngContract {
     param(
         [Parameter(Mandatory = $true)][byte[]]$Bytes,
@@ -253,6 +264,7 @@ try {
     $package = [IO.Compression.ZipFile]::OpenRead($PackagePath)
     try {
         Assert-ArchiveTimestamps -Archive $package -ArchiveDescription 'The package'
+        Assert-ArchiveStorage -Archive $package -ArchiveDescription 'The package'
         Assert-ArchiveEntries -Archive $package -ArchiveDescription 'The package' -Allowlist @(
             '^_rels/\.rels$',
             '^\[Content_Types\]\.xml$',
@@ -288,6 +300,7 @@ try {
     $symbols = [IO.Compression.ZipFile]::OpenRead($SymbolsPath)
     try {
         Assert-ArchiveTimestamps -Archive $symbols -ArchiveDescription 'The symbol package'
+        Assert-ArchiveStorage -Archive $symbols -ArchiveDescription 'The symbol package'
         Assert-ArchiveEntries -Archive $symbols -ArchiveDescription 'The symbol package' -Allowlist @(
             '^_rels/\.rels$',
             '^\[Content_Types\]\.xml$',
@@ -308,6 +321,7 @@ try {
     Write-Output "Package inspection passed: $([IO.Path]::GetFileName($PackagePath)) SHA256=$packageHash"
     Write-Output "Symbol inspection passed: $([IO.Path]::GetFileName($SymbolsPath)) SHA256=$symbolsHash"
     Write-Output "Normalized archive timestamps verified: $($normalizedArchiveTimestamp.ToString('yyyy-MM-dd HH:mm:ss')) ZIP local time"
+    Write-Output 'Normalized archive storage verified: all entries are stored without compression'
     Write-Output "SourceLink commit verified: $expectedCommit"
     exit 0
 }
