@@ -108,8 +108,8 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   integration checks against both `9.8.0` and `10.10.0`. The macOS evidence comes from a hosted, virtualized
   `macos-latest` runner, not physical macOS hardware.
 - The package gate packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, stores entries
-  without compression, compares the `.nupkg` and `.snupkg` SHA256 values, and inspects the normalized artifacts before
-  the clean consumer restore. This makes the
+  without compression, emits LF-only UTF-8 XML/package metadata, compares the `.nupkg` and `.snupkg` SHA256 values, and
+  inspects the normalized artifacts before the clean consumer restore. This makes the
   package artifact identity reproducible for the fixed commit and SDK selected by `global.json`.
 
 ## Supported Integration Range

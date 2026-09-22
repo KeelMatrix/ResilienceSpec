@@ -43,6 +43,36 @@ function Get-Crc32 {
     return [uint32]([uint64]4294967295 -bxor [uint64]$value)
 }
 
+function Get-CanonicalPayloadBytes {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][byte[]]$Bytes
+    )
+
+    if ($Name -notmatch '\.(xml|nuspec|rels|psmdcp)$') {
+        return ,$Bytes
+    }
+
+    $hasUtf8Bom = $Bytes.Length -ge 3 -and
+        $Bytes[0] -eq 0xEF -and
+        $Bytes[1] -eq 0xBB -and
+        $Bytes[2] -eq 0xBF
+    $offset = if ($hasUtf8Bom) { 3 } else { 0 }
+    $text = [Text.Encoding]::UTF8.GetString($Bytes, $offset, $Bytes.Length - $offset)
+    $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $canonical = [Text.Encoding]::UTF8.GetBytes($text)
+    if (-not $hasUtf8Bom) {
+        return ,$canonical
+    }
+
+    $withBom = [byte[]]::new($canonical.Length + 3)
+    $withBom[0] = 0xEF
+    $withBom[1] = 0xBB
+    $withBom[2] = 0xBF
+    [Array]::Copy($canonical, 0, $withBom, 3, $canonical.Length)
+    return ,$withBom
+}
+
 function Get-ArchiveRecords {
     param(
         [Parameter(Mandatory = $true)][string]$Path
@@ -63,6 +93,8 @@ function Get-ArchiveRecords {
                 $stream.Dispose()
             }
 
+            $name = $entry.FullName.Replace('\', '/')
+            $bytes = Get-CanonicalPayloadBytes -Name $name -Bytes $bytes
             $hash = [Security.Cryptography.SHA256]::Create()
             try {
                 $digest = (($hash.ComputeHash($bytes) | ForEach-Object ToString x2) -join '')
@@ -71,7 +103,6 @@ function Get-ArchiveRecords {
                 $hash.Dispose()
             }
 
-            $name = $entry.FullName.Replace('\', '/')
             $nameBytes = [Text.Encoding]::UTF8.GetBytes($name)
             if ($nameBytes.Length -gt [uint16]::MaxValue) {
                 throw "Archive entry name is too long: '$name'."
@@ -195,7 +226,7 @@ try {
     Assert-SameManifest -Expected $records -Actual $normalizedRecords
     Move-Item -LiteralPath $temporaryPath -Destination $resolvedPath -Force
 
-    Write-Output ("Normalized archive: {0} entries={1} timestamp=1980-01-01 00:00:00 ZIP-local-time storage=uncompressed canonical-headers" -f $resolvedPath, $records.Count)
+    Write-Output ("Normalized archive: {0} entries={1} timestamp=1980-01-01 00:00:00 ZIP-local-time storage=uncompressed canonical-headers UTF-8-text=LF" -f $resolvedPath, $records.Count)
 }
 catch {
     if ($temporaryPath -and (Test-Path -LiteralPath $temporaryPath)) {

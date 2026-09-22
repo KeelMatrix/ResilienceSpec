@@ -351,7 +351,8 @@ so this package deliberately asserts the assembled behaviour instead of restatin
   macOS, then runs explicit integration checks against both `9.8.0` and `10.10.0`.
 - Only `net8.0` is exercised. The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical
   macOS hardware. The package gate packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time,
-  stores entries without compression, compares the `.nupkg` and `.snupkg` SHA256 values, and inspects the normalized
+  stores entries without compression, emits LF-only UTF-8 XML/package metadata, compares the `.nupkg` and `.snupkg`
+  SHA256 values, and inspects the normalized
   artifacts before the clean consumer restore.
 
 ## Telemetry

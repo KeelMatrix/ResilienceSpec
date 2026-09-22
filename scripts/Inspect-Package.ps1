@@ -94,6 +94,50 @@ function Read-XmlEntry {
     return $document
 }
 
+function Get-EntryHash {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.Compression.ZipArchiveEntry]$Entry
+    )
+
+    $stream = $Entry.Open()
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        return (($hash.ComputeHash($stream) | ForEach-Object ToString x2) -join '')
+    }
+    finally {
+        $hash.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Assert-CanonicalTextEntries {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.Compression.ZipArchive]$Archive,
+        [Parameter(Mandatory = $true)][string]$ArchiveDescription
+    )
+
+    foreach ($entry in $Archive.Entries) {
+        $name = $entry.FullName.Replace('\', '/')
+        if ($name -notmatch '\.(xml|nuspec|rels|psmdcp|md)$' -and $name -cne 'LICENSE') {
+            continue
+        }
+
+        $text = Read-ZipEntryText -Archive $Archive -Name $name
+        Assert-Contract (-not $text.Contains("`r")) "$ArchiveDescription text entry '$name' is not LF-only."
+    }
+}
+
+function Write-EntryManifest {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.Compression.ZipArchive]$Archive,
+        [Parameter(Mandatory = $true)][string]$ArchiveDescription
+    )
+
+    foreach ($entry in ($Archive.Entries | Sort-Object FullName)) {
+        Write-Output ("{0} entry SHA256: {1}={2}" -f $ArchiveDescription, $entry.FullName.Replace('\', '/'), (Get-EntryHash -Entry $entry))
+    }
+}
+
 function Get-MetadataText {
     param(
         [Parameter(Mandatory = $true)][Xml.XmlDocument]$Document,
@@ -265,6 +309,7 @@ try {
     try {
         Assert-ArchiveTimestamps -Archive $package -ArchiveDescription 'The package'
         Assert-ArchiveStorage -Archive $package -ArchiveDescription 'The package'
+        Assert-CanonicalTextEntries -Archive $package -ArchiveDescription 'The package'
         Assert-ArchiveEntries -Archive $package -ArchiveDescription 'The package' -Allowlist @(
             '^_rels/\.rels$',
             '^\[Content_Types\]\.xml$',
@@ -292,6 +337,7 @@ try {
         Assert-PngContract -Bytes (Read-ZipEntryBytes -Archive $package -Name 'icon.png') -ExpectedIconFile $ExpectedIconPath
         $packagePdb = Read-ZipEntryBytes -Archive $package -Name "lib/$targetFramework/$packageId.dll"
         Assert-Contract ($packagePdb.Length -gt 0) 'The packed library is empty.'
+        Write-EntryManifest -Archive $package -ArchiveDescription 'Package'
     }
     finally {
         $package.Dispose()
@@ -301,6 +347,7 @@ try {
     try {
         Assert-ArchiveTimestamps -Archive $symbols -ArchiveDescription 'The symbol package'
         Assert-ArchiveStorage -Archive $symbols -ArchiveDescription 'The symbol package'
+        Assert-CanonicalTextEntries -Archive $symbols -ArchiveDescription 'The symbol package'
         Assert-ArchiveEntries -Archive $symbols -ArchiveDescription 'The symbol package' -Allowlist @(
             '^_rels/\.rels$',
             '^\[Content_Types\]\.xml$',
@@ -311,6 +358,7 @@ try {
         )
 
         Assert-SourceLink -PdbBytes (Read-ZipEntryBytes -Archive $symbols -Name "lib/$targetFramework/$packageId.pdb") -ExpectedCommit $expectedCommit
+        Write-EntryManifest -Archive $symbols -ArchiveDescription 'Symbols'
     }
     finally {
         $symbols.Dispose()
@@ -322,6 +370,7 @@ try {
     Write-Output "Symbol inspection passed: $([IO.Path]::GetFileName($SymbolsPath)) SHA256=$symbolsHash"
     Write-Output "Normalized archive timestamps verified: $($normalizedArchiveTimestamp.ToString('yyyy-MM-dd HH:mm:ss')) ZIP local time"
     Write-Output 'Normalized archive storage verified: all entries are stored without compression'
+    Write-Output 'Canonical text payloads verified: UTF-8 XML/package metadata and documentation entries are LF-only'
     Write-Output "SourceLink commit verified: $expectedCommit"
     exit 0
 }

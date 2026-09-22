@@ -76,8 +76,8 @@ pwsh -NoProfile -File .\scripts\Invoke-PackageSmoke.ps1
 ```
 
 The script packs the shipping project twice with `--include-symbols`, normalizes both archives to the fixed ZIP-local
-timestamp `1980-01-01 00:00:00` and stored (uncompressed) entries, and fails if either the `.nupkg` or `.snupkg`
-SHA256 changes between packs. It then
+timestamp `1980-01-01 00:00:00`, stored (uncompressed) entries, and LF-only UTF-8 XML/package metadata, and fails if
+either the `.nupkg` or `.snupkg` SHA256 changes between packs. It then
 copies the first normalized pair into `artifacts/packages/feed`, runs `scripts/Inspect-Package.ps1` against those exact
 artifacts, and restores `tests/PackageSmoke` with an isolated package cache and a generated `NuGet.config` whose
 package source mapping allows the candidate package to come from the local feed only. The consumer restore hash must
@@ -85,8 +85,9 @@ match the inspected package, and the consumer asserts the documented behaviour a
 counts. The reproducible artifact hashes and smoke output are written to `artifacts/packages/package-smoke.log`, which
 is ignored by Git and never packed.
 
-`scripts/Inspect-Package.ps1` enforces the package contract: normalized archive timestamps and stored entries, the exact
-archive entry set, package ID, version, authors, description, tags, license, README, icon, repository and SourceLink
+`scripts/Inspect-Package.ps1` enforces the package contract: normalized archive timestamps and stored entries, LF-only
+UTF-8 XML/package metadata and documentation entries, the exact archive entry set, package ID, version, authors,
+description, tags, license, README, icon, repository and SourceLink
 commit, the single `net8.0` dependency group with its exact dependency versions, the portable PDB inside the symbol
 package, and the absence of any file that is not on the allowlist.
 
@@ -97,7 +98,7 @@ pwsh -NoProfile -File .\scripts\Run-Sample.ps1
 ```
 
 The sample gate packs `KeelMatrix.ResilienceSpec` to a temporary local feed, normalizes the package and symbol
-archives with the same fixed ZIP-local timestamp and stored-entry format used by the package gate, maps only that package ID to the feed, restores all
+archives with the same fixed ZIP-local timestamp, stored-entry, and LF-only UTF-8 text format used by the package gate, maps only that package ID to the feed, restores all
 other dependencies from NuGet.org into an isolated cache, verifies the restored package hash, and runs the sample with
 `--no-restore`. The temporary feed and cache are removed when the command finishes.
 
