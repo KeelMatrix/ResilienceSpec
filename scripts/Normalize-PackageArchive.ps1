@@ -8,34 +8,86 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-function Get-EntryDigest {
-    param(
-        [Parameter(Mandatory = $true)][System.IO.Compression.ZipArchiveEntry]$Entry
-    )
+$fixedDosTime = [uint16]0
+$fixedDosDate = [uint16]0x0021
+$utf8Flag = [uint16]0x0800
+$storedMethod = [uint16]0
+$zipVersion = [uint16]20
+$crcTable = [uint32[]]::new(256)
 
-    $stream = $Entry.Open()
-    $hash = [Security.Cryptography.SHA256]::Create()
-    try {
-        return [pscustomobject]@{
-            Name = $Entry.FullName
-            Length = $Entry.Length
-            Hash = (($hash.ComputeHash($stream) | ForEach-Object ToString x2) -join '')
+for ($index = 0; $index -lt $crcTable.Length; $index++) {
+    $value = [uint32]$index
+    for ($bit = 0; $bit -lt 8; $bit++) {
+        if (($value -band [uint32]1) -ne 0) {
+            $value = [uint32]([uint64]3988292384 -bxor [uint64]($value -shr 1))
+        }
+        else {
+            $value = [uint32]($value -shr 1)
         }
     }
-    finally {
-        $hash.Dispose()
-        $stream.Dispose()
-    }
+
+    $crcTable[$index] = $value
 }
 
-function Get-ArchiveManifest {
+function Get-Crc32 {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes
+    )
+
+    $value = [uint32]4294967295
+    foreach ($byte in $Bytes) {
+        $tableIndex = [int](([uint64]$value -bxor [uint64]$byte) -band [uint64]255)
+        $value = [uint32]([uint64]$script:crcTable[$tableIndex] -bxor [uint64]($value -shr 8))
+    }
+
+    return [uint32]([uint64]4294967295 -bxor [uint64]$value)
+}
+
+function Get-ArchiveRecords {
     param(
         [Parameter(Mandatory = $true)][string]$Path
     )
 
     $archive = [IO.Compression.ZipFile]::OpenRead($Path)
     try {
-        return @($archive.Entries | Sort-Object FullName | ForEach-Object { Get-EntryDigest -Entry $_ })
+        $records = @()
+        foreach ($entry in ($archive.Entries | Sort-Object FullName)) {
+            $stream = $entry.Open()
+            $memory = [IO.MemoryStream]::new()
+            try {
+                $stream.CopyTo($memory)
+                $bytes = [byte[]]$memory.ToArray()
+            }
+            finally {
+                $memory.Dispose()
+                $stream.Dispose()
+            }
+
+            $hash = [Security.Cryptography.SHA256]::Create()
+            try {
+                $digest = (($hash.ComputeHash($bytes) | ForEach-Object ToString x2) -join '')
+            }
+            finally {
+                $hash.Dispose()
+            }
+
+            $name = $entry.FullName.Replace('\', '/')
+            $nameBytes = [Text.Encoding]::UTF8.GetBytes($name)
+            if ($nameBytes.Length -gt [uint16]::MaxValue) {
+                throw "Archive entry name is too long: '$name'."
+            }
+
+            $records += [pscustomobject]@{
+                Name = $name
+                NameBytes = $nameBytes
+                Bytes = $bytes
+                Length = [uint32]$bytes.Length
+                Hash = $digest
+                Crc32 = Get-Crc32 -Bytes $bytes
+            }
+        }
+
+        return $records
     }
     finally {
         $archive.Dispose()
@@ -61,50 +113,89 @@ function Assert-SameManifest {
     }
 }
 
+function Write-CanonicalArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][object[]]$Records
+    )
+
+    $stream = [IO.File]::Create($Path)
+    $writer = [IO.BinaryWriter]::new($stream)
+    $centralRecords = [Collections.Generic.List[object]]::new()
+    try {
+        foreach ($record in $Records) {
+            $localOffset = [uint32]$stream.Position
+            $writer.Write([uint32]0x04034B50)
+            $writer.Write($zipVersion)
+            $writer.Write($utf8Flag)
+            $writer.Write($storedMethod)
+            $writer.Write($fixedDosTime)
+            $writer.Write($fixedDosDate)
+            $writer.Write([uint32]$record.Crc32)
+            $writer.Write([uint32]$record.Length)
+            $writer.Write([uint32]$record.Length)
+            $writer.Write([uint16]$record.NameBytes.Length)
+            $writer.Write([uint16]0)
+            $writer.Write($record.NameBytes)
+            $writer.Write($record.Bytes)
+
+            $centralRecords.Add([pscustomobject]@{
+                    Record = $record
+                    LocalOffset = $localOffset
+                })
+        }
+
+        $centralOffset = [uint32]$stream.Position
+        foreach ($central in $centralRecords) {
+            $record = $central.Record
+            $writer.Write([uint32]0x02014B50)
+            $writer.Write($zipVersion)
+            $writer.Write($zipVersion)
+            $writer.Write($utf8Flag)
+            $writer.Write($storedMethod)
+            $writer.Write($fixedDosTime)
+            $writer.Write($fixedDosDate)
+            $writer.Write([uint32]$record.Crc32)
+            $writer.Write([uint32]$record.Length)
+            $writer.Write([uint32]$record.Length)
+            $writer.Write([uint16]$record.NameBytes.Length)
+            $writer.Write([uint16]0)
+            $writer.Write([uint16]0)
+            $writer.Write([uint16]0)
+            $writer.Write([uint16]0)
+            $writer.Write([uint32]0)
+            $writer.Write([uint32]$central.LocalOffset)
+            $writer.Write($record.NameBytes)
+        }
+
+        $centralSize = [uint32]($stream.Position - $centralOffset)
+        $entryCount = [uint16]$centralRecords.Count
+        $writer.Write([uint32]0x06054B50)
+        $writer.Write([uint16]0)
+        $writer.Write([uint16]0)
+        $writer.Write($entryCount)
+        $writer.Write($entryCount)
+        $writer.Write($centralSize)
+        $writer.Write($centralOffset)
+        $writer.Write([uint16]0)
+    }
+    finally {
+        $writer.Dispose()
+    }
+}
+
 $temporaryPath = $null
 try {
     $resolvedPath = (Resolve-Path -LiteralPath $PackagePath -ErrorAction Stop).Path
     $temporaryPath = "$resolvedPath.normalizing-$([Guid]::NewGuid().ToString('N'))"
-    $fixedTimestamp = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
-    $manifest = Get-ArchiveManifest -Path $resolvedPath
+    $records = @(Get-ArchiveRecords -Path $resolvedPath)
+    Write-CanonicalArchive -Path $temporaryPath -Records $records
 
-    $source = [IO.Compression.ZipFile]::OpenRead($resolvedPath)
-    $destinationStream = [IO.File]::Create($temporaryPath)
-    try {
-        $destination = [IO.Compression.ZipArchive]::new(
-            $destinationStream,
-            [IO.Compression.ZipArchiveMode]::Create,
-            $false)
-        try {
-            foreach ($entry in ($source.Entries | Sort-Object FullName)) {
-                $normalized = $destination.CreateEntry($entry.FullName, [IO.Compression.CompressionLevel]::NoCompression)
-                $normalized.LastWriteTime = $fixedTimestamp
-
-                $input = $entry.Open()
-                $output = $normalized.Open()
-                try {
-                    $input.CopyTo($output)
-                }
-                finally {
-                    $output.Dispose()
-                    $input.Dispose()
-                }
-            }
-        }
-        finally {
-            $destination.Dispose()
-        }
-    }
-    finally {
-        $destinationStream.Dispose()
-        $source.Dispose()
-    }
-
-    $normalizedManifest = Get-ArchiveManifest -Path $temporaryPath
-    Assert-SameManifest -Expected $manifest -Actual $normalizedManifest
+    $normalizedRecords = @(Get-ArchiveRecords -Path $temporaryPath)
+    Assert-SameManifest -Expected $records -Actual $normalizedRecords
     Move-Item -LiteralPath $temporaryPath -Destination $resolvedPath -Force
 
-    Write-Output ("Normalized archive: {0} entries={1} timestamp={2} ZIP-local-time storage=uncompressed" -f $resolvedPath, $manifest.Count, $fixedTimestamp.ToString('yyyy-MM-dd HH:mm:ss'))
+    Write-Output ("Normalized archive: {0} entries={1} timestamp=1980-01-01 00:00:00 ZIP-local-time storage=uncompressed canonical-headers" -f $resolvedPath, $records.Count)
 }
 catch {
     if ($temporaryPath -and (Test-Path -LiteralPath $temporaryPath)) {
