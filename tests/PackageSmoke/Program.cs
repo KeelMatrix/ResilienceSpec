@@ -45,6 +45,28 @@ await RunAsync("A public system-clock wrapper cannot be wrapped as a determinist
     throw new InvalidOperationException("A public system-clock wrapper was accepted as a deterministic scenario clock.");
 });
 
+await RunAsync("A cross-assembly framework-name and assembly-name spoof cannot be wrapped as a deterministic clock", async () =>
+{
+    var provider = SpoofedTimeProviderFactory.Create();
+    if (provider.GetType().FullName != "Microsoft.Extensions.Time.Testing.FakeTimeProvider" ||
+        provider.GetType().Assembly.GetName().Name != "Microsoft.Extensions.TimeProvider.Testing")
+    {
+        throw new InvalidOperationException("The consumer spoof fixture did not preserve the reviewer's runtime identity shape.");
+    }
+
+    try
+    {
+        _ = new ResilienceScenarioClock(provider, static _ => { });
+    }
+    catch (ArgumentException exception) when (exception.Message.Contains("runtime identity", StringComparison.OrdinalIgnoreCase))
+    {
+        await Task.CompletedTask;
+        return;
+    }
+
+    throw new InvalidOperationException("A cross-assembly framework-name and assembly-name spoof was accepted as a deterministic scenario clock.");
+});
+
 await RunAsync("GET 503 -> 200 through the standard resilience handler", async () =>
 {
     var underlyingClock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));

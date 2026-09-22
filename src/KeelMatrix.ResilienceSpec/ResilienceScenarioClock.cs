@@ -12,8 +12,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// </para>
 /// <para>
 /// The wrapped provider's advance operation must synchronously dispatch the timers released by an advance. The package
-/// supports the exact <c>Microsoft.Extensions.Time.Testing.FakeTimeProvider</c> type; derived or delegating providers
-/// are rejected because they cannot prove that their time source is controllable.
+/// admits only the runtime <see cref="Type"/> identity resolved from the strong-named
+/// <c>Microsoft.Extensions.TimeProvider.Testing</c> assembly. Derived, delegating, and name-spoofed consumer types are
+/// rejected because they cannot prove that their time source is the supported framework fake.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenarioClock
@@ -24,7 +25,7 @@ public sealed class ResilienceScenarioClock
     /// <summary>Initializes a clock wrapper around a controllable provider.</summary>
     /// <param name="inner">The controllable provider that owns the virtual time.</param>
     /// <param name="advanceInner">The operation that advances <paramref name="inner"/>.</param>
-    /// <exception cref="ArgumentException"><paramref name="inner"/> is <see cref="TimeProvider.System"/>, is not the exact supported <c>FakeTimeProvider</c> type, or is already tracking another clock.</exception>
+    /// <exception cref="ArgumentException"><paramref name="inner"/> is <see cref="TimeProvider.System"/>, is not the exact runtime type identity of the supported <c>FakeTimeProvider</c>, or is already tracking another clock.</exception>
     public ResilienceScenarioClock(TimeProvider inner, Action<TimeSpan> advanceInner)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -46,8 +47,8 @@ public sealed class ResilienceScenarioClock
         if (!IsSupportedControllableProvider(inner))
         {
             throw new ArgumentException(
-                "Timing scenarios require an exact Microsoft.Extensions.Time.Testing.FakeTimeProvider instance. " +
-                "Derived or delegating TimeProvider wrappers cannot prove deterministic timing.",
+                "Timing scenarios require the exact runtime identity of Microsoft.Extensions.Time.Testing.FakeTimeProvider. " +
+                "Consumer-authored derived, delegating, or name-spoofed TimeProvider types cannot prove deterministic timing.",
                 nameof(inner));
         }
 
@@ -72,11 +73,29 @@ public sealed class ResilienceScenarioClock
 
     internal static bool IsTrackingProvider(TimeProvider provider) => provider is TrackingTimeProvider;
 
-    private static bool IsSupportedControllableProvider(TimeProvider provider)
+    private static readonly Type? SupportedControllableProviderType = ResolveSupportedControllableProviderType();
+
+    private static bool IsSupportedControllableProvider(TimeProvider provider) =>
+        SupportedControllableProviderType is { } supportedType && provider.GetType() == supportedType;
+
+    private static Type? ResolveSupportedControllableProviderType()
     {
-        var type = provider.GetType();
-        return string.Equals(type.FullName, "Microsoft.Extensions.Time.Testing.FakeTimeProvider", StringComparison.Ordinal) &&
-            string.Equals(type.Assembly.GetName().Name, "Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal);
+        try
+        {
+            return Type.GetType(
+                "Microsoft.Extensions.Time.Testing.FakeTimeProvider, Microsoft.Extensions.TimeProvider.Testing, " +
+                "PublicKeyToken=31bf3856ad364e35",
+                throwOnError: false,
+                ignoreCase: false);
+        }
+        catch (FileLoadException)
+        {
+            return null;
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
     }
 
     internal static long GetTimerCallbackVersion(TimeProvider provider) =>

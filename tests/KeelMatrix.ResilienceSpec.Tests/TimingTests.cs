@@ -510,6 +510,29 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public void ConsumerAuthoredProviderWithSpoofedFrameworkIdentityCannotObtainTimingAdmission()
+    {
+        var provider = SpoofedTimeProviderFactory.Create();
+
+        Assert.Equal("Microsoft.Extensions.Time.Testing.FakeTimeProvider", provider.GetType().FullName);
+        Assert.Equal("Microsoft.Extensions.TimeProvider.Testing", provider.GetType().Assembly.GetName().Name);
+
+        var failure = Assert.Throws<ArgumentException>(
+            () => new ResilienceScenarioClock(provider, static _ => { }));
+
+        Assert.Contains("runtime identity", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void OtherConsumerAuthoredTimeProviderCannotObtainTimingAdmission()
+    {
+        var failure = Assert.Throws<ArgumentException>(
+            () => new ResilienceScenarioClock(new ConsumerAuthoredTimeProvider(), static _ => { }));
+
+        Assert.Contains("consumer-authored", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task SupportedControllableClockRemainsTimingEligible()
     {
         var clock = Chains.CreateClock();
@@ -599,4 +622,8 @@ public sealed class DeterministicTimingTests
         Assert.True(scenario.Report.IsObservationCutoff);
         Assert.Equal(HttpAttemptOutcome.Abandoned, scenario.Report.Attempts[0].Outcome);
     }
+}
+
+internal sealed class ConsumerAuthoredTimeProvider : TimeProvider
+{
 }

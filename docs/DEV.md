@@ -111,8 +111,9 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 
 Timing assertions require a `ResilienceScenarioClock` around an exact
 `Microsoft.Extensions.Time.Testing.FakeTimeProvider` used by the client pipeline. Register `clock.TimeProvider` and
-pass that provider plus `clock.Advance` to the scenario. Derived or delegating providers, including wrappers around
-`TimeProvider.System`, are rejected so the scenario
+pass that provider plus `clock.Advance` to the scenario. Admission resolves the runtime `Type` from the strong-named
+testing assembly and compares that `Type` object for identity; `TimeProvider.System`, consumer-authored derived or
+delegating providers, and full-name/assembly-name spoofs are rejected so the scenario
 advances directly to the next tracked provider timer when available and uses `AdvanceStep` only when no timer deadline
 is available. It waits for scripted-downstream progress only after a timer fires; if a fired timer's continuation does
 not reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` without another virtual
