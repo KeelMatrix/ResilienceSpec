@@ -352,10 +352,12 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 - The package and its tests use portable .NET APIs. Hosted validation runs the package gate on Windows, Linux, and
   macOS, then runs explicit integration checks against both `9.8.0` and `10.10.0`.
 - Only `net8.0` is exercised. The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical
-  macOS hardware. The package gate packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time,
-  stores entries without compression, emits LF-only UTF-8 package text payloads, compares the `.nupkg` and `.snupkg`
-  SHA256 values, and inspects the normalized
-  artifacts before the clean consumer restore.
+  macOS hardware. The package gate requires the exact `.NET SDK 10.0.401` pinned by `global.json` with SDK roll-forward
+  disabled. It packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, stores entries
+  without compression, emits LF-only UTF-8 package text payloads, compares both archive SHA256 values, prints a sorted
+  entry-level manifest and its canonical identity SHA256, and inspects the normalized artifacts before the clean
+  consumer restore. The manifest includes the generated nuspec entries, so the recorded identity is reproducible in an
+  independent environment using the pinned toolchain.
 
 ## Telemetry
 

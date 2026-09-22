@@ -106,6 +106,22 @@ try {
         Assert-Contract ($LASTEXITCODE -eq 0) 'Unable to resolve the repository commit.'
     }
 
+    $globalJson = Get-Content -LiteralPath (Join-Path $repo 'global.json') -Raw | ConvertFrom-Json
+    $expectedSdkVersion = [string]$globalJson.sdk.version
+    $rollForward = [string]$globalJson.sdk.rollForward
+    Push-Location $repo
+    try {
+        $selectedSdkVersion = (& dotnet --version 2>&1 | Out-String).Trim()
+        $sdkExitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    Assert-Contract ($sdkExitCode -eq 0 -and $selectedSdkVersion -match '^\d+\.\d+\.\d+$') 'Unable to resolve the selected .NET SDK version.'
+    Assert-Contract ($rollForward -ceq 'disable') 'global.json must disable SDK roll-forward for package identity evidence.'
+    Assert-Contract ($selectedSdkVersion -ceq $expectedSdkVersion) "The selected .NET SDK '$selectedSdkVersion' does not match pinned global.json SDK '$expectedSdkVersion'."
+    Write-Output "Package identity toolchain: .NET SDK $selectedSdkVersion; global.json rollForward=$rollForward"
+
     foreach ($name in @(
             'NUGET_PACKAGES',
             'NUGET_HTTP_CACHE_PATH',

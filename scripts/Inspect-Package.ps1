@@ -138,6 +138,40 @@ function Write-EntryManifest {
     }
 }
 
+function Get-CanonicalArtifactManifest {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.Compression.ZipArchive]$PackageArchive,
+        [Parameter(Mandatory = $true)][System.IO.Compression.ZipArchive]$SymbolsArchive
+    )
+
+    $records = [Collections.Generic.List[string]]::new()
+    foreach ($archive in @(
+            [pscustomobject]@{ Kind = 'nupkg'; Value = $PackageArchive },
+            [pscustomobject]@{ Kind = 'snupkg'; Value = $SymbolsArchive })) {
+        foreach ($entry in ($archive.Value.Entries | Sort-Object FullName)) {
+            $name = $entry.FullName.Replace('\', '/')
+            Assert-Contract ($name -notmatch '[\r\n\t|]') "Archive entry name '$name' contains a manifest delimiter."
+            $null = $records.Add(('{0}|{1}|{2}' -f $archive.Kind, $name, (Get-EntryHash -Entry $entry)))
+        }
+    }
+
+    $lines = @($records | Sort-Object)
+    $manifestText = [string]::Join("`n", $lines) + "`n"
+    $utf8 = [Text.UTF8Encoding]::new($false)
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = (($hash.ComputeHash($utf8.GetBytes($manifestText)) | ForEach-Object ToString x2) -join '')
+    }
+    finally {
+        $hash.Dispose()
+    }
+
+    return [pscustomobject]@{
+        Lines = $lines
+        Hash = $digest
+    }
+}
+
 function Get-MetadataText {
     param(
         [Parameter(Mandatory = $true)][Xml.XmlDocument]$Document,
@@ -361,6 +395,20 @@ try {
         Write-EntryManifest -Archive $symbols -ArchiveDescription 'Symbols'
     }
     finally {
+        $symbols.Dispose()
+    }
+
+    $package = [IO.Compression.ZipFile]::OpenRead($PackagePath)
+    $symbols = [IO.Compression.ZipFile]::OpenRead($SymbolsPath)
+    try {
+        $manifest = Get-CanonicalArtifactManifest -PackageArchive $package -SymbolsArchive $symbols
+        foreach ($line in $manifest.Lines) {
+            Write-Output "Canonical artifact manifest: $line"
+        }
+        Write-Output "Canonical artifact identity SHA256: $($manifest.Hash)"
+    }
+    finally {
+        $package.Dispose()
         $symbols.Dispose()
     }
 
