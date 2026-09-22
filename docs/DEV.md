@@ -76,7 +76,7 @@ pwsh -NoProfile -File .\scripts\Invoke-PackageSmoke.ps1
 ```
 
 The script packs the shipping project twice with `--include-symbols`, normalizes both archives to the fixed ZIP-local
-timestamp `1980-01-01 00:00:00`, stored (uncompressed) entries, and LF-only UTF-8 XML/package metadata, and fails if
+timestamp `1980-01-01 00:00:00`, stored (uncompressed) entries, and LF-only UTF-8 package text payloads, and fails if
 either the `.nupkg` or `.snupkg` SHA256 changes between packs. It then
 copies the first normalized pair into `artifacts/packages/feed`, runs `scripts/Inspect-Package.ps1` against those exact
 artifacts, and restores `tests/PackageSmoke` with an isolated package cache and a generated `NuGet.config` whose
@@ -86,7 +86,7 @@ counts. The reproducible artifact hashes and smoke output are written to `artifa
 is ignored by Git and never packed.
 
 `scripts/Inspect-Package.ps1` enforces the package contract: normalized archive timestamps and stored entries, LF-only
-UTF-8 XML/package metadata and documentation entries, the exact archive entry set, package ID, version, authors,
+UTF-8 XML/package metadata, documentation, and license entries, the exact archive entry set, package ID, version, authors,
 description, tags, license, README, icon, repository and SourceLink
 commit, the single `net8.0` dependency group with its exact dependency versions, the portable PDB inside the symbol
 package, and the absence of any file that is not on the allowlist.

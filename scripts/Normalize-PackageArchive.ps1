@@ -49,7 +49,7 @@ function Get-CanonicalPayloadBytes {
         [Parameter(Mandatory = $true)][byte[]]$Bytes
     )
 
-    if ($Name -notmatch '\.(xml|nuspec|rels|psmdcp)$') {
+    if ($Name -notmatch '\.(xml|nuspec|rels|psmdcp)$' -and $Name -cne 'LICENSE') {
         return ,$Bytes
     }
 
