@@ -85,8 +85,10 @@ match the inspected package, and the consumer asserts the documented behaviour a
 counts. The reproducible artifact hashes and smoke output are written to `artifacts/packages/package-smoke.log`, which
 is ignored by Git and never packed.
 
-`Directory.Build.props` also maps the repository source root to `/_/` for deterministic compiler and portable-PDB paths;
-this keeps the compiled package payload independent of the checkout directory and operating system.
+`Directory.Build.props` maps the repository source root to `/_/` for deterministic compiler and portable-PDB paths;
+`Directory.Build.targets` runs `scripts/Normalize-GeneratedSources.ps1` before compilation so SDK-generated source
+line endings are also stable. Together these keep the compiled package payload independent of the checkout directory
+and operating system.
 
 `scripts/Inspect-Package.ps1` enforces the package contract: normalized archive timestamps and stored entries, LF-only
 UTF-8 XML/package metadata, documentation, and license entries, the exact archive entry set, package ID, version, authors,

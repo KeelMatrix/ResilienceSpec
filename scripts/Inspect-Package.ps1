@@ -370,7 +370,7 @@ try {
     Write-Output "Symbol inspection passed: $([IO.Path]::GetFileName($SymbolsPath)) SHA256=$symbolsHash"
     Write-Output "Normalized archive timestamps verified: $($normalizedArchiveTimestamp.ToString('yyyy-MM-dd HH:mm:ss')) ZIP local time"
     Write-Output 'Normalized archive storage verified: all entries are stored without compression'
-    Write-Output 'Canonical text payloads verified: UTF-8 XML/package metadata and documentation entries are LF-only'
+    Write-Output 'Canonical text payloads verified: UTF-8 package text entries are LF-only'
     Write-Output "SourceLink commit verified: $expectedCommit"
     exit 0
 }

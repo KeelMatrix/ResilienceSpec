@@ -1,4 +1,15 @@
 <Project>
+  <Target Name="NormalizeGeneratedSourceLineEndings"
+          BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_GeneratedSourceFile Include="$(IntermediateOutputPath)**\*.g.cs" />
+      <_GeneratedSourceFile Include="$(IntermediateOutputPath)**\*.AssemblyInfo.cs" />
+      <_GeneratedSourceFile Include="$(IntermediateOutputPath)**\*.AssemblyAttributes.cs" />
+    </ItemGroup>
+
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildThisFileDirectory)scripts/Normalize-GeneratedSources.ps1&quot; -Path &quot;%(_GeneratedSourceFile.Identity)&quot;" />
+  </Target>
+
   <PropertyGroup Condition="'$(IsPackable)' == 'true'">
     <Authors>KeelMatrix</Authors>
     <RepositoryType>git</RepositoryType>
