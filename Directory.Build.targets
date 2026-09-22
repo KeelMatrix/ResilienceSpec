@@ -13,6 +13,7 @@
   <PropertyGroup Condition="'$(IsPackable)' == 'true'">
     <Authors>KeelMatrix</Authors>
     <RepositoryType>git</RepositoryType>
+    <RepositoryBranch>refs/heads/main</RepositoryBranch>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>

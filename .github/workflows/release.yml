@@ -99,6 +99,7 @@ jobs:
             -p:PackageVersion=${{ steps.release-version.outputs.version }} `
             -p:SourceRevisionId=$env:GITHUB_SHA `
             -p:RepositoryCommit=$env:GITHUB_SHA `
+            -p:RepositoryBranch=refs/heads/main `
             -p:NuGetAudit=false `
             --output $packageDirectory
           if ($LASTEXITCODE -ne 0) {

@@ -106,6 +106,7 @@ try {
         "-p:PackageVersion=$PackageVersion",
         "-p:SourceRevisionId=$expectedCommit",
         "-p:RepositoryCommit=$expectedCommit",
+        '-p:RepositoryBranch=refs/heads/main',
         '-p:NuGetAudit=false',
         '-o', $packageFeed)
 

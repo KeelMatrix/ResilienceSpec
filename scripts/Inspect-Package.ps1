@@ -12,6 +12,8 @@ param(
 
     [string]$ExpectedRepositoryUrl = 'https://github.com/KeelMatrix/ResilienceSpec',
 
+    [string]$ExpectedRepositoryBranch = 'refs/heads/main',
+
     [string]$ExpectedIconPath
 )
 
@@ -293,6 +295,7 @@ function Assert-Metadata {
     Assert-Contract ($null -ne $repository) 'Package repository metadata is missing.'
     Assert-Contract ($repository.GetAttribute('type') -ceq 'git') 'Package repository type must be git.'
     Assert-Contract ($repository.GetAttribute('url') -ceq $ExpectedRepositoryUrl) 'Package repository URL is incorrect.'
+    Assert-Contract ($repository.GetAttribute('branch') -ceq $ExpectedRepositoryBranch) "Package repository branch must be '$ExpectedRepositoryBranch'."
     Assert-Contract ($repository.GetAttribute('commit').ToLowerInvariant() -ceq $ExpectedCommit) "Package repository commit must be '$ExpectedCommit'."
 
     $groups = @(Get-MetadataNode -Document $Document -XPath '/n:package/n:metadata/n:dependencies/n:group')

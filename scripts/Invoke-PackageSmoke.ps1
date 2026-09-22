@@ -50,6 +50,32 @@ function Assert-Contract {
     }
 }
 
+function Get-ArchiveEntryHash {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$EntryName
+    )
+
+    $archive = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
+    try {
+        $matches = @($archive.Entries | Where-Object { $_.FullName.Replace('\\', '/') -ceq $EntryName })
+        Assert-Contract ($matches.Count -eq 1) "Archive '$ArchivePath' must contain exactly one '$EntryName' entry."
+
+        $stream = $matches[0].Open()
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try {
+            return (($hash.ComputeHash($stream) | ForEach-Object ToString x2) -join '')
+        }
+        finally {
+            $hash.Dispose()
+            $stream.Dispose()
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 function Remove-TemporaryDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -153,6 +179,7 @@ try {
         "-p:PackageVersion=$PackageVersion",
         "-p:SourceRevisionId=$expectedCommit",
         "-p:RepositoryCommit=$expectedCommit",
+        '-p:RepositoryBranch=refs/heads/main',
         '-p:NuGetAudit=false')
 
     Write-Output 'Pack the shipping project twice for reproducibility'
@@ -177,6 +204,15 @@ try {
     Write-Output "Reproducible symbols SHA256: $symbolsHash / $secondSymbolsHash"
     Assert-Contract ($packageHash -ceq $secondPackageHash) 'Two normalized package archives differ.'
     Assert-Contract ($symbolsHash -ceq $secondSymbolsHash) 'Two normalized symbol archives differ.'
+
+    $firstPackageNuspecHash = Get-ArchiveEntryHash -ArchivePath $firstPackage -EntryName 'KeelMatrix.ResilienceSpec.nuspec'
+    $secondPackageNuspecHash = Get-ArchiveEntryHash -ArchivePath $secondPackage -EntryName 'KeelMatrix.ResilienceSpec.nuspec'
+    $firstSymbolsNuspecHash = Get-ArchiveEntryHash -ArchivePath $firstSymbols -EntryName 'KeelMatrix.ResilienceSpec.nuspec'
+    $secondSymbolsNuspecHash = Get-ArchiveEntryHash -ArchivePath $secondSymbols -EntryName 'KeelMatrix.ResilienceSpec.nuspec'
+    Write-Output "Reproducible package nuspec SHA256: $firstPackageNuspecHash / $secondPackageNuspecHash"
+    Write-Output "Reproducible symbols nuspec SHA256: $firstSymbolsNuspecHash / $secondSymbolsNuspecHash"
+    Assert-Contract ($firstPackageNuspecHash -ceq $secondPackageNuspecHash) 'Two normalized package nuspec entries differ.'
+    Assert-Contract ($firstSymbolsNuspecHash -ceq $secondSymbolsNuspecHash) 'Two normalized symbol nuspec entries differ.'
 
     Copy-Item -LiteralPath $firstPackage -Destination (Join-Path $packageFeed $nupkgName) -Force
     Copy-Item -LiteralPath $firstSymbols -Destination (Join-Path $packageFeed $snupkgName) -Force
