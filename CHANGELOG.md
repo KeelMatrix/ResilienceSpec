@@ -15,9 +15,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   distinct.
 - Direct scripted-handler use now rejects untracked time providers instead of presenting wall-clock timing as
   deterministic.
-- `ResilienceScenarioClock` resolves the supported `FakeTimeProvider` through the strong-named testing assembly and
-  compares exact runtime `Type` identity. `TimeProvider.System`, consumer-authored derived/delegating providers, and
-  full-name/assembly-name spoofs are rejected, so wall-clock timing cannot be presented as deterministic evidence.
+- `ResilienceScenarioClock` admits only the `FakeTimeProvider` type loaded from the strong-name-token-checked
+  `Microsoft.Extensions.TimeProvider.Testing.dll` at the dependency path beside the package assembly. `TimeProvider.System`,
+  consumer-authored derived/delegating providers, same-name assemblies from another path, and resolver-hook substitutions
+  are rejected; a consumer-replaced file at that exact path is outside this provenance check.
 - Standard validation runs the core and integration test projects sequentially, avoiding cross-project scheduler
   contention while preserving the bounded fail-closed timing watchdog.
 - Package validation produces byte-identical `.nupkg` and `.snupkg` artifacts for a fixed commit by normalizing ZIP
@@ -36,9 +37,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   "this unsafe request was not retried", final response or exception, and cancellation outcomes, with failures that
   print the observed timeline; pending observation cutoffs remain distinct from genuine request settlement.
 - Deterministic timing assertions for retry delays, `Retry-After` deltas, per-attempt timeouts, and total-request
-  timeouts, driven by the exact runtime identity of the supported `FakeTimeProvider`; timing assertions are
-  unavailable, and fail with `MissingTimeProviderException`, when no supported fake clock is supplied. Consumer-authored
-  derived, delegating, and name-spoofed providers cannot obtain timing eligibility.
+  timeouts, driven by the `FakeTimeProvider` type from the strong-name-token-checked testing assembly at the dependency
+  path beside the package assembly. Timing assertions are unavailable, and fail with `MissingTimeProviderException`,
+  when no supported fake clock is supplied. Consumer-authored derived, delegating, same-name cross-assembly, and
+  resolver-hook-spoofed providers cannot obtain timing eligibility; a consumer-replaced file at that exact path is outside
+  this provenance check.
 - A fail-closed virtual-time progress contract based on `ResilienceScenarioClock`: when a provider timer fires but its
   continuation does not reach the scripted downstream within the observation window, the scenario returns an honest
   pending observation instead of advancing past work that has not progressed.

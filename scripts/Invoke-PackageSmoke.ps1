@@ -63,6 +63,7 @@ function Remove-TemporaryDirectory {
 $repo = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repo 'src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj'
 $smokeProject = Join-Path $repo 'tests/PackageSmoke/PackageSmoke.csproj'
+$consumerSpoofProject = Join-Path $repo 'tests/PackageSmoke/ConsumerSpoof/ConsumerSpoof.csproj'
 $inspectionScript = Join-Path $PSScriptRoot 'Inspect-Package.ps1'
 $normalizationScript = Join-Path $PSScriptRoot 'Normalize-PackageArchive.ps1'
 if ([string]::IsNullOrWhiteSpace($ArtifactsDirectory)) {
@@ -82,11 +83,22 @@ $httpCache = Join-Path $smokeRoot 'http-cache'
 $scratch = Join-Path $smokeRoot 'scratch'
 $pluginsCache = Join-Path $smokeRoot 'plugins'
 $dotnetHome = Join-Path $smokeRoot 'dotnet-home'
+$consumerSpoofOutput = Join-Path $smokeRoot 'consumer-spoof'
 $smokeLog = Join-Path $ArtifactsDirectory 'package-smoke.log'
 $savedEnvironment = @{}
 
 try {
-    New-Item -ItemType Directory -Path $packageFeed, $consumerPackages, $httpCache, $scratch, $pluginsCache, $dotnetHome, $firstPack, $secondPack -Force | Out-Null
+    New-Item -ItemType Directory -Path $packageFeed, $consumerPackages, $httpCache, $scratch, $pluginsCache, $dotnetHome, $firstPack, $secondPack, $consumerSpoofOutput -Force | Out-Null
+
+    $consumerSpoofPublicKey = Join-Path $consumerSpoofOutput 'MicrosoftPublic.snk'
+    [IO.File]::WriteAllBytes(
+        $consumerSpoofPublicKey,
+        [Convert]::FromHexString(
+            '0024000004800000940000000602000000240000525341310004000001000100' +
+            'B5FC90E7027F67871E773A8FDE8938C81DD402BA65B9201D60593E96C492651E' +
+            '889CC13F1415EBB53FAC1131AE0BD333C5EE6021672D9718EA31A8AEBD0DA007' +
+            '2F25D87DBA6FC90FFD598ED4DA35E44C398C454307E8E33B8426143DAEC9F596' +
+            '836F97C8F74750E5975C64E2189F45DEF46B2A2B1247ADC3652BF5C308055DA9'))
 
     $expectedCommit = $ExpectedRepositoryCommit
     if ([string]::IsNullOrWhiteSpace($expectedCommit)) {
@@ -103,7 +115,8 @@ try {
             'DOTNET_SKIP_FIRST_TIME_EXPERIENCE',
             'DOTNET_CLI_TELEMETRY_OPTOUT',
             'DOTNET_NOLOGO',
-            'KEELMATRIX_NO_TELEMETRY')) {
+            'KEELMATRIX_NO_TELEMETRY',
+            'RESILIENCE_SPEC_CONSUMER_SPOOF_PATH')) {
         $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
 
@@ -111,6 +124,12 @@ try {
     [Environment]::SetEnvironmentVariable('DOTNET_CLI_TELEMETRY_OPTOUT', '1', 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_NOLOGO', '1', 'Process')
     [Environment]::SetEnvironmentVariable('KEELMATRIX_NO_TELEMETRY', '1', 'Process')
+
+    Write-Output 'Build the isolated consumer spoof fixture'
+    Invoke-Checked 'dotnet' @(
+        'build', $consumerSpoofProject, '-c', 'Release',
+        "-p:ConsumerSpoofPublicKeyFile=$consumerSpoofPublicKey",
+        '-p:NuGetAudit=false', '-o', $consumerSpoofOutput)
 
     $packArguments = @(
         'pack', $project, '-c', 'Release',
@@ -188,6 +207,7 @@ try {
     [Environment]::SetEnvironmentVariable('NUGET_SCRATCH', $scratch, 'Process')
     [Environment]::SetEnvironmentVariable('NUGET_PLUGINS_CACHE_PATH', $pluginsCache, 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_CLI_HOME', $dotnetHome, 'Process')
+    [Environment]::SetEnvironmentVariable('RESILIENCE_SPEC_CONSUMER_SPOOF_PATH', (Join-Path $consumerSpoofOutput 'Microsoft.Extensions.TimeProvider.Testing.dll'), 'Process')
 
     Invoke-Checked 'dotnet' @(
         'restore', $smokeProject,

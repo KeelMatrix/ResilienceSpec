@@ -215,11 +215,12 @@ var scenario = new ResilienceScenario(script, clock.TimeProvider, clock.Advance)
 the scenario. The wrapper records which provider timers fire during each advance, so the scenario can distinguish an
 ordinary intermediate delay from a timer whose continuation has not reached the scripted downstream. The adapter
 fails configuration with a `MissingTimeProviderException` when the scenario clock is missing or a different provider
-instance is registered. `ResilienceScenarioClock` resolves the supported `FakeTimeProvider` through the runtime loader
-using the strong-named testing assembly identity, then requires exact runtime `Type` identity. `TimeProvider.System`,
-every consumer-authored derived or delegating `TimeProvider`, and a type that spoofs the framework full name and
-assembly simple name are rejected. A consumer-authored type cannot satisfy the admission check because its runtime
-`Type` object is not the loader-resolved framework type; unsupported providers cannot produce a timing-eligible report.
+instance is registered. Admission loads `Microsoft.Extensions.TimeProvider.Testing.dll` from the exact directory beside
+the package assembly, checks the expected Microsoft strong-name public-key token, and compares the provider type with
+`FakeTimeProvider` from that explicitly loaded assembly. `TimeProvider.System`, consumer-authored derived or delegating
+providers, same-name assemblies loaded from another path, and resolver-hook substitutions are rejected. This
+provenance check does not attest a consumer-replaced file at that exact dependency path; unsupported providers cannot
+produce a timing-eligible report.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances to the next tracked provider timer when one is
 available and otherwise uses `AdvanceStep` as a fallback. It waits for scripted-downstream progress only after a timer
@@ -286,9 +287,10 @@ its single-consumer lease until the late request and cancellation callbacks fini
   `AdvanceStep`. When no timer deadline is available, the fallback step remains the documented observation bound.
 - **Timing scenarios require the exact supported runtime type.** Wrap an exact
   `Microsoft.Extensions.Time.Testing.FakeTimeProvider` instance with `ResilienceScenarioClock` and register
-  `clock.TimeProvider`. Admission uses the loader-resolved runtime `Type` from the strong-named testing assembly, so
-  raw, derived, delegating, and full-name/assembly-name-spoofed consumer providers are rejected instead of claiming a
-  deterministic timing result.
+  `clock.TimeProvider`. Admission uses the type loaded from the strong-name-checked testing assembly at the dependency
+  path beside the package assembly, so raw, derived, delegating, same-name cross-assembly, and resolver-hook-spoofed
+  consumer providers are rejected instead of claiming a deterministic timing result. The check does not attest a file
+  a consumer replaces at that exact path.
 - **`Retry-After` is asserted for delta responses only.** A response without `Retry-After` is governed by the
   configured backoff, which `ShouldHaveRetryDelay` verifies.
 
@@ -373,7 +375,7 @@ evidence covers the verification path and not the optional telemetry transport.
 | Symptom | Cause and next step |
 | --- | --- |
 | `MissingTimeProviderException` when creating a client | The scenario has a controllable clock but the container has no matching tracking provider. Register `clock.TimeProvider` with `services.AddSingleton<TimeProvider>(clock.TimeProvider)`, or set `RequireRegisteredTimeProvider` to `false` when the pipeline time source is configured another way. |
-| `MissingTimeProviderException` from a timing scenario | Use an exact `Microsoft.Extensions.Time.Testing.FakeTimeProvider`, wrap it with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)`, and pass `clock.TimeProvider` plus `clock.Advance` to the scenario. Consumer-authored derived, delegating, and name-spoofed providers are rejected by runtime type identity. |
+| `MissingTimeProviderException` from a timing scenario | Use an exact `Microsoft.Extensions.Time.Testing.FakeTimeProvider`, wrap it with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)`, and pass `clock.TimeProvider` plus `clock.Advance` to the scenario. Admission requires the type from the strong-name-token-checked testing assembly at the path beside the package assembly; derived, delegating, same-name cross-assembly, and resolver-hook-spoofed providers are rejected. |
 | `ConcurrentScriptUseException` | Two in-flight requests consumed one script. Create one scenario per logical call, or opt in to `ScriptConcurrency.AllowConcurrent`. |
 | `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |
 | `AttemptStateOverflowException` | The client under test served more attempts than `HttpAttemptReport.MaximumRecordedAttempts`, so the recorded timeline is incomplete and cannot judge attempt state. Lower the client's configured maximum attempts; a script cannot describe more attempts than `HttpFaultScript.MaximumSteps` steps. |

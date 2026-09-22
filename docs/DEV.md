@@ -121,15 +121,17 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 
 Timing assertions require a `ResilienceScenarioClock` around an exact
 `Microsoft.Extensions.Time.Testing.FakeTimeProvider` used by the client pipeline. Register `clock.TimeProvider` and
-pass that provider plus `clock.Advance` to the scenario. Admission resolves the runtime `Type` from the strong-named
-testing assembly and compares that `Type` object for identity; `TimeProvider.System`, consumer-authored derived or
-delegating providers, and full-name/assembly-name spoofs are rejected so the scenario
-advances directly to the next tracked provider timer when available and uses `AdvanceStep` only when no timer deadline
-is available. It waits for scripted-downstream progress only after a timer fires; if a fired timer's continuation does
-not reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` without another virtual
-advance. The observation window is a watchdog, not a timing measurement. A virtual-budget or no-advance cutoff returns `Pending` and is not reported as
-request settlement. Cancellation cleanup is separately bounded by `ResilienceScenarioOptions.CleanupTimeout`; the
-single-consumer lease remains held until late cleanup finishes.
+pass that provider plus `clock.Advance` to the scenario. Admission explicitly loads
+`Microsoft.Extensions.TimeProvider.Testing.dll` from the dependency path beside the package assembly, checks the
+expected Microsoft strong-name public-key token, and compares the provider type with the type from that assembly;
+`TimeProvider.System`, consumer-authored derived or delegating providers, same-name assemblies from another path, and
+resolver-hook substitutions are rejected. The check does not attest a consumer-replaced file at that exact path. The
+scenario advances directly to the next tracked provider timer when available and uses `AdvanceStep` only when no timer
+deadline is available. It waits for scripted-downstream progress only after a timer fires; if a fired timer's
+continuation does not reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` without
+another virtual advance. The observation window is a watchdog, not a timing measurement. A virtual-budget or no-advance
+cutoff returns `Pending` and is not reported as request settlement. Cancellation cleanup is separately bounded by
+`ResilienceScenarioOptions.CleanupTimeout`; the single-consumer lease remains held until late cleanup finishes.
 
 `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
 the wait runs on the injected clock, so it is deliberately not exposed.

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Microsoft.Extensions.TimeProvider.Testing</AssemblyName>
+    <RootNamespace>Microsoft.Extensions.Time.Testing</RootNamespace>
+    <Version>10.10.0</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <SignAssembly Condition="'$(ConsumerSpoofPublicKeyFile)' != ''">true</SignAssembly>
+    <PublicSign Condition="'$(ConsumerSpoofPublicKeyFile)' != ''">true</PublicSign>
+    <AssemblyOriginatorKeyFile Condition="'$(ConsumerSpoofPublicKeyFile)' != ''">$(ConsumerSpoofPublicKeyFile)</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+</Project>

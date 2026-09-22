@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Runtime.Loader;
+
 namespace KeelMatrix.ResilienceSpec;
 
 /// <summary>
@@ -12,9 +15,11 @@ namespace KeelMatrix.ResilienceSpec;
 /// </para>
 /// <para>
 /// The wrapped provider's advance operation must synchronously dispatch the timers released by an advance. The package
-/// admits only the runtime <see cref="Type"/> identity resolved from the strong-named
-/// <c>Microsoft.Extensions.TimeProvider.Testing</c> assembly. Derived, delegating, and name-spoofed consumer types are
-/// rejected because they cannot prove that their time source is the supported framework fake.
+/// admits only the runtime <see cref="Type"/> identity loaded from the
+/// <c>Microsoft.Extensions.TimeProvider.Testing.dll</c> file beside the package assembly, after checking the expected
+/// Microsoft strong-name public-key token. Derived, delegating, and name-spoofed consumer types are rejected because
+/// their assembly provenance is not that resolved dependency path; the check does not attest a file that a consumer
+/// replaces at that exact path.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenarioClock
@@ -25,7 +30,7 @@ public sealed class ResilienceScenarioClock
     /// <summary>Initializes a clock wrapper around a controllable provider.</summary>
     /// <param name="inner">The controllable provider that owns the virtual time.</param>
     /// <param name="advanceInner">The operation that advances <paramref name="inner"/>.</param>
-    /// <exception cref="ArgumentException"><paramref name="inner"/> is <see cref="TimeProvider.System"/>, is not the exact runtime type identity of the supported <c>FakeTimeProvider</c>, or is already tracking another clock.</exception>
+    /// <exception cref="ArgumentException"><paramref name="inner"/> is <see cref="TimeProvider.System"/>, is not the exact runtime type loaded from the resolved supported <c>FakeTimeProvider</c> assembly, or is already tracking another clock.</exception>
     public ResilienceScenarioClock(TimeProvider inner, Action<TimeSpan> advanceInner)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -73,6 +78,12 @@ public sealed class ResilienceScenarioClock
 
     internal static bool IsTrackingProvider(TimeProvider provider) => provider is TrackingTimeProvider;
 
+    private const string SupportedControllableProviderTypeName = "Microsoft.Extensions.Time.Testing.FakeTimeProvider";
+    private const string SupportedControllableProviderAssemblyName = "Microsoft.Extensions.TimeProvider.Testing";
+    private const string SupportedControllableProviderAssemblyFileName = "Microsoft.Extensions.TimeProvider.Testing.dll";
+    private static readonly byte[] SupportedControllableProviderPublicKeyToken =
+        Convert.FromHexString("31BF3856AD364E35");
+
     private static readonly Type? SupportedControllableProviderType = ResolveSupportedControllableProviderType();
 
     private static bool IsSupportedControllableProvider(TimeProvider provider) =>
@@ -82,13 +93,49 @@ public sealed class ResilienceScenarioClock
     {
         try
         {
-            return Type.GetType(
-                "Microsoft.Extensions.Time.Testing.FakeTimeProvider, Microsoft.Extensions.TimeProvider.Testing, " +
-                "PublicKeyToken=31bf3856ad364e35",
+            var packageAssemblyPath = typeof(ResilienceScenarioClock).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(packageAssemblyPath))
+            {
+                return null;
+            }
+
+            var packageDirectory = Path.GetDirectoryName(packageAssemblyPath);
+            if (string.IsNullOrWhiteSpace(packageDirectory))
+            {
+                return null;
+            }
+
+            var trustedAssemblyPath = Path.Combine(packageDirectory, SupportedControllableProviderAssemblyFileName);
+            if (!File.Exists(trustedAssemblyPath))
+            {
+                return null;
+            }
+
+            var fileAssemblyName = AssemblyName.GetAssemblyName(trustedAssemblyPath);
+            if (!HasSupportedAssemblyIdentity(fileAssemblyName))
+            {
+                return null;
+            }
+
+            var loadContext = AssemblyLoadContext.GetLoadContext(typeof(ResilienceScenarioClock).Assembly);
+            if (loadContext is null)
+            {
+                return null;
+            }
+
+            var trustedAssembly = loadContext.LoadFromAssemblyPath(trustedAssemblyPath);
+            if (!PathsEqual(trustedAssembly.Location, trustedAssemblyPath) ||
+                !HasSupportedAssemblyIdentity(trustedAssembly.GetName()))
+            {
+                return null;
+            }
+
+            return trustedAssembly.GetType(
+                SupportedControllableProviderTypeName,
                 throwOnError: false,
                 ignoreCase: false);
         }
-        catch (FileLoadException)
+        catch (ArgumentException)
         {
             return null;
         }
@@ -96,7 +143,35 @@ public sealed class ResilienceScenarioClock
         {
             return null;
         }
+        catch (BadImageFormatException)
+        {
+            return null;
+        }
+        catch (FileLoadException)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
+
+    private static bool HasSupportedAssemblyIdentity(AssemblyName assemblyName) =>
+        string.Equals(assemblyName.Name, SupportedControllableProviderAssemblyName, StringComparison.Ordinal) &&
+        assemblyName.GetPublicKeyToken() is { } token &&
+        token.AsSpan().SequenceEqual(SupportedControllableProviderPublicKeyToken);
+
+    private static bool PathsEqual(string left, string right) =>
+        !string.IsNullOrWhiteSpace(left) &&
+        string.Equals(
+            Path.GetFullPath(left),
+            Path.GetFullPath(right),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     internal static long GetTimerCallbackVersion(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).TimerCallbackVersion;

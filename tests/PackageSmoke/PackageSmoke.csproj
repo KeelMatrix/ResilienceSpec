@@ -11,8 +11,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="ConsumerSpoof/**/*.cs" />
+    <EmbeddedResource Remove="ConsumerSpoof/**/*" />
+    <None Remove="ConsumerSpoof/**/*" />
     <PackageReference Include="KeelMatrix.ResilienceSpec" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
-    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <!-- The cold-load child process loads the authentic assembly explicitly after its spoof probe. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" ExcludeAssets="compile;runtime;build;native;contentfiles;analyzers;buildtransitive" PrivateAssets="all" />
   </ItemGroup>
 </Project>
