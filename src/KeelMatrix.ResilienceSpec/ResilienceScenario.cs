@@ -100,7 +100,8 @@ public sealed class ResilienceScenario : IDisposable
     /// <returns>
     /// The outcome of the run, including the final response or exception and the attempt report. If observation or
     /// bounded cancellation cleanup expires first, the outcome is <see cref="ResilienceResultKind.Pending"/> and the
-    /// report marks <see cref="HttpAttemptReport.IsObservationCutoff"/> rather than claiming request settlement.
+    /// report marks <see cref="HttpAttemptReport.IsObservationCutoff"/> rather than claiming request settlement. An
+    /// attempt ended by that cleanup has no duration because cleanup is not timeout evidence.
     /// </returns>
     public async Task<ResilienceResult> SendAsync(
         HttpClient client,
@@ -192,6 +193,7 @@ public sealed class ResilienceScenario : IDisposable
 
             if (!settled)
             {
+                Handler.Observer.MarkObservationCleanupStarted();
                 var cleanup = BeginCleanup(linked, pending);
                 var cleanupCompleted = await CompleteWithinAsync(cleanup, Options.CleanupTimeout).ConfigureAwait(false);
                 Handler.Observer.MarkObservationCutoff();
@@ -225,6 +227,7 @@ public sealed class ResilienceScenario : IDisposable
         }
         catch
         {
+            Handler.Observer.MarkObservationCleanupStarted();
             cleanupOwnsLease = await CleanupPendingAsync(logicalCall, linked, pending).ConfigureAwait(false);
             Handler.Observer.MarkObservationCutoff();
             throw;

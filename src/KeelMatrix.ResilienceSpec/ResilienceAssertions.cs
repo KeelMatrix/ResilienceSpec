@@ -157,7 +157,7 @@ public static class ResilienceAssertions
     {
         ArgumentNullException.ThrowIfNull(report);
         report.RequireCompleteTimeline(nameof(ShouldRespectRetryAfter));
-        RequireTiming(report, nameof(ShouldRespectRetryAfter));
+        RequireCompleteAttemptTiming(report, nameof(ShouldRespectRetryAfter));
 
         var advertised = false;
         for (var index = 0; index < report.AttemptCount; index++)
@@ -209,7 +209,7 @@ public static class ResilienceAssertions
     {
         ArgumentNullException.ThrowIfNull(report);
         report.RequireCompleteTimeline(nameof(ShouldHaveRetryDelay));
-        RequireTiming(report, nameof(ShouldHaveRetryDelay));
+        RequireCompleteAttemptTiming(report, nameof(ShouldHaveRetryDelay));
 
         if (report.AttemptCount < 2)
         {
@@ -247,7 +247,7 @@ public static class ResilienceAssertions
     /// <returns>The same report, so assertions can be chained.</returns>
     /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
-    /// <exception cref="ResilienceAssertionException">The attempt is missing or lasted a different time.</exception>
+    /// <exception cref="ResilienceAssertionException">The attempt is missing, has incomplete timing evidence, or lasted a different time.</exception>
     public static HttpAttemptReport ShouldHaveAttemptDuration(this HttpAttemptReport report, int ordinal, TimeSpan expected)
     {
         ArgumentNullException.ThrowIfNull(report);
@@ -264,13 +264,22 @@ public static class ResilienceAssertions
             }
         }
 
-        if (attempt?.Duration is not { } observed)
+        if (attempt is null)
         {
             report.RecordAssertion(false);
             throw Fail(
                 report,
                 $"attempt #{ordinal} to be recorded",
                 "no attempt with that ordinal reached the scripted downstream");
+        }
+
+        if (attempt.Duration is not { } observed)
+        {
+            report.RecordAssertion(false);
+            throw Fail(
+                report,
+                $"attempt #{ordinal} to have complete timing evidence",
+                "incomplete timing evidence: observation cleanup ended the attempt before a genuine completion");
         }
 
         var step = report.ObservationStep!.Value;
@@ -407,20 +416,7 @@ public static class ResilienceAssertions
 
     private static void RequireTiming(HttpAttemptReport report, string assertion)
     {
-        var timed = report.HasTiming && report.AttemptCount > 0;
-        if (timed)
-        {
-            foreach (var attempt in report.Attempts)
-            {
-                if (attempt.StartedAfter is null || attempt.Duration is null)
-                {
-                    timed = false;
-                    break;
-                }
-            }
-        }
-
-        if (timed)
+        if (report.HasTiming && report.AttemptCount > 0)
         {
             return;
         }
@@ -430,6 +426,24 @@ public static class ResilienceAssertions
             $"{assertion} requires an injected clock and at least one timed attempt. Create a ResilienceScenarioClock around the " +
             "controllable provider, pass clock.TimeProvider and clock.Advance to the scenario, and let the same clock drive the " +
             "resilience pipeline. The package never falls back to wall-clock sleeps or elapsed-time tolerances.");
+    }
+
+    private static void RequireCompleteAttemptTiming(HttpAttemptReport report, string assertion)
+    {
+        RequireTiming(report, assertion);
+        foreach (var attempt in report.Attempts)
+        {
+            if (attempt.StartedAfter is not null && attempt.Duration is not null)
+            {
+                continue;
+            }
+
+            report.RecordAssertion(false);
+            throw Fail(
+                report,
+                $"{assertion} to have complete timing evidence",
+                $"attempt #{attempt.Ordinal} has no genuine completion duration");
+        }
     }
 
     private static TimeSpan Interval(HttpAttempt attempt, HttpAttempt next) =>

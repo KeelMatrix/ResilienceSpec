@@ -102,7 +102,7 @@ public sealed class ResilienceResult : IDisposable
             return ResilienceResultKind.Canceled;
         }
 
-        if (exception is TimeoutException || IsSupportedStrategyTimeout(exception))
+        if (exception is TimeoutException || IsSupportedStrategyTimeout(exception) || IsNativeHttpClientTimeout(exception))
         {
             return ResilienceResultKind.Timeout;
         }
@@ -127,6 +127,9 @@ public sealed class ResilienceResult : IDisposable
 
         return false;
     }
+
+    private static bool IsNativeHttpClientTimeout(Exception exception) =>
+        exception is OperationCanceledException && Inner<TimeoutException>(exception) is not null;
 
     private static TException? Inner<TException>(Exception exception)
         where TException : Exception

@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Observation-cutoff cleanup no longer supplies a virtual duration that can satisfy a per-attempt timeout assertion;
+  genuinely completed earlier attempts remain independently assertable.
+- Native `HttpClient.Timeout` cancellation is classified as `Timeout`, while caller and unrelated cancellations remain
+  distinct.
+- Direct scripted-handler use now rejects untracked time providers instead of presenting wall-clock timing as
+  deterministic.
+- Corrected the root README examples to pass the tracked `clock.TimeProvider`.
+
 ## [0.1.0] - Planned
 
 ### Added

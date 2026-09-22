@@ -83,10 +83,13 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   time instead of allowing another advance. Intermediate virtual delays stay wall-clock cheap because they do not
   require a watchdog wait before a timer fires.
 - When the virtual budget or pending observation expires, `SendAsync` returns `Pending` and the report marks
-  `IsObservationCutoff`; `ShouldHaveSettledAtVirtualTime` accepts only genuine request settlement. Cleanup is bounded
-  by `ResilienceScenarioOptions.CleanupTimeout`; late completion is observed and late responses are disposed, but
-  arbitrary user code that ignores cancellation cannot be forcibly terminated. The single-consumer lease remains held
-  until late cleanup completes, so reuse fails clearly during that window and is safe only afterward.
+  `IsObservationCutoff`; `ShouldHaveSettledAtVirtualTime` accepts only genuine request settlement. An attempt ended by
+  observation cleanup has incomplete timing evidence, so `ShouldHaveAttemptDuration` rejects it instead of treating
+  cleanup's virtual duration as a configured timeout; earlier genuinely completed attempts remain independently
+  assertable. Cleanup is bounded by `ResilienceScenarioOptions.CleanupTimeout`; late completion is observed and late
+  responses are disposed, but arbitrary user code that ignores cancellation cannot be forcibly terminated. The
+  single-consumer lease remains held until late cleanup completes, so reuse fails clearly during that window and is safe
+  only afterward.
 - One script serves one logical call. Concurrent use fails with `ConcurrentScriptUseException` unless
   `ScriptConcurrency.AllowConcurrent` is requested.
 - `ShouldRespectRetryAfter` verifies the advertised value as a minimum wait; use `ShouldHaveRetryDelay` for an exact

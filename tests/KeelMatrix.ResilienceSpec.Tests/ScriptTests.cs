@@ -113,6 +113,27 @@ public sealed class ResilienceScenarioConfigurationTests
         Assert.Throws<MissingTimeProviderException>(() => new ScriptedHttpMessageHandler(script));
     }
 
+    [Fact]
+    public void DirectHandlerRejectsAnUntrackedProvider()
+    {
+        Assert.Throws<MissingTimeProviderException>(() =>
+            new ScriptedHttpMessageHandler(Script(), TimeProvider.System));
+    }
+
+    [Fact]
+    public async Task DirectHandlerAcceptsTheSupportedTrackingProvider()
+    {
+        var clock = Chains.CreateClock();
+        using var handler = new ScriptedHttpMessageHandler(Script(), clock.TimeProvider);
+        using var client = new HttpClient(handler, disposeHandler: false);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        handler.Report.ShouldHaveAttempts(1).ShouldHaveAttemptDuration(1, TimeSpan.Zero);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

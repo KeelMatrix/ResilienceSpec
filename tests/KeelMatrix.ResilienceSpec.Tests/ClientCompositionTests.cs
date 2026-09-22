@@ -298,6 +298,21 @@ public sealed class CancellationTests
     }
 
     [Fact]
+    public async Task NativeHttpClientTimeoutIsClassifiedAsTimeout()
+    {
+        using var scenario = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Timeout()));
+        using var client = Chains.CreateClient(scenario.Handler);
+        client.Timeout = TimeSpan.FromMilliseconds(100);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout).ShouldHaveException<TimeoutException>();
+        Assert.IsType<TaskCanceledException>(result.Exception);
+        Assert.IsType<TimeoutException>(result.Exception!.InnerException);
+    }
+
+    [Fact]
     public async Task IgnoredCancellationCannotHangObservationCleanupAndLateResponsesAreDisposed()
     {
         var lateResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);

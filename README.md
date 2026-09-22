@@ -105,7 +105,7 @@ var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(
         HttpFault.Response(HttpStatusCode.ServiceUnavailable),
         HttpFault.Success()),
-    clock,
+    clock.TimeProvider,
     clock.Advance);
 
 // ... configure the client as in the quick start ...
@@ -153,7 +153,7 @@ var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(
         HttpFault.Response(HttpStatusCode.TooManyRequests, retryAfter: TimeSpan.FromSeconds(5)),
         HttpFault.Success()),
-    clock,
+    clock.TimeProvider,
     clock.Advance);
 
 // ... run the request ...
@@ -169,7 +169,7 @@ supported; see [Timing Limitations](#timing-limitations).
 ```csharp
 var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(HttpFault.NetworkError(), HttpFault.Success()),
-    clock,
+    clock.TimeProvider,
     clock.Advance);
 
 using var result = await scenario.SendAsync(client, request);
@@ -182,7 +182,7 @@ scenario.Report.ShouldHaveAttempts(2);
 ```csharp
 var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(HttpFault.Timeout()),
-    clock,
+    clock.TimeProvider,
     clock.Advance);
 
 using var caller = new CancellationTokenSource();
@@ -250,7 +250,7 @@ var options = new ResilienceScenarioOptions
 
 var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(2), HttpFault.Success())),
-    clock,
+    clock.TimeProvider,
     clock.Advance,
     options);
 
@@ -262,7 +262,9 @@ scenario.Report.ShouldHaveAttempts(1);
 
 When observation ends because `VirtualBudget` is exhausted or `AdvanceClock` is disabled, the result remains
 `Pending` and the report marks `IsObservationCutoff`. That cutoff is not settlement evidence, so
-`ShouldHaveSettledAtVirtualTime` rejects it. Cancellation cleanup is bounded by
+`ShouldHaveSettledAtVirtualTime` rejects it. An attempt ended by observation cleanup has incomplete timing evidence;
+`ShouldHaveAttemptDuration` rejects it rather than treating cleanup's virtual duration as a configured timeout.
+Earlier attempts that genuinely completed remain independently assertable. Cancellation cleanup is bounded by
 `ResilienceScenarioOptions.CleanupTimeout`; late faults are observed and late responses are disposed, but arbitrary
 user code that ignores cancellation cannot be forcibly terminated. If cleanup outlives that bound, the scenario retains
 its single-consumer lease until the late request and cancellation callbacks finish. A second logical call fails with

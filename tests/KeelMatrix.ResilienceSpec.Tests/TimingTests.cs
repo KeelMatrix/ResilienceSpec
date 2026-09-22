@@ -360,6 +360,86 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public async Task VirtualBudgetCleanupDoesNotCreatePerAttemptTimeoutEvidence()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            clock.TimeProvider,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                VirtualBudget = TimeSpan.FromSeconds(1),
+                ObservationWindow = TimeSpan.FromMilliseconds(10),
+                CleanupTimeout = TimeSpan.FromMilliseconds(50),
+            });
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        Assert.Null(scenario.Report.Attempts[0].Duration);
+        var failure = Assert.Throws<ResilienceAssertionException>(
+            () => scenario.Report.ShouldHaveAttemptDuration(1, TimeSpan.FromSeconds(1)));
+        Assert.Contains("incomplete timing evidence", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NoClockAdvanceCleanupDoesNotCreateZeroDurationEvidence()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(1), HttpFault.Success())),
+            clock.TimeProvider,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                AdvanceClock = false,
+                PendingObservation = TimeSpan.FromMilliseconds(10),
+                CleanupTimeout = TimeSpan.FromMilliseconds(50),
+            });
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        Assert.Null(scenario.Report.Attempts[0].Duration);
+        var failure = Assert.Throws<ResilienceAssertionException>(
+            () => scenario.Report.ShouldHaveAttemptDuration(1, TimeSpan.Zero));
+        Assert.Contains("incomplete timing evidence", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ACompletedEarlierAttemptRemainsAssertableWhenCleanupAbandonsLaterAttempt()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Timeout()),
+            clock.TimeProvider,
+            clock.Advance,
+            new ResilienceScenarioOptions
+            {
+                VirtualBudget = TimeSpan.FromSeconds(1),
+                ObservationWindow = TimeSpan.FromMilliseconds(10),
+                CleanupTimeout = TimeSpan.FromMilliseconds(50),
+            });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        scenario.Report.ShouldHaveAttemptDuration(1, TimeSpan.Zero);
+        Assert.Null(scenario.Report.Attempts[1].Duration);
+    }
+
+    [Fact]
     public async Task FinalAdvanceIsCappedAtTheVirtualBudget()
     {
         var clock = Chains.CreateClock();

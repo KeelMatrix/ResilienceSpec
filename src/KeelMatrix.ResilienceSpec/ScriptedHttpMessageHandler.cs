@@ -48,6 +48,13 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
                 "clock.TimeProvider and clock.Advance.");
         }
 
+        if (timeProvider is not null && !ResilienceScenarioClock.IsTrackingProvider(timeProvider))
+        {
+            throw new MissingTimeProviderException(
+                "Direct ScriptedHttpMessageHandler use with timing requires a ResilienceScenarioClock. Wrap the " +
+                "controllable provider and pass clock.TimeProvider so timing assertions cannot use wall-clock durations.");
+        }
+
         _timeProvider = timeProvider;
         _observer = new ScenarioObserver(script, timeProvider, options);
     }

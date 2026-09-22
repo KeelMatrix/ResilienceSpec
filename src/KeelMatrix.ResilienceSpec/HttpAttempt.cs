@@ -36,7 +36,8 @@ public enum HttpAttemptOutcome
 /// controllable clock was supplied.
 /// </param>
 /// <param name="Duration">
-/// The injected-clock duration of the attempt, or <see langword="null"/> when no controllable clock was supplied.
+/// The injected-clock duration of a genuinely completed attempt, or <see langword="null"/> when no controllable
+/// clock was supplied or observation cleanup ended the attempt before it completed.
 /// </param>
 public sealed record HttpAttempt(
     int Ordinal,

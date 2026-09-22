@@ -160,6 +160,7 @@ internal sealed class ScenarioObserver
     private int _ordinal;
     private bool _overflowed;
     private int _logicalCalls;
+    private bool _observationCleanupActive;
     private bool _observationCutoff;
     private long _progressVersion;
     private TaskCompletionSource<bool> _progress = NewProgressSource();
@@ -189,6 +190,7 @@ internal sealed class ScenarioObserver
             }
 
             _logicalCalls++;
+            _observationCleanupActive = false;
         }
 
         return new LogicalCallScope(this);
@@ -253,7 +255,7 @@ internal sealed class ScenarioObserver
         {
             var finished = Elapsed();
             entry.Finish(
-                finished is { } end && entry.StartedAfter is { } start
+                !_observationCleanupActive && finished is { } end && entry.StartedAfter is { } start
                     ? end - start
                     : null);
             _inFlight--;
@@ -265,6 +267,14 @@ internal sealed class ScenarioObserver
         if (failed)
         {
             Telemetry.RecordFailure();
+        }
+    }
+
+    internal void MarkObservationCleanupStarted()
+    {
+        lock (_gate)
+        {
+            _observationCleanupActive = true;
         }
     }
 

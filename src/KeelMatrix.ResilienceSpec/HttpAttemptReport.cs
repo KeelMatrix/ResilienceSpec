@@ -90,7 +90,10 @@ public sealed class HttpAttemptReport
     /// </summary>
     public TimeSpan? ObservationStep { get; }
 
-    /// <summary>Gets a value indicating whether timing assertions are available for this report.</summary>
+    /// <summary>
+    /// Gets a value indicating whether the report has an injected timing source. Individual attempt-duration or
+    /// inter-attempt assertions can still reject incomplete evidence from an observation cutoff.
+    /// </summary>
     public bool HasTiming => ObservationStep is not null;
 
     /// <summary>
