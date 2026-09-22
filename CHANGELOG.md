@@ -15,6 +15,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   distinct.
 - Direct scripted-handler use now rejects untracked time providers instead of presenting wall-clock timing as
   deterministic.
+- `ResilienceScenarioClock` now rejects `TimeProvider.System`, including the public wrapper path, so wall-clock timing
+  cannot be presented as deterministic timing evidence.
+- Standard validation runs the core and integration test projects sequentially, avoiding cross-project scheduler
+  contention while preserving the bounded fail-closed timing watchdog.
 - Corrected the root README examples to pass the tracked `clock.TimeProvider`.
 
 ## [0.1.0] - Planned

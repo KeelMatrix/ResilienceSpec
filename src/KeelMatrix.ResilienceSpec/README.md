@@ -73,7 +73,8 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   descriptors.
 - Timing assertions require a `ResilienceScenarioClock` that wraps the controllable `TimeProvider`. Register its
   `TimeProvider` property in the client pipeline and pass that property plus `clock.Advance` to the scenario. Without
-  the wrapper, timing scenarios fail with `MissingTimeProviderException` instead of falling back to sleeps.
+  the wrapper, timing scenarios fail with `MissingTimeProviderException` instead of falling back to sleeps. The wrapper
+  rejects `TimeProvider.System`, which is a wall-clock provider and cannot make timing assertions deterministic.
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
 - Timing observations use `ResilienceScenarioOptions.AdvanceStep` only as a fallback when no provider timer deadline

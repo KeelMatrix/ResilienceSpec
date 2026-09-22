@@ -66,13 +66,20 @@ jobs:
           -p:NuGetAudit=false
 
       - name: Test
-        run: >-
-          dotnet test KeelMatrix.ResilienceSpec.slnx
-          --configuration Release
-          --no-build
-          --no-restore
-          -p:Version=${{ steps.release-version.outputs.version }}
-          -p:NuGetAudit=false
+        shell: bash
+        run: |
+          dotnet test tests/KeelMatrix.ResilienceSpec.Tests/KeelMatrix.ResilienceSpec.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --no-restore \
+            -p:Version=${{ steps.release-version.outputs.version }} \
+            -p:NuGetAudit=false
+          dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests/KeelMatrix.ResilienceSpec.IntegrationTests.csproj \
+            --configuration Release \
+            --no-build \
+            --no-restore \
+            -p:Version=${{ steps.release-version.outputs.version }} \
+            -p:NuGetAudit=false
 
       - name: Pack shipping project
         shell: pwsh

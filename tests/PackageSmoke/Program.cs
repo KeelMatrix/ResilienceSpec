@@ -15,6 +15,21 @@ var failures = new List<string>();
 using var observer = new NetworkActivityObserver();
 var inMemoryAttempts = 0;
 
+await RunAsync("System clock cannot be wrapped as a deterministic clock", async () =>
+{
+    try
+    {
+        _ = new ResilienceScenarioClock(TimeProvider.System, static _ => { });
+    }
+    catch (ArgumentException exception) when (exception.Message.Contains("controllable", StringComparison.OrdinalIgnoreCase))
+    {
+        await Task.CompletedTask;
+        return;
+    }
+
+    throw new InvalidOperationException("TimeProvider.System was accepted as a deterministic scenario clock.");
+});
+
 await RunAsync("GET 503 -> 200 through the standard resilience handler", async () =>
 {
     var underlyingClock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));

@@ -327,7 +327,18 @@ internal sealed class ScenarioObserver
         }
 
         var completed = await Task.WhenAny(progress, Task.Delay(timeout)).ConfigureAwait(false);
-        return ReferenceEquals(completed, progress);
+        if (ReferenceEquals(completed, progress))
+        {
+            return true;
+        }
+
+        // A progress signal can race the watchdog at the scheduling boundary. Re-read the version after the delay
+        // wins so a signal already published by the time this method returns is not misclassified as a stalled
+        // pipeline under parallel test load.
+        lock (_gate)
+        {
+            return _progressVersion != observedVersion;
+        }
     }
 
     internal void EndLogicalCall()

@@ -23,6 +23,7 @@ public sealed class ResilienceScenarioClock
     /// <summary>Initializes a clock wrapper around a controllable provider.</summary>
     /// <param name="inner">The controllable provider that owns the virtual time.</param>
     /// <param name="advanceInner">The operation that advances <paramref name="inner"/>.</param>
+    /// <exception cref="ArgumentException"><paramref name="inner"/> is <see cref="TimeProvider.System"/> or is already tracking another clock.</exception>
     public ResilienceScenarioClock(TimeProvider inner, Action<TimeSpan> advanceInner)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -31,6 +32,14 @@ public sealed class ResilienceScenarioClock
         if (inner is TrackingTimeProvider)
         {
             throw new ArgumentException("The wrapped provider must be the underlying controllable clock.", nameof(inner));
+        }
+
+        if (ReferenceEquals(inner, TimeProvider.System))
+        {
+            throw new ArgumentException(
+                "TimeProvider.System is a wall-clock provider and cannot be wrapped as a controllable clock. " +
+                "Use a supported controllable provider such as FakeTimeProvider.",
+                nameof(inner));
         }
 
         _provider = new TrackingTimeProvider(inner);

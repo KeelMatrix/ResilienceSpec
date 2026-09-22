@@ -33,7 +33,7 @@ pwsh -NoProfile -File .\scripts\Validate.ps1
 ```
 
 The gate performs, in order: restore from `NuGet.config`, a formatting/analyzer check, a Release build of
-`KeelMatrix.ResilienceSpec.slnx`, the Release test run of both test projects, and the package gate
+`KeelMatrix.ResilienceSpec.slnx`, sequential Release test runs of the core and integration projects, and the package gate
 (`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
 restores the shipping package from its own temporary local feed.

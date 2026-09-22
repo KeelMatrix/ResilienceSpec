@@ -64,8 +64,15 @@ try {
     Invoke-Step -Name 'Release build of the solution' -File 'dotnet' -Arguments (@('build', $solution, '-c', 'Release', '--no-restore') + $common)
     $durations['build'] = $script:stepDuration
 
-    Invoke-Step -Name 'Release test run of the solution' -File 'dotnet' -Arguments (@('test', $solution, '-c', 'Release', '--no-build') + $common)
-    $durations['test'] = $script:stepDuration
+    $testProjects = @(
+        (Join-Path $repo 'tests/KeelMatrix.ResilienceSpec.Tests/KeelMatrix.ResilienceSpec.Tests.csproj'),
+        (Join-Path $repo 'tests/KeelMatrix.ResilienceSpec.IntegrationTests/KeelMatrix.ResilienceSpec.IntegrationTests.csproj')
+    )
+    foreach ($testProject in $testProjects) {
+        $testName = "Release test run: $(Split-Path -Leaf (Split-Path -Parent $testProject))"
+        Invoke-Step -Name $testName -File 'dotnet' -Arguments (@('test', $testProject, '-c', 'Release', '--no-build') + $common)
+        $durations[$testName] = $script:stepDuration
+    }
 
     if (-not $SkipPackage) {
         Invoke-Step -Name 'Package build, inspection, and clean consumer smoke' -File 'pwsh' -Arguments @('-NoProfile', '-File', $smokeScript)

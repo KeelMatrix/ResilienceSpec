@@ -483,6 +483,33 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public void SystemClockCannotBeWrappedAsADeterministicClock()
+    {
+        var failure = Assert.Throws<ArgumentException>(
+            () => new ResilienceScenarioClock(TimeProvider.System, static _ => { }));
+
+        Assert.Contains("controllable", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SupportedControllableClockRemainsTimingEligible()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            clock.TimeProvider,
+            clock.Advance);
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        Assert.True(scenario.Report.HasTiming);
+        scenario.Report.ShouldHaveAttemptDuration(1, TimeSpan.Zero);
+    }
+
+    [Fact]
     public async Task LongVirtualWaitsStayWallClockCheap()
     {
         var clock = Chains.CreateClock();

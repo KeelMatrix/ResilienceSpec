@@ -190,6 +190,20 @@ public sealed class StandardResilienceTests
     [Fact]
     public async Task PerAttemptTimeoutFiresOnTheInjectedClock()
     {
+        await AssertPerAttemptTimeoutFiresOnTheInjectedClockAsync();
+    }
+
+    [Fact]
+    public async Task PerAttemptTimeoutFiresOnTheInjectedClockRepeatedly()
+    {
+        for (var repetition = 0; repetition < 5; repetition++)
+        {
+            await AssertPerAttemptTimeoutFiresOnTheInjectedClockAsync();
+        }
+    }
+
+    private static async Task AssertPerAttemptTimeoutFiresOnTheInjectedClockAsync()
+    {
         var clock = StandardResilienceChains.CreateClock();
         var attemptTimeout = TimeSpan.FromSeconds(1);
         using var scenario = new ResilienceScenario(

@@ -266,7 +266,7 @@ public sealed class ResilienceScenario : IDisposable
         }
 
         var completed = await Task.WhenAny(task, Task.Delay(window)).ConfigureAwait(false);
-        return ReferenceEquals(completed, task);
+        return ReferenceEquals(completed, task) || task.IsCompleted;
     }
 
     private long GetTimerCallbackVersion() =>

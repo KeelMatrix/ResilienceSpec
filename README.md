@@ -215,7 +215,8 @@ var scenario = new ResilienceScenario(script, clock.TimeProvider, clock.Advance)
 the scenario. The wrapper records which provider timers fire during each advance, so the scenario can distinguish an
 ordinary intermediate delay from a timer whose continuation has not reached the scripted downstream. The adapter
 fails configuration with a `MissingTimeProviderException` when the scenario clock is missing or a different provider
-instance is registered.
+instance is registered. `ResilienceScenarioClock` rejects `TimeProvider.System`, because wall-clock timestamps cannot
+produce deterministic timing evidence.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances to the next tracked provider timer when one is
 available and otherwise uses `AdvanceStep` as a fallback. It waits for scripted-downstream progress only after a timer
