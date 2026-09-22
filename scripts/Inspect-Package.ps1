@@ -24,6 +24,7 @@ $description = 'Verify how your real .NET HttpClient resilience chain retries, d
 $tags = 'httpclient resilience retry polly testing ci retry-after timeout dotnet'
 $targetFramework = 'net8.0'
 $packageNamespace = 'http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd'
+$normalizedArchiveTimestamp = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
 
 function Assert-Contract {
     param(
@@ -145,6 +146,17 @@ function Assert-ArchiveEntries {
     }
 }
 
+function Assert-ArchiveTimestamps {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.Compression.ZipArchive]$Archive,
+        [Parameter(Mandatory = $true)][string]$ArchiveDescription
+    )
+
+    foreach ($entry in $Archive.Entries) {
+        Assert-Contract ($entry.LastWriteTime.DateTime -eq $normalizedArchiveTimestamp.DateTime) "$ArchiveDescription entry '$($entry.FullName)' has a non-normalized archive timestamp."
+    }
+}
+
 function Assert-PngContract {
     param(
         [Parameter(Mandatory = $true)][byte[]]$Bytes,
@@ -240,6 +252,7 @@ try {
 
     $package = [IO.Compression.ZipFile]::OpenRead($PackagePath)
     try {
+        Assert-ArchiveTimestamps -Archive $package -ArchiveDescription 'The package'
         Assert-ArchiveEntries -Archive $package -ArchiveDescription 'The package' -Allowlist @(
             '^_rels/\.rels$',
             '^\[Content_Types\]\.xml$',
@@ -274,6 +287,7 @@ try {
 
     $symbols = [IO.Compression.ZipFile]::OpenRead($SymbolsPath)
     try {
+        Assert-ArchiveTimestamps -Archive $symbols -ArchiveDescription 'The symbol package'
         Assert-ArchiveEntries -Archive $symbols -ArchiveDescription 'The symbol package' -Allowlist @(
             '^_rels/\.rels$',
             '^\[Content_Types\]\.xml$',
@@ -293,6 +307,7 @@ try {
     $symbolsHash = (Get-FileHash -LiteralPath $SymbolsPath -Algorithm SHA256).Hash
     Write-Output "Package inspection passed: $([IO.Path]::GetFileName($PackagePath)) SHA256=$packageHash"
     Write-Output "Symbol inspection passed: $([IO.Path]::GetFileName($SymbolsPath)) SHA256=$symbolsHash"
+    Write-Output "Normalized archive timestamps verified: $($normalizedArchiveTimestamp.ToString('yyyy-MM-dd HH:mm:ss')) ZIP local time"
     Write-Output "SourceLink commit verified: $expectedCommit"
     exit 0
 }

@@ -52,3 +52,18 @@ jobs:
       - name: Run integration endpoint 10.10.0
         shell: pwsh
         run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0
+
+      - name: Report normalized package artifact hashes
+        shell: pwsh
+        run: |
+          $packageDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts/packages/feed'
+          foreach ($archive in @(
+              (Join-Path $packageDirectory 'KeelMatrix.ResilienceSpec.0.1.0.nupkg'),
+              (Join-Path $packageDirectory 'KeelMatrix.ResilienceSpec.0.1.0.snupkg')
+          )) {
+            if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+              throw "Expected normalized package artifact was not found: $archive"
+            }
+            $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+            Write-Output ("{0} SHA256={1}" -f (Split-Path -Leaf $archive), $hash)
+          }

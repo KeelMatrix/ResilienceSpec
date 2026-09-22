@@ -58,6 +58,7 @@ function Remove-TemporaryDirectory {
 
 $repo = Split-Path -Parent $PSScriptRoot
 $packageProject = Join-Path $repo 'src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj'
+$normalizationScript = Join-Path $PSScriptRoot 'Normalize-PackageArchive.ps1'
 $sampleProject = Join-Path $repo 'samples/KeelMatrix.ResilienceSpec.Sample/KeelMatrix.ResilienceSpec.Sample.csproj'
 $sampleRoot = Join-Path ([IO.Path]::GetTempPath()) "resiliencespec-sample-$([Guid]::NewGuid().ToString('N'))"
 $packageFeed = Join-Path $sampleRoot 'feed'
@@ -68,6 +69,7 @@ $scratch = Join-Path $sampleRoot 'scratch'
 $pluginsCache = Join-Path $sampleRoot 'plugins'
 $dotnetHome = Join-Path $sampleRoot 'dotnet-home'
 $nupkgName = "KeelMatrix.ResilienceSpec.$PackageVersion.nupkg"
+$snupkgName = "KeelMatrix.ResilienceSpec.$PackageVersion.snupkg"
 $savedEnvironment = @{}
 
 try {
@@ -108,7 +110,11 @@ try {
         '-o', $packageFeed)
 
     $nupkg = Join-Path $packageFeed $nupkgName
+    $snupkg = Join-Path $packageFeed $snupkgName
     Assert-Contract (Test-Path -LiteralPath $nupkg -PathType Leaf) "Packed package was not found: $nupkg"
+    Assert-Contract (Test-Path -LiteralPath $snupkg -PathType Leaf) "Packed symbol package was not found: $snupkg"
+    Invoke-Checked 'pwsh' @('-NoProfile', '-File', $normalizationScript, '-PackagePath', $nupkg)
+    Invoke-Checked 'pwsh' @('-NoProfile', '-File', $normalizationScript, '-PackagePath', $snupkg)
     Write-Output ("Packed artifact: {0} ({1:n0} bytes)" -f $nupkg, (Get-Item -LiteralPath $nupkg).Length)
 
     $escapedFeed = [Security.SecurityElement]::Escape($packageFeed)

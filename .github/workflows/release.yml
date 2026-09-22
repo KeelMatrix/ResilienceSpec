@@ -104,6 +104,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Packing failed with exit code $LASTEXITCODE."
           }
+          $normalizationScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Normalize-PackageArchive.ps1'
+          foreach ($archive in @(
+              (Join-Path $packageDirectory "KeelMatrix.ResilienceSpec.${{ steps.release-version.outputs.version }}.nupkg"),
+              (Join-Path $packageDirectory "KeelMatrix.ResilienceSpec.${{ steps.release-version.outputs.version }}.snupkg")
+          )) {
+            pwsh -NoProfile -File $normalizationScript -PackagePath $archive
+            if ($LASTEXITCODE -ne 0) {
+              throw "Package normalization failed with exit code $LASTEXITCODE."
+            }
+          }
 
       - name: Validate exact release artifact set
         shell: pwsh

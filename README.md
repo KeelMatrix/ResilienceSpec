@@ -347,11 +347,11 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Platforms And Target Frameworks
 
 - Target framework: `net8.0`.
-- The package and its tests use portable .NET APIs. Hosted validation runs Full validation on Windows and macOS against
-  `10.10.0`; Linux runs the portable core/integration script. Every runner then runs explicit integration checks
-  against both `9.8.0` and `10.10.0`.
+- The package and its tests use portable .NET APIs. Hosted validation runs the package gate on Windows, Linux, and
+  macOS, then runs explicit integration checks against both `9.8.0` and `10.10.0`.
 - Only `net8.0` is exercised. The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical
-  macOS hardware. Linux package-stage parity is not established by this workflow.
+  macOS hardware. The package gate packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, compares
+  the `.nupkg` and `.snupkg` SHA256 values, and inspects the normalized artifacts before the clean consumer restore.
 
 ## Telemetry
 

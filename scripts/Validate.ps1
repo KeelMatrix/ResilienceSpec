@@ -75,7 +75,7 @@ try {
     }
 
     if (-not $SkipPackage) {
-        Invoke-Step -Name 'Package build, inspection, and clean consumer smoke' -File 'pwsh' -Arguments @('-NoProfile', '-File', $smokeScript)
+        Invoke-Step -Name 'Reproducible package build, inspection, and clean consumer smoke' -File 'pwsh' -Arguments @('-NoProfile', '-File', $smokeScript)
         $durations['smoke'] = $script:stepDuration
 
         Invoke-Step -Name 'Run sample against the packed package' -File 'pwsh' -Arguments @('-NoProfile', '-File', $sampleScript)

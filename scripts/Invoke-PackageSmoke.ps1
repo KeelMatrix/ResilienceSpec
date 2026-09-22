@@ -64,6 +64,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repo 'src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj'
 $smokeProject = Join-Path $repo 'tests/PackageSmoke/PackageSmoke.csproj'
 $inspectionScript = Join-Path $PSScriptRoot 'Inspect-Package.ps1'
+$normalizationScript = Join-Path $PSScriptRoot 'Normalize-PackageArchive.ps1'
 if ([string]::IsNullOrWhiteSpace($ArtifactsDirectory)) {
     $ArtifactsDirectory = Join-Path $repo 'artifacts/packages'
 }
@@ -72,6 +73,9 @@ $nupkgName = "KeelMatrix.ResilienceSpec.$PackageVersion.nupkg"
 $snupkgName = "KeelMatrix.ResilienceSpec.$PackageVersion.snupkg"
 $smokeRoot = Join-Path ([IO.Path]::GetTempPath()) "resiliencespec-package-smoke-$([Guid]::NewGuid().ToString('N'))"
 $packageFeed = Join-Path $ArtifactsDirectory 'feed'
+$reproducibilityRoot = Join-Path $smokeRoot 'reproducibility'
+$firstPack = Join-Path $reproducibilityRoot 'first'
+$secondPack = Join-Path $reproducibilityRoot 'second'
 $consumerPackages = Join-Path $smokeRoot 'packages'
 $nugetConfig = Join-Path $smokeRoot 'NuGet.config'
 $httpCache = Join-Path $smokeRoot 'http-cache'
@@ -82,7 +86,7 @@ $smokeLog = Join-Path $ArtifactsDirectory 'package-smoke.log'
 $savedEnvironment = @{}
 
 try {
-    New-Item -ItemType Directory -Path $packageFeed, $consumerPackages, $httpCache, $scratch, $pluginsCache, $dotnetHome -Force | Out-Null
+    New-Item -ItemType Directory -Path $packageFeed, $consumerPackages, $httpCache, $scratch, $pluginsCache, $dotnetHome, $firstPack, $secondPack -Force | Out-Null
 
     $expectedCommit = $ExpectedRepositoryCommit
     if ([string]::IsNullOrWhiteSpace($expectedCommit)) {
@@ -108,15 +112,39 @@ try {
     [Environment]::SetEnvironmentVariable('DOTNET_NOLOGO', '1', 'Process')
     [Environment]::SetEnvironmentVariable('KEELMATRIX_NO_TELEMETRY', '1', 'Process')
 
-    Write-Output 'Pack the shipping project'
-    Invoke-Checked 'dotnet' @(
+    $packArguments = @(
         'pack', $project, '-c', 'Release',
         "--include-symbols", '-p:SymbolPackageFormat=snupkg',
         "-p:PackageVersion=$PackageVersion",
         "-p:SourceRevisionId=$expectedCommit",
         "-p:RepositoryCommit=$expectedCommit",
-        '-p:NuGetAudit=false',
-        '-o', $packageFeed)
+        '-p:NuGetAudit=false')
+
+    Write-Output 'Pack the shipping project twice for reproducibility'
+    Invoke-Checked 'dotnet' ($packArguments + @('-o', $firstPack))
+    Invoke-Checked 'dotnet' ($packArguments + @('-o', $secondPack))
+
+    foreach ($packDirectory in @($firstPack, $secondPack)) {
+        foreach ($archiveName in @($nupkgName, $snupkgName)) {
+            Invoke-Checked 'pwsh' @('-NoProfile', '-File', $normalizationScript, '-PackagePath', (Join-Path $packDirectory $archiveName))
+        }
+    }
+
+    $firstPackage = Join-Path $firstPack $nupkgName
+    $secondPackage = Join-Path $secondPack $nupkgName
+    $firstSymbols = Join-Path $firstPack $snupkgName
+    $secondSymbols = Join-Path $secondPack $snupkgName
+    $packageHash = (Get-FileHash -LiteralPath $firstPackage -Algorithm SHA256).Hash
+    $secondPackageHash = (Get-FileHash -LiteralPath $secondPackage -Algorithm SHA256).Hash
+    $symbolsHash = (Get-FileHash -LiteralPath $firstSymbols -Algorithm SHA256).Hash
+    $secondSymbolsHash = (Get-FileHash -LiteralPath $secondSymbols -Algorithm SHA256).Hash
+    Write-Output "Reproducible package SHA256: $packageHash / $secondPackageHash"
+    Write-Output "Reproducible symbols SHA256: $symbolsHash / $secondSymbolsHash"
+    Assert-Contract ($packageHash -ceq $secondPackageHash) 'Two normalized package archives differ.'
+    Assert-Contract ($symbolsHash -ceq $secondSymbolsHash) 'Two normalized symbol archives differ.'
+
+    Copy-Item -LiteralPath $firstPackage -Destination (Join-Path $packageFeed $nupkgName) -Force
+    Copy-Item -LiteralPath $firstSymbols -Destination (Join-Path $packageFeed $snupkgName) -Force
 
     $nupkg = Join-Path $packageFeed $nupkgName
     $snupkg = Join-Path $packageFeed $snupkgName
