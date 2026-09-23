@@ -206,6 +206,14 @@ public sealed class ReleaseContractTests
 
         var packagePath = Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.nupkg");
         var symbolsPath = Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.snupkg");
+        var sourceLinkPath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "KeelMatrix.ResilienceSpec",
+            "obj",
+            "Release",
+            "net8.0",
+            "KeelMatrix.ResilienceSpec.sourcelink.json");
         var normalizeScript = Path.Combine(sourceRepositoryRoot, "scripts", "Normalize-PackageArchive.ps1");
         RunProcess("pwsh", new[] { "-NoProfile", "-File", normalizeScript, "-PackagePath", packagePath }, repositoryRoot)
             .RequireSuccess($"normalize the {shapeName} package");
@@ -217,11 +225,12 @@ public sealed class ReleaseContractTests
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(packagePath))),
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(symbolsPath))),
             packagePath,
-            symbolsPath);
+            symbolsPath,
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourceLinkPath))));
     }
 
     private static string FormatIdentity(ArtifactIdentity identity) =>
-        $"{identity.ShapeName}:package={identity.PackageHash},symbols={identity.SymbolsHash}";
+        $"{identity.ShapeName}:package={identity.PackageHash},symbols={identity.SymbolsHash},sourcelink={identity.SourceLinkHash}";
 
     private static string FormatArchiveDifferences(string expectedPath, string actualPath)
     {
@@ -333,7 +342,8 @@ public sealed class ReleaseContractTests
         string PackageHash,
         string SymbolsHash,
         string PackagePath,
-        string SymbolsPath);
+        string SymbolsPath,
+        string SourceLinkHash);
 
     private static ContractResult RunContract(
         string tag,
