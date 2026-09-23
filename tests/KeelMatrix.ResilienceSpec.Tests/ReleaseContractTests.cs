@@ -233,6 +233,178 @@ public sealed class ReleaseContractTests
         }
     }
 
+    [Fact]
+    public void StrictPackMismatchRemovesStaleArchivesFromOutputDirectory()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var expectedCommit = RunProcess(
+            "git",
+            new List<string> { "rev-parse", "HEAD" },
+            repositoryRoot).RequireSuccess("resolve the repository commit").Output.Trim();
+        var mismatchedCommit = "5a8d5eca75d6ac516892552cbc123df82b319443";
+        Assert.NotEqual(expectedCommit, mismatchedCommit, StringComparer.OrdinalIgnoreCase);
+
+        var temporaryRoot = Directory.CreateTempSubdirectory("resilience-stale-archive-contract-");
+        try
+        {
+            var project = Path.Combine(repositoryRoot, "src", "KeelMatrix.ResilienceSpec", "KeelMatrix.ResilienceSpec.csproj");
+            var packageDirectory = Path.Combine(temporaryRoot.FullName, "packages");
+            Directory.CreateDirectory(packageDirectory);
+
+            var restore = RunProcess(
+                "dotnet",
+                new[] { "restore", project, "--configfile", Path.Combine(repositoryRoot, "NuGet.config"), "-p:NuGetAudit=false" },
+                repositoryRoot).RequireSuccess("restore the stale archive shape");
+            var goodPack = RunProcess(
+                "dotnet",
+                StrictPackArguments(project, expectedCommit, packageDirectory),
+                repositoryRoot);
+            var unrelatedFile = Path.Combine(packageDirectory, "unrelated.txt");
+            File.WriteAllText(unrelatedFile, "keep");
+
+            var badPack = RunProcess(
+                "dotnet",
+                StrictPackArguments(project, mismatchedCommit, packageDirectory),
+                repositoryRoot);
+            var nupkgCount = Directory.EnumerateFiles(packageDirectory, "*.nupkg").Count();
+            var snupkgCount = Directory.EnumerateFiles(packageDirectory, "*.snupkg").Count();
+
+            Console.WriteLine(
+                $"F1_STALE_ARCHIVE RESTORE_EXIT={restore.ExitCode} GOOD_PACK_EXIT={goodPack.ExitCode} " +
+                $"BAD_PACK_EXIT={badPack.ExitCode} NUPKG_COUNT={nupkgCount} SNUPKG_COUNT={snupkgCount} " +
+                $"UNRELATED_EXISTS={File.Exists(unrelatedFile)}");
+
+            Assert.Equal(0, goodPack.ExitCode);
+            Assert.NotEqual(0, badPack.ExitCode);
+            Assert.Contains("does not match", badPack.Output, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, nupkgCount);
+            Assert.Equal(0, snupkgCount);
+            Assert.True(File.Exists(unrelatedFile));
+        }
+        finally
+        {
+            DeleteTemporaryTree(temporaryRoot);
+        }
+    }
+
+    [Fact]
+    public void StrictPackIgnoresGitEnvironmentForGitlessSourceRoot()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var expectedCommit = RunProcess(
+            "git",
+            new List<string> { "rev-parse", "HEAD" },
+            repositoryRoot).RequireSuccess("resolve the repository commit").Output.Trim();
+        var externalRevision = "b787a0488eacaf0a2094b4a100e6f8848539aa7c";
+        Assert.NotEqual(expectedCommit, externalRevision, StringComparer.OrdinalIgnoreCase);
+
+        var temporaryRoot = Directory.CreateTempSubdirectory("resilience-git-environment-contract-");
+        var canonicalGitPath = Path.Combine(repositoryRoot, ".git");
+        var savedGitPath = Path.Combine(temporaryRoot.FullName, "canonical-dot-git");
+        var metadataMoved = false;
+        try
+        {
+            var externalClone = Path.Combine(temporaryRoot.FullName, "external-git");
+            var normalPackageDirectory = Path.Combine(temporaryRoot.FullName, "normal");
+            var gitlessPackageDirectory = Path.Combine(temporaryRoot.FullName, "gitless");
+            Directory.CreateDirectory(normalPackageDirectory);
+            Directory.CreateDirectory(gitlessPackageDirectory);
+
+            RunProcess(
+                "git",
+                new[] { "clone", "--no-checkout", "--no-hardlinks", "--quiet", repositoryRoot, externalClone },
+                Directory.GetCurrentDirectory()).RequireSuccess("create the external Git probe clone");
+            Assert.False(File.Exists(Path.Combine(externalClone, "icon.png")));
+            RunProcess(
+                "git",
+                new[] { "--git-dir", Path.Combine(externalClone, ".git"), "update-ref", "refs/heads/probe", externalRevision },
+                repositoryRoot).RequireSuccess("point the external Git probe at the mismatched revision");
+            RunProcess(
+                "git",
+                new[] { "--git-dir", Path.Combine(externalClone, ".git"), "symbolic-ref", "HEAD", "refs/heads/probe" },
+                repositoryRoot).RequireSuccess("set the external Git probe HEAD");
+
+            var project = Path.Combine(repositoryRoot, "src", "KeelMatrix.ResilienceSpec", "KeelMatrix.ResilienceSpec.csproj");
+            var normalPack = RunProcess(
+                "dotnet",
+                StrictPackArguments(project, expectedCommit, normalPackageDirectory),
+                repositoryRoot);
+
+            MoveGitMetadata(canonicalGitPath, savedGitPath);
+            metadataMoved = true;
+            try
+            {
+                var gitEnvironment = new Dictionary<string, string?>
+                {
+                    ["GIT_DIR"] = Path.Combine(externalClone, ".git")
+                };
+                var gitProbe = RunProcess(
+                    "git",
+                    new[] { "-C", repositoryRoot, "rev-parse", "--verify", "HEAD" },
+                    repositoryRoot,
+                    gitEnvironment);
+                var gitlessPack = RunProcess(
+                    "dotnet",
+                    StrictPackArguments(project, expectedCommit, gitlessPackageDirectory),
+                    repositoryRoot,
+                    gitEnvironment);
+
+                Assert.Equal(0, normalPack.ExitCode);
+                Assert.Equal(0, gitProbe.ExitCode);
+                Assert.Equal(externalRevision, gitProbe.Output.Trim(), StringComparer.OrdinalIgnoreCase);
+                Assert.Equal(0, gitlessPack.ExitCode);
+            }
+            finally
+            {
+                MoveGitMetadata(savedGitPath, canonicalGitPath);
+                metadataMoved = false;
+            }
+
+            var normalizeScript = Path.Combine(repositoryRoot, "scripts", "Normalize-PackageArchive.ps1");
+            var archivePaths = new[]
+            {
+                Path.Combine(normalPackageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.nupkg"),
+                Path.Combine(normalPackageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.snupkg"),
+                Path.Combine(gitlessPackageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.nupkg"),
+                Path.Combine(gitlessPackageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.snupkg")
+            };
+            foreach (var archivePath in archivePaths)
+            {
+                RunProcess(
+                    "pwsh",
+                    new[] { "-NoProfile", "-File", normalizeScript, "-PackagePath", archivePath },
+                    repositoryRoot).RequireSuccess($"normalize '{archivePath}'");
+            }
+
+            var normalPackageHash = HashFile(archivePaths[0]);
+            var normalSymbolsHash = HashFile(archivePaths[1]);
+            var gitlessPackageHash = HashFile(archivePaths[2]);
+            var gitlessSymbolsHash = HashFile(archivePaths[3]);
+            var nupkgCount = Directory.EnumerateFiles(gitlessPackageDirectory, "*.nupkg").Count();
+            var snupkgCount = Directory.EnumerateFiles(gitlessPackageDirectory, "*.snupkg").Count();
+
+            Console.WriteLine(
+                $"F2_GIT_DIR NORMAL_PACK_EXIT={normalPack.ExitCode} GIT_PROBE_EXIT=0 GITLESS_PACK_EXIT=0 " +
+                $"NORMAL_PACKAGE_SHA256={normalPackageHash} NORMAL_SYMBOLS_SHA256={normalSymbolsHash} " +
+                $"GITLESS_PACKAGE_SHA256={gitlessPackageHash} GITLESS_SYMBOLS_SHA256={gitlessSymbolsHash} " +
+                $"NUPKG_COUNT={nupkgCount} SNUPKG_COUNT={snupkgCount}");
+
+            Assert.Equal(normalPackageHash, gitlessPackageHash);
+            Assert.Equal(normalSymbolsHash, gitlessSymbolsHash);
+            Assert.Equal(1, nupkgCount);
+            Assert.Equal(1, snupkgCount);
+        }
+        finally
+        {
+            if (metadataMoved)
+            {
+                MoveGitMetadata(savedGitPath, canonicalGitPath);
+            }
+
+            DeleteTemporaryTree(temporaryRoot);
+        }
+    }
+
     private static ArtifactIdentity PackShape(
         string repositoryRoot,
         string shapeName,
@@ -292,6 +464,39 @@ public sealed class ReleaseContractTests
             packagePath,
             symbolsPath,
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourceLinkPath))));
+    }
+
+    private static List<string> StrictPackArguments(string project, string revision, string packageDirectory) =>
+        new()
+        {
+            "pack", project, "-c", "Release", "-warnaserror", "--no-restore",
+            "-p:PackageVersion=0.1.0",
+            $"-p:SourceRevisionId={revision}",
+            $"-p:RepositoryCommit={revision}",
+            "-p:RepositoryBranch=refs/heads/main",
+            "-p:RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+            "-p:PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+            "-p:ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+            "-p:GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git",
+            "-p:GitRepositoryRemoteName=origin",
+            "-p:PublishRepositoryUrl=true",
+            "-p:NuGetAudit=false",
+            "-o", packageDirectory
+        };
+
+    private static string HashFile(string path) =>
+        Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+
+    private static void MoveGitMetadata(string source, string destination)
+    {
+        if (Directory.Exists(source))
+        {
+            Directory.Move(source, destination);
+        }
+        else
+        {
+            File.Move(source, destination);
+        }
     }
 
     private static string FormatIdentity(ArtifactIdentity identity) =>
@@ -415,7 +620,11 @@ public sealed class ReleaseContractTests
         directory.Delete(recursive: true);
     }
 
-    private static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments, string workingDirectory)
+    private static ProcessResult RunProcess(
+        string fileName,
+        IEnumerable<string> arguments,
+        string workingDirectory,
+        IReadOnlyDictionary<string, string?>? environmentVariables = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -429,6 +638,13 @@ public sealed class ReleaseContractTests
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+        if (environmentVariables is not null)
+        {
+            foreach (var variable in environmentVariables)
+            {
+                startInfo.Environment[variable.Key] = variable.Value ?? string.Empty;
+            }
         }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Unable to start {fileName}.");

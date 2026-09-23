@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
-    <!-- A pinned pack revision makes source-control manager discovery unnecessary and origin-dependent. -->
+    <!-- The strict pack revision is the caller-supplied package identity; discovery, when possible, is only
+         from the packed source root's own checkout and never from a clone's origin or Git environment. -->
     <EnableSourceControlManagerQueries
       Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">false</EnableSourceControlManagerQueries>
     <_RepositorySourceRoot
@@ -40,9 +41,19 @@
 
   <Target Name="ValidateExplicitPackRevision"
           Condition="'$(IsPackable)' == 'true' and ('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '')">
-    <!-- A Git checkout is ground truth when it is available. A Git-less tree intentionally keeps the caller-supplied
-         revision as the declared source of truth because no checkout exists to disagree with it. -->
-    <Exec Command="git -C &quot;$(_RepositoryGitSourceRoot)&quot; rev-parse --verify HEAD"
+    <!-- A source-root .git directory or gitdir pointer is ground truth when it is available. A genuinely Git-less
+         tree intentionally keeps the caller-supplied revision as the declared source of truth. Git discovery is
+         scoped to this source root and all Git environment overrides are cleared for the probe. -->
+    <PropertyGroup>
+      <_RepositoryGitSourceRoot>$([System.IO.Path]::TrimEndingDirectorySeparator('$(_RepositorySourceRoot)'))</_RepositoryGitSourceRoot>
+      <_HasRepositoryGitMetadata Condition="Exists('$(_RepositoryGitSourceRoot)/.git')">true</_HasRepositoryGitMetadata>
+    </PropertyGroup>
+    <ItemGroup>
+      <_PackArchiveToRemove Include="$([System.IO.Path]::Combine('$(PackageOutputPath)', '$(PackageId).$(PackageVersion).nupkg'))" />
+      <_PackArchiveToRemove Include="$([System.IO.Path]::Combine('$(PackageOutputPath)', '$(PackageId).$(PackageVersion).snupkg'))" />
+    </ItemGroup>
+    <Exec Condition="'$(_HasRepositoryGitMetadata)' == 'true'"
+          Command="pwsh -NoProfile -File &quot;$(MSBuildThisFileDirectory)scripts/Resolve-SourceRootGitRevision.ps1&quot; -SourceRoot &quot;$(_RepositoryGitSourceRoot)&quot;"
           IgnoreExitCode="true"
           ConsoleToMsBuild="true"
           StandardOutputImportance="Low"
@@ -53,11 +64,12 @@
     <PropertyGroup>
       <_ExplicitPackRevision Condition="'$(SourceRevisionId)' != ''">$(SourceRevisionId)</_ExplicitPackRevision>
       <_ExplicitPackRevision Condition="'$(SourceRevisionId)' == ''">$(RepositoryCommit)</_ExplicitPackRevision>
-      <_RepositoryGitSourceRoot>$([System.IO.Path]::TrimEndingDirectorySeparator('$(_RepositorySourceRoot)'))</_RepositoryGitSourceRoot>
       <_CheckedOutPackRevision>@(_GitHeadOutput)</_CheckedOutPackRevision>
       <_NormalizedExplicitPackRevision>$([System.String]::Copy('$(_ExplicitPackRevision)').Trim().ToLowerInvariant())</_NormalizedExplicitPackRevision>
       <_NormalizedCheckedOutPackRevision>$([System.String]::Copy('$(_CheckedOutPackRevision)').Trim().ToLowerInvariant())</_NormalizedCheckedOutPackRevision>
     </PropertyGroup>
+    <Delete Files="@(_PackArchiveToRemove)"
+            Condition="'$(_GitHeadExitCode)' == '0' and '$(_NormalizedCheckedOutPackRevision)' != '$(_NormalizedExplicitPackRevision)'" />
     <Error Condition="'$(_GitHeadExitCode)' == '0' and '$(_NormalizedCheckedOutPackRevision)' != '$(_NormalizedExplicitPackRevision)'"
            Text="Refusing to pack: explicit revision '$(_ExplicitPackRevision)' does not match checked-out commit '$(_CheckedOutPackRevision)' at '$(_RepositorySourceRoot)'." />
   </Target>
