@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using Xunit;
@@ -156,11 +157,13 @@ public sealed class ReleaseContractTests
                 Assert.True(
                     first.PackageHash == identity.PackageHash,
                     $"Package identity differed between '{first.ShapeName}' and '{identity.ShapeName}'. " +
-                    string.Join("; ", identities.Select(FormatIdentity)));
+                    string.Join("; ", identities.Select(FormatIdentity)) +
+                    $" Entry differences: {FormatArchiveDifferences(first.PackagePath, identity.PackagePath)}");
                 Assert.True(
                     first.SymbolsHash == identity.SymbolsHash,
                     $"Symbols identity differed between '{first.ShapeName}' and '{identity.ShapeName}'. " +
-                    string.Join("; ", identities.Select(FormatIdentity)));
+                    string.Join("; ", identities.Select(FormatIdentity)) +
+                    $" Entry differences: {FormatArchiveDifferences(first.SymbolsPath, identity.SymbolsPath)}");
             }
         }
         finally
@@ -214,11 +217,44 @@ public sealed class ReleaseContractTests
         return new ArtifactIdentity(
             shapeName,
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(packagePath))),
-            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(symbolsPath))));
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(symbolsPath))),
+            packagePath,
+            symbolsPath);
     }
 
     private static string FormatIdentity(ArtifactIdentity identity) =>
         $"{identity.ShapeName}:package={identity.PackageHash},symbols={identity.SymbolsHash}";
+
+    private static string FormatArchiveDifferences(string expectedPath, string actualPath)
+    {
+        using var expected = ZipFile.OpenRead(expectedPath);
+        using var actual = ZipFile.OpenRead(actualPath);
+        var expectedEntries = GetArchiveEntryHashes(expected);
+        var actualEntries = GetArchiveEntryHashes(actual);
+        return string.Join(
+            ", ",
+            expectedEntries.Keys
+                .Union(actualEntries.Keys, StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .Where(name => !expectedEntries.TryGetValue(name, out var expectedHash) ||
+                    !actualEntries.TryGetValue(name, out var actualHash) ||
+                    !string.Equals(expectedHash, actualHash, StringComparison.Ordinal))
+                .Select(name => $"{name}={expectedEntries.GetValueOrDefault(name, "missing")}->{actualEntries.GetValueOrDefault(name, "missing")}"));
+    }
+
+    private static Dictionary<string, string> GetArchiveEntryHashes(ZipArchive archive) =>
+        archive.Entries.ToDictionary(
+            entry => entry.FullName,
+            entry => Convert.ToHexString(SHA256.HashData(ReadArchiveEntry(entry))),
+            StringComparer.Ordinal);
+
+    private static byte[] ReadArchiveEntry(ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        using var memory = new MemoryStream();
+        stream.CopyTo(memory);
+        return memory.ToArray();
+    }
 
     private static string CloneRepository(string source, string destination)
     {
@@ -294,7 +330,12 @@ public sealed class ReleaseContractTests
         }
     }
 
-    private sealed record ArtifactIdentity(string ShapeName, string PackageHash, string SymbolsHash);
+    private sealed record ArtifactIdentity(
+        string ShapeName,
+        string PackageHash,
+        string SymbolsHash,
+        string PackagePath,
+        string SymbolsPath);
 
     private static ContractResult RunContract(
         string tag,
