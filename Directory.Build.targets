@@ -3,6 +3,8 @@
     <!-- A pinned pack revision makes source-control manager discovery unnecessary and origin-dependent. -->
     <EnableSourceControlManagerQueries
       Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">false</EnableSourceControlManagerQueries>
+    <!-- Keep compiler document paths stable even when the source tree is reached through a filesystem alias. -->
+    <PathMap Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">$(MSBuildThisFileDirectory)=/_/</PathMap>
   </PropertyGroup>
 
   <Target Name="NormalizeGeneratedSourceLineEndings"
