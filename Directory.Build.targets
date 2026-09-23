@@ -35,7 +35,32 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <BeforePack Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">ValidateExplicitPackRevision;$(BeforePack)</BeforePack>
   </PropertyGroup>
+
+  <Target Name="ValidateExplicitPackRevision"
+          Condition="'$(IsPackable)' == 'true' and ('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '')">
+    <!-- A Git checkout is ground truth when it is available. A Git-less tree intentionally keeps the caller-supplied
+         revision as the declared source of truth because no checkout exists to disagree with it. -->
+    <Exec Command="git -C &quot;$(_RepositoryGitSourceRoot)&quot; rev-parse --verify HEAD"
+          IgnoreExitCode="true"
+          ConsoleToMsBuild="true"
+          StandardOutputImportance="Low"
+          StandardErrorImportance="Low">
+      <Output TaskParameter="ExitCode" PropertyName="_GitHeadExitCode" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_GitHeadOutput" />
+    </Exec>
+    <PropertyGroup>
+      <_ExplicitPackRevision Condition="'$(SourceRevisionId)' != ''">$(SourceRevisionId)</_ExplicitPackRevision>
+      <_ExplicitPackRevision Condition="'$(SourceRevisionId)' == ''">$(RepositoryCommit)</_ExplicitPackRevision>
+      <_RepositoryGitSourceRoot>$([System.IO.Path]::TrimEndingDirectorySeparator('$(_RepositorySourceRoot)'))</_RepositoryGitSourceRoot>
+      <_CheckedOutPackRevision>@(_GitHeadOutput)</_CheckedOutPackRevision>
+      <_NormalizedExplicitPackRevision>$([System.String]::Copy('$(_ExplicitPackRevision)').Trim().ToLowerInvariant())</_NormalizedExplicitPackRevision>
+      <_NormalizedCheckedOutPackRevision>$([System.String]::Copy('$(_CheckedOutPackRevision)').Trim().ToLowerInvariant())</_NormalizedCheckedOutPackRevision>
+    </PropertyGroup>
+    <Error Condition="'$(_GitHeadExitCode)' == '0' and '$(_NormalizedCheckedOutPackRevision)' != '$(_NormalizedExplicitPackRevision)'"
+           Text="Refusing to pack: explicit revision '$(_ExplicitPackRevision)' does not match checked-out commit '$(_CheckedOutPackRevision)' at '$(_RepositorySourceRoot)'." />
+  </Target>
 
   <Target Name="PinSourceControlInformation"
           BeforeTargets="InitializeSourceControlInformation;TranslateGitHubUrlsInSourceControlInformation"

@@ -172,6 +172,67 @@ public sealed class ReleaseContractTests
         }
     }
 
+    [Fact]
+    public void StrictPackRejectsExplicitRevisionThatDiffersFromHeadBeforeWritingArchives()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var expectedCommit = RunProcess(
+            "git",
+            new List<string> { "rev-parse", "HEAD" },
+            repositoryRoot).RequireSuccess("resolve the repository commit").Output.Trim();
+        var mismatchedCommit = "5a8d5eca75d6ac516892552cbc123df82b319443";
+        Assert.NotEqual(expectedCommit, mismatchedCommit, StringComparer.OrdinalIgnoreCase);
+
+        var temporaryRoot = Directory.CreateTempSubdirectory("resilience-pack-revision-contract-");
+        try
+        {
+            var project = Path.Combine(repositoryRoot, "src", "KeelMatrix.ResilienceSpec", "KeelMatrix.ResilienceSpec.csproj");
+            var packageDirectory = Path.Combine(temporaryRoot.FullName, "packages");
+            Directory.CreateDirectory(packageDirectory);
+
+            var restore = RunProcess(
+                "dotnet",
+                new[] { "restore", project, "--configfile", Path.Combine(repositoryRoot, "NuGet.config"), "-p:NuGetAudit=false" },
+                repositoryRoot).RequireSuccess("restore the revision mismatch shape");
+
+            var packArguments = new List<string>
+            {
+                "pack", project, "-c", "Release", "-warnaserror", "--no-restore",
+                "-p:PackageVersion=0.1.0",
+                $"-p:SourceRevisionId={mismatchedCommit}",
+                $"-p:RepositoryCommit={mismatchedCommit}",
+                "-p:RepositoryBranch=refs/heads/main",
+                "-p:RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+                "-p:PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+                "-p:ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+                "-p:GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git",
+                "-p:GitRepositoryRemoteName=origin",
+                "-p:PublishRepositoryUrl=true",
+                "-p:NuGetAudit=false",
+                "-o", packageDirectory
+            };
+            var pack = RunProcess("dotnet", packArguments, repositoryRoot);
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.nupkg");
+            var symbolsPath = Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.snupkg");
+            var packageExists = File.Exists(packagePath);
+            var symbolsExist = File.Exists(symbolsPath);
+
+            Console.WriteLine(
+                $"EXPLICIT_REVISION_MISMATCH HEAD={expectedCommit} EXPECTED={mismatchedCommit} " +
+                $"RESTORE_EXIT={restore.ExitCode} PACK_EXIT={pack.ExitCode} " +
+                $"PACKAGE_EXISTS={packageExists} SYMBOLS_EXISTS={symbolsExist}");
+
+            Assert.NotEqual(0, pack.ExitCode);
+            Assert.Contains("does not match", pack.Output, StringComparison.OrdinalIgnoreCase);
+            Assert.False(packageExists);
+            Assert.False(symbolsExist);
+        }
+        finally
+        {
+            DeleteTemporaryTree(temporaryRoot);
+        }
+    }
+
     private static ArtifactIdentity PackShape(
         string repositoryRoot,
         string shapeName,
@@ -182,7 +243,7 @@ public sealed class ReleaseContractTests
         var packageDirectory = Path.Combine(repositoryRoot, "origin-contract-artifacts");
         Directory.CreateDirectory(packageDirectory);
 
-        RunProcess(
+        var restore = RunProcess(
             "dotnet",
             new[] { "restore", project, "--configfile", Path.Combine(repositoryRoot, "NuGet.config"), "-p:NuGetAudit=false" },
             repositoryRoot).RequireSuccess($"restore the {shapeName} shape");
@@ -203,7 +264,7 @@ public sealed class ReleaseContractTests
             "-p:NuGetAudit=false",
             "-o", packageDirectory
         };
-        RunProcess("dotnet", packArguments, repositoryRoot)
+        var pack = RunProcess("dotnet", packArguments, repositoryRoot)
             .RequireSuccess($"strict-pack the {shapeName} shape");
 
         var packagePath = Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.nupkg");
@@ -221,6 +282,8 @@ public sealed class ReleaseContractTests
             .RequireSuccess($"normalize the {shapeName} package");
         RunProcess("pwsh", new[] { "-NoProfile", "-File", normalizeScript, "-PackagePath", symbolsPath }, repositoryRoot)
             .RequireSuccess($"normalize the {shapeName} symbols");
+
+        Console.WriteLine($"ORIGIN_SHAPE={shapeName} RESTORE_EXIT={restore.ExitCode} PACK_EXIT={pack.ExitCode}");
 
         return new ArtifactIdentity(
             shapeName,
