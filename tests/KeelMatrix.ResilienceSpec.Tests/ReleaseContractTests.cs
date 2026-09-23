@@ -95,7 +95,7 @@ public sealed class ReleaseContractTests
         Assert.Contains("<ScmRepositoryUrl>$(RepositoryUrl)</ScmRepositoryUrl>", buildTargets, StringComparison.Ordinal);
         Assert.Contains("<PrivateRepositoryUrl>$(RepositoryUrl)</PrivateRepositoryUrl>", buildTargets, StringComparison.Ordinal);
         Assert.Contains("<SourceRoot Update=\"@(SourceRoot)\"", buildTargets, StringComparison.Ordinal);
-        Assert.Contains("<SourceRoot Include=\"$(MSBuildThisFileDirectory)\"", buildTargets, StringComparison.Ordinal);
+        Assert.Contains("<SourceRoot Include=\"$(_RepositorySourceRoot)\"", buildTargets, StringComparison.Ordinal);
 
         foreach (var relativePath in new[]
         {
