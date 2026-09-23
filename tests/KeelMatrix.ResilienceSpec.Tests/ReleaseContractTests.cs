@@ -153,8 +153,14 @@ public sealed class ReleaseContractTests
             var first = identities[0];
             foreach (var identity in identities.Skip(1))
             {
-                Assert.Equal(first.PackageHash, identity.PackageHash);
-                Assert.Equal(first.SymbolsHash, identity.SymbolsHash);
+                Assert.True(
+                    first.PackageHash == identity.PackageHash,
+                    $"Package identity differed between '{first.ShapeName}' and '{identity.ShapeName}'. " +
+                    string.Join("; ", identities.Select(FormatIdentity)));
+                Assert.True(
+                    first.SymbolsHash == identity.SymbolsHash,
+                    $"Symbols identity differed between '{first.ShapeName}' and '{identity.ShapeName}'. " +
+                    string.Join("; ", identities.Select(FormatIdentity)));
             }
         }
         finally
@@ -207,9 +213,13 @@ public sealed class ReleaseContractTests
             .RequireSuccess($"normalize the {shapeName} symbols");
 
         return new ArtifactIdentity(
+            shapeName,
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(packagePath))),
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(symbolsPath))));
     }
+
+    private static string FormatIdentity(ArtifactIdentity identity) =>
+        $"{identity.ShapeName}:package={identity.PackageHash},symbols={identity.SymbolsHash}";
 
     private static string CloneRepository(string source, string destination)
     {
@@ -285,7 +295,7 @@ public sealed class ReleaseContractTests
         }
     }
 
-    private sealed record ArtifactIdentity(string PackageHash, string SymbolsHash);
+    private sealed record ArtifactIdentity(string ShapeName, string PackageHash, string SymbolsHash);
 
     private static ContractResult RunContract(
         string tag,
