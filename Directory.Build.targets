@@ -6,8 +6,12 @@
     <_RepositorySourceRoot
       Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../'))</_RepositorySourceRoot>
     <!-- Keep compiler document paths stable even when the source tree is reached through a filesystem alias. -->
-    <PathMap Condition="('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '') and '$(OS)' == 'Windows_NT'">$(_RepositorySourceRoot)=/_/</PathMap>
-    <PathMap Condition="('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '') and '$(OS)' != 'Windows_NT'">$(_RepositorySourceRoot)=/_/,/var/=/_/,/private/var/=/_/</PathMap>
+    <_RepositorySourceRootAlias
+      Condition="'$(OS)' != 'Windows_NT' and $([System.String]::Copy('$(_RepositorySourceRoot)').StartsWith('/private/var/'))">$([System.String]::Copy('$(_RepositorySourceRoot)').Replace('/private/var/', '/var/'))</_RepositorySourceRootAlias>
+    <_RepositorySourceRootAlias
+      Condition="'$(OS)' != 'Windows_NT' and $([System.String]::Copy('$(_RepositorySourceRoot)').StartsWith('/var/'))">/private$(_RepositorySourceRoot)</_RepositorySourceRootAlias>
+    <PathMap Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">$(_RepositorySourceRoot)=/_/</PathMap>
+    <PathMap Condition="('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '') and '$(_RepositorySourceRootAlias)' != ''">$(_RepositorySourceRoot)=/_/,$(_RepositorySourceRootAlias)=/_/</PathMap>
   </PropertyGroup>
 
   <Target Name="NormalizeGeneratedSourceLineEndings"
