@@ -41,6 +41,7 @@
       <SourceRoot Update="@(SourceRoot)" Condition="'%(SourceRoot.SourceControl)' == 'git'">
         <ScmRepositoryUrl>$(RepositoryUrl)</ScmRepositoryUrl>
         <RepositoryUrl>$(RepositoryUrl)</RepositoryUrl>
+        <RevisionId>$(SourceRevisionId)</RevisionId>
       </SourceRoot>
       <SourceRoot Include="$(MSBuildThisFileDirectory)" Condition="'$(_HasGitSourceRoot)' != 'true'">
         <SourceControl>git</SourceControl>
