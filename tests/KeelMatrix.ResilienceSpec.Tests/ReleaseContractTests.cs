@@ -295,8 +295,6 @@ public sealed class ReleaseContractTests
             "git",
             new List<string> { "rev-parse", "HEAD" },
             repositoryRoot).RequireSuccess("resolve the repository commit").Output.Trim();
-        var externalRevision = "b787a0488eacaf0a2094b4a100e6f8848539aa7c";
-        Assert.NotEqual(expectedCommit, externalRevision, StringComparer.OrdinalIgnoreCase);
 
         var temporaryRoot = Directory.CreateTempSubdirectory("resilience-git-environment-contract-");
         var canonicalGitPath = Path.Combine(repositoryRoot, ".git");
@@ -315,6 +313,24 @@ public sealed class ReleaseContractTests
                 new[] { "clone", "--no-checkout", "--no-hardlinks", "--quiet", repositoryRoot, externalClone },
                 Directory.GetCurrentDirectory()).RequireSuccess("create the external Git probe clone");
             Assert.False(File.Exists(Path.Combine(externalClone, "icon.png")));
+            var externalTree = RunProcess(
+                "git",
+                new[] { "--git-dir", Path.Combine(externalClone, ".git"), "rev-parse", "HEAD^{tree}" },
+                repositoryRoot).RequireSuccess("resolve the external Git probe tree").Output.Trim();
+            var externalRevision = RunProcess(
+                "git",
+                new[] { "--git-dir", Path.Combine(externalClone, ".git"), "commit-tree", externalTree, "-m", "external probe revision" },
+                repositoryRoot,
+                new Dictionary<string, string?>
+                {
+                    ["GIT_AUTHOR_NAME"] = "Probe",
+                    ["GIT_AUTHOR_EMAIL"] = "probe@example.invalid",
+                    ["GIT_COMMITTER_NAME"] = "Probe",
+                    ["GIT_COMMITTER_EMAIL"] = "probe@example.invalid",
+                    ["GIT_AUTHOR_DATE"] = "2000-01-01T00:00:00Z",
+                    ["GIT_COMMITTER_DATE"] = "2000-01-01T00:00:00Z"
+                }).RequireSuccess("create the external Git probe revision").Output.Trim();
+            Assert.NotEqual(expectedCommit, externalRevision, StringComparer.OrdinalIgnoreCase);
             RunProcess(
                 "git",
                 new[] { "--git-dir", Path.Combine(externalClone, ".git"), "update-ref", "refs/heads/probe", externalRevision },
@@ -384,7 +400,7 @@ public sealed class ReleaseContractTests
             var snupkgCount = Directory.EnumerateFiles(gitlessPackageDirectory, "*.snupkg").Count();
 
             Console.WriteLine(
-                $"F2_GIT_DIR NORMAL_PACK_EXIT={normalPack.ExitCode} GIT_PROBE_EXIT=0 GITLESS_PACK_EXIT=0 " +
+                $"F2_GIT_DIR EXTERNAL_REVISION={externalRevision} NORMAL_PACK_EXIT={normalPack.ExitCode} GIT_PROBE_EXIT=0 GITLESS_PACK_EXIT=0 " +
                 $"NORMAL_PACKAGE_SHA256={normalPackageHash} NORMAL_SYMBOLS_SHA256={normalSymbolsHash} " +
                 $"GITLESS_PACKAGE_SHA256={gitlessPackageHash} GITLESS_SYMBOLS_SHA256={gitlessSymbolsHash} " +
                 $"NUPKG_COUNT={nupkgCount} SNUPKG_COUNT={snupkgCount}");
