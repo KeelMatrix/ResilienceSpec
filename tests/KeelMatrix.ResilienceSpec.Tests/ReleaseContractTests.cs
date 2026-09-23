@@ -154,16 +154,14 @@ public sealed class ReleaseContractTests
             var first = identities[0];
             foreach (var identity in identities.Skip(1))
             {
+                var packageMatches = first.PackageHash == identity.PackageHash;
+                var symbolsMatch = first.SymbolsHash == identity.SymbolsHash;
                 Assert.True(
-                    first.PackageHash == identity.PackageHash,
-                    $"Package identity differed between '{first.ShapeName}' and '{identity.ShapeName}'. " +
+                    packageMatches && symbolsMatch,
+                    $"Artifact identity differed between '{first.ShapeName}' and '{identity.ShapeName}'. " +
                     string.Join("; ", identities.Select(FormatIdentity)) +
-                    $" Entry differences: {FormatArchiveDifferences(first.PackagePath, identity.PackagePath)}");
-                Assert.True(
-                    first.SymbolsHash == identity.SymbolsHash,
-                    $"Symbols identity differed between '{first.ShapeName}' and '{identity.ShapeName}'. " +
-                    string.Join("; ", identities.Select(FormatIdentity)) +
-                    $" Entry differences: {FormatArchiveDifferences(first.SymbolsPath, identity.SymbolsPath)}");
+                    $" Package entry differences: {FormatArchiveDifferences(first.PackagePath, identity.PackagePath)}." +
+                    $" Symbols entry differences: {FormatArchiveDifferences(first.SymbolsPath, identity.SymbolsPath)}");
             }
         }
         finally
