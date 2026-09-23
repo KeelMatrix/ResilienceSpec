@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KeelMatrix.ResilienceSpec.Tests;
@@ -119,6 +120,150 @@ public sealed class DeterministicTimingTests
 
         result.ShouldHaveStatus(HttpStatusCode.OK);
         scenario.Report.ShouldRespectRetryAfter().ShouldHaveRetryDelay(TimeSpan.FromSeconds(3));
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    [InlineData(TimeSpan.TicksPerMillisecond, false)]
+    [InlineData(TimeSpan.TicksPerMillisecond * 100, false)]
+    public void ExactRetryDelayRejectsEveryPositiveDifference(long additionalTicks, bool shouldPass)
+    {
+        var expected = TimeSpan.FromMilliseconds(10);
+        var observed = expected + TimeSpan.FromTicks(additionalTicks);
+        var report = ExactTimingReport(
+            [
+                TimingAttempt(1, TimeSpan.Zero, TimeSpan.Zero),
+                TimingAttempt(2, observed, TimeSpan.Zero),
+            ],
+            observed);
+
+        if (shouldPass)
+        {
+            report.ShouldHaveRetryDelay(expected);
+        }
+        else
+        {
+            Assert.Throws<ResilienceAssertionException>(() => report.ShouldHaveRetryDelay(expected));
+        }
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    [InlineData(TimeSpan.TicksPerMillisecond, false)]
+    [InlineData(TimeSpan.TicksPerMillisecond * 100, false)]
+    public void ExactAttemptDurationRejectsEveryPositiveDifference(long additionalTicks, bool shouldPass)
+    {
+        var expected = TimeSpan.FromMilliseconds(10);
+        var observed = expected + TimeSpan.FromTicks(additionalTicks);
+        var report = ExactTimingReport([TimingAttempt(1, TimeSpan.Zero, observed)], observed);
+
+        if (shouldPass)
+        {
+            report.ShouldHaveAttemptDuration(1, expected);
+        }
+        else
+        {
+            Assert.Throws<ResilienceAssertionException>(() => report.ShouldHaveAttemptDuration(1, expected));
+        }
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    [InlineData(TimeSpan.TicksPerMillisecond, false)]
+    [InlineData(TimeSpan.TicksPerMillisecond * 100, false)]
+    public void ExactSettlementTimeRejectsEveryPositiveDifference(long additionalTicks, bool shouldPass)
+    {
+        var expected = TimeSpan.FromMilliseconds(10);
+        var observed = expected + TimeSpan.FromTicks(additionalTicks);
+        var report = ExactTimingReport([TimingAttempt(1, TimeSpan.Zero, TimeSpan.Zero)], observed);
+
+        if (shouldPass)
+        {
+            report.ShouldHaveSettledAtVirtualTime(expected);
+        }
+        else
+        {
+            Assert.Throws<ResilienceAssertionException>(() => report.ShouldHaveSettledAtVirtualTime(expected));
+        }
+    }
+
+    [Fact]
+    public async Task SamplingOnlyRetryDelayCannotMasqueradeAsExactEvidence()
+    {
+        var clock = Chains.CreateClock();
+        var release = new TaskCompletionSource();
+        var step = TimeSpan.FromMilliseconds(100);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success(), HttpFault.Success()),
+            clock.TimeProvider,
+            amount =>
+            {
+                clock.Advance(amount);
+                release.TrySetResult();
+            },
+            new ResilienceScenarioOptions { AdvanceStep = step });
+        using var client = Chains.CreateClient(scenario.Handler, new SamplingRetryHandler(release.Task));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        var failure = Assert.Throws<ResilienceAssertionException>(
+            () => scenario.Report.ShouldHaveRetryDelay(step));
+        Assert.Contains("exact timing evidence", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SamplingOnlyAttemptDurationCannotMasqueradeAsExactEvidence()
+    {
+        var clock = Chains.CreateClock();
+        var release = new TaskCompletionSource();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            clock.TimeProvider,
+            amount =>
+            {
+                clock.Advance(amount);
+                release.TrySetResult();
+            });
+        using var client = Chains.CreateClient(scenario.Handler, new SamplingBeforeAttemptHandler(release.Task));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        var failure = Assert.Throws<ResilienceAssertionException>(
+            () => scenario.Report.ShouldHaveAttemptDuration(1, TimeSpan.Zero));
+        Assert.Contains("exact timing evidence", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SamplingOnlySettlementCannotMasqueradeAsExactEvidence()
+    {
+        var clock = Chains.CreateClock();
+        var release = new TaskCompletionSource();
+        var step = TimeSpan.FromMilliseconds(100);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            clock.TimeProvider,
+            amount =>
+            {
+                clock.Advance(amount);
+                release.TrySetResult();
+            },
+            new ResilienceScenarioOptions { AdvanceStep = step });
+        using var client = Chains.CreateClient(scenario.Handler, new SamplingBeforeAttemptHandler(release.Task));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        var failure = Assert.Throws<ResilienceAssertionException>(
+            () => scenario.Report.ShouldHaveSettledAtVirtualTime(step));
+        Assert.Contains("exact timing evidence", failure.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -551,6 +696,180 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public void NoOpAdvanceDelegateIsRejectedWhenUsed()
+    {
+        var provider = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(provider, static _ => { });
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(() => clock.Advance(TimeSpan.FromSeconds(1)));
+
+        Assert.Contains("exactly", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 s", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AdvanceOfAnotherProviderIsRejectedWhenUsed()
+    {
+        var provider = new FakeTimeProvider();
+        var other = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(provider, other.Advance);
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(() => clock.Advance(TimeSpan.FromSeconds(1)));
+
+        Assert.Contains("wrapped", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UnderAdvanceDelegateIsRejectedWhenUsed()
+    {
+        var provider = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(provider, amount => provider.Advance(amount / 2));
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(() => clock.Advance(TimeSpan.FromSeconds(2)));
+
+        Assert.Contains("1 s", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2 s", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DoubleAdvanceDelegateIsRejectedWhenUsed()
+    {
+        var provider = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(provider, amount => provider.Advance(amount + amount));
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(() => clock.Advance(TimeSpan.FromSeconds(1)));
+
+        Assert.Contains("2 s", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void OffsetAdvanceDelegateIsRejectedWhenUsed()
+    {
+        var provider = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(
+            provider,
+            amount => provider.Advance(amount + TimeSpan.FromTicks(1)));
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(() => clock.Advance(TimeSpan.FromSeconds(1)));
+
+        Assert.Contains("requested", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CorrectAdvanceDelegateMovesTheAdmittedProviderExactly()
+    {
+        var provider = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(provider, provider.Advance);
+        var before = provider.GetTimestamp();
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(TimeSpan.FromSeconds(1), provider.GetElapsedTime(before));
+    }
+
+    [Fact]
+    public void MovementOutsideTheWrapperAdvanceIsRejectedOnTheNextObservation()
+    {
+        var provider = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(provider, provider.Advance);
+        provider.Advance(TimeSpan.FromSeconds(1));
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(() => clock.TimeProvider.GetTimestamp());
+
+        Assert.Contains("outside", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("scenario-controlled", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task OverAdvanceCannotProduceFalseSettlementEvidence()
+    {
+        var provider = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(provider, amount => provider.Advance(amount + amount));
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(1), HttpFault.Success())),
+            clock.TimeProvider,
+            clock.Advance);
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var failure = await Assert.ThrowsAnyAsync<InvalidOperationException>(
+            () => scenario.SendAsync(client, request));
+
+        Assert.Contains("exactly", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(scenario.Report.IsSettled);
+        Assert.Null(scenario.Report.SettledVirtualElapsed);
+    }
+
+    [Fact]
+    public void NonZeroAutoAdvanceIsRejectedAtConstruction()
+    {
+        var provider = new FakeTimeProvider { AutoAdvanceAmount = TimeSpan.FromTicks(1) };
+
+        var failure = Assert.Throws<ArgumentException>(
+            () => new ResilienceScenarioClock(provider, provider.Advance));
+
+        Assert.Contains("AutoAdvanceAmount", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("zero", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AutoAdvanceMutationDuringARunFailsClosed()
+    {
+        var provider = new FakeTimeProvider();
+        var clock = new ResilienceScenarioClock(provider, provider.Advance);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            clock.TimeProvider,
+            clock.Advance);
+        provider.AutoAdvanceAmount = TimeSpan.FromTicks(1);
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var failure = await Assert.ThrowsAnyAsync<InvalidOperationException>(
+            () => scenario.SendAsync(client, request));
+
+        Assert.Contains("AutoAdvanceAmount", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SupportedTimingProviderVersionIsPinnedToTheAdmissionContract()
+    {
+        Assert.Equal(new Version(10, 10, 0, 0), typeof(FakeTimeProvider).Assembly.GetName().Version);
+    }
+
+    private static HttpAttempt TimingAttempt(int ordinal, TimeSpan startedAfter, TimeSpan duration) =>
+        new(
+            ordinal,
+            HttpMethod.Get,
+            HttpAttemptOutcome.Response,
+            HttpStatusCode.OK,
+            null,
+            startedAfter,
+            duration)
+        {
+            StartedAfterIsExact = true,
+            DurationIsExact = true,
+        };
+
+    private static HttpAttemptReport ExactTimingReport(
+        HttpAttempt[] attempts,
+        TimeSpan settledVirtualElapsed,
+        bool settledVirtualElapsedIsExact = true) =>
+        new(
+            attempts,
+            attempts.Length,
+            overflowed: false,
+            settled: true,
+            observationCutoff: false,
+            settledVirtualElapsed,
+            TimeSpan.FromMilliseconds(100),
+            settledVirtualElapsedIsExact,
+            new ScenarioTelemetry(
+                new RecordingTelemetrySink(),
+                HttpFaultScript.Sequence(HttpFault.Success()),
+                timingAssertionsAvailable: true));
+
+    [Fact]
     public async Task LongVirtualWaitsStayWallClockCheap()
     {
         var clock = Chains.CreateClock();
@@ -626,4 +945,51 @@ public sealed class DeterministicTimingTests
 
 internal sealed class ConsumerAuthoredTimeProvider : TimeProvider
 {
+}
+
+internal sealed class SamplingBeforeAttemptHandler : DelegatingHandler
+{
+    private readonly Task _release;
+
+    internal SamplingBeforeAttemptHandler(Task release) => _release = release;
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken) =>
+        _release.ContinueWith(
+            _ => base.SendAsync(request, cancellationToken),
+            cancellationToken,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default).Unwrap();
+}
+
+internal sealed class SamplingRetryHandler : DelegatingHandler
+{
+    private readonly Task _release;
+
+    internal SamplingRetryHandler(Task release) => _release = release;
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        var first = base.SendAsync(request, cancellationToken);
+        return first.ContinueWith(
+            completed =>
+            {
+                using var response = completed.GetAwaiter().GetResult();
+                return _release.ContinueWith(
+                    _ =>
+                    {
+                        using var retry = new HttpRequestMessage(request.Method, request.RequestUri);
+                        return base.SendAsync(retry, cancellationToken);
+                    },
+                    cancellationToken,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default).Unwrap();
+            },
+            cancellationToken,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default).Unwrap();
+    }
 }

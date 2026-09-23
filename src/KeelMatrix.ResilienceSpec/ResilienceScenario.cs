@@ -123,10 +123,14 @@ public sealed class ResilienceScenario : IDisposable
             {
                 pending = client.SendAsync(request, linked.Token);
             }
+            catch (TimingConfigurationException)
+            {
+                throw;
+            }
             catch (Exception exception)
             {
-                Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
-                return ResilienceResult.ForException(exception, cancellationToken.IsCancellationRequested, virtualElapsed, Handler.Report);
+                var settledElapsed = Handler.Observer.MarkSettled() ?? virtualElapsed;
+                return ResilienceResult.ForException(exception, cancellationToken.IsCancellationRequested, settledElapsed, Handler.Report);
             }
 
             var settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
@@ -216,13 +220,17 @@ public sealed class ResilienceScenario : IDisposable
             try
             {
                 var response = await pending.ConfigureAwait(false);
-                Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
-                return ResilienceResult.ForResponse(response, virtualElapsed, Handler.Report);
+                var settledElapsed = Handler.Observer.MarkSettled() ?? virtualElapsed;
+                return ResilienceResult.ForResponse(response, settledElapsed, Handler.Report);
+            }
+            catch (TimingConfigurationException)
+            {
+                throw;
             }
             catch (Exception exception)
             {
-                Handler.Observer.MarkSettled(TimeProvider is null ? null : virtualElapsed);
-                return ResilienceResult.ForException(exception, cancellationToken.IsCancellationRequested, virtualElapsed, Handler.Report);
+                var settledElapsed = Handler.Observer.MarkSettled() ?? virtualElapsed;
+                return ResilienceResult.ForException(exception, cancellationToken.IsCancellationRequested, settledElapsed, Handler.Report);
             }
         }
         catch

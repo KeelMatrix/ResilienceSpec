@@ -7,10 +7,9 @@ package can trigger.
 
 ## Platforms
 
-The package targets `net8.0`. Hosted validation runs Full validation on Windows and macOS against `10.10.0`; Linux runs
-the portable core/integration script. Every runner then runs explicit integration checks against both `9.8.0` and
-`10.10.0`. The macOS evidence comes from a hosted, virtualized `macos-latest` runner, not physical macOS hardware.
-Linux package-stage parity is not established by this workflow.
+The package targets `net8.0`. Repository validation disables telemetry on every supported hosted platform, so
+KeelMatrix's own tests, package smoke, and sample runs are not counted as product demand. The current workflow topology
+is maintained in [`docs/DEV.md`](docs/DEV.md).
 
 ## Product data boundary
 
@@ -31,10 +30,12 @@ still explicit.
 
 ## Optional telemetry
 
-The optional `KeelMatrix.Telemetry` integration requests only the shared anonymous activation and weekly heartbeat
-contract. An activation is requested when a scripted scenario reached at least one injected failure **and** at least
-one resilience assertion was evaluated. Constructing a script, handler, or scenario, running a scenario that only
-succeeds, and failing to evaluate any assertion do not activate telemetry.
+The optional `KeelMatrix.Telemetry` integration requests only the shared privacy-preserving activation and weekly
+heartbeat contract, which uses pseudonymous identifiers rather than request or scenario content. An activation is
+requested when a scripted scenario reached at least one injected failure **and** at least one resilience assertion
+was evaluated. Constructing a script, handler, or scenario, running a scenario that only succeeds, and failing to
+evaluate any assertion do not activate telemetry. Identifier, storage, retention, and delivery details belong to the
+maintained shared policy linked below.
 
 Telemetry is best-effort and opt-out. A telemetry failure cannot change a scenario result, fail a test, or affect the
 host application.

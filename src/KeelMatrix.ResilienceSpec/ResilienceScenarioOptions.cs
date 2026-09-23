@@ -18,9 +18,10 @@ public sealed class ResilienceScenarioOptions
 
     /// <summary>
     /// Gets the fallback amount of injected-clock time added while a request is pending when the tracking clock has no
-    /// scheduled timer to target. The value is also the maximum granularity reported by
-    /// <see cref="HttpAttemptReport.ObservationStep"/> and used by timing assertions. When a supported tracking
-    /// clock exposes a timer deadline, the scenario advances directly to that deadline. Defaults to 100 milliseconds.
+    /// scheduled timer to target. The value is reported by <see cref="HttpAttemptReport.ObservationStep"/> as the
+    /// sampling interval. Exact timing assertions fail closed after fallback sampling; this value is never an implicit
+    /// tolerance. When a supported tracking clock exposes a timer deadline, the scenario advances directly to that
+    /// deadline. Defaults to 100 milliseconds.
     /// </summary>
     public TimeSpan AdvanceStep { get; init; } = TimeSpan.FromMilliseconds(100);
 

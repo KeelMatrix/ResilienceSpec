@@ -175,7 +175,8 @@ public sealed class ScriptedDownstreamTests
             HttpMethod.Get,
             HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)),
             startedAfter: null,
-            seam);
+            startedAfterIsExact: false,
+            publicationSeam: seam);
 
         var completion = Task.Run(() => entry.Complete(
             HttpAttemptOutcome.Response,

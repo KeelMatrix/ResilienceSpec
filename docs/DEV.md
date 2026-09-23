@@ -48,17 +48,19 @@ run:
 bash ./scripts/validate-linux.sh
 ```
 
-The script restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core Release tests, and runs the
-integration Release tests when that project is present. The hosted Linux job uses this lightweight path; it does not run
-package inspection, the clean consumer smoke test, or the sample. Windows and macOS use
-`scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0`, including those package stages and the required audit.
+The script restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core and integration Release tests,
+then runs `scripts/Invoke-PackageSmoke.ps1` and `scripts/Run-Sample.ps1`. The package smoke includes pack, package
+inspection, and an isolated clean-consumer restore. Linux does not run the formatting gate or the dependency audit.
+Windows and macOS use `scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0`, which includes formatting, the same
+package smoke and sample stages, and the required dependency audit.
 
 ## Hosted CI status
 
 The repository contains `.github/workflows/validate.yml`, which runs on pushes to `main` and on manual dispatch with
 Windows, Ubuntu, and macOS hosted runners. Windows and macOS invoke Full validation against `10.10.0`; Linux runs its
-portable core/integration script. Every runner then runs explicit integration jobs for both `9.8.0` and `10.10.0`. Only
-`net8.0` is exercised; a hosted result is evidence from the specific runner, not physical hardware.
+repository-controlled test, package-smoke, and sample path without the format or audit stages. Every runner then runs
+explicit integration jobs for both `9.8.0` and `10.10.0`. Only `net8.0` is exercised; a hosted result is evidence from
+the specific runner, not physical hardware.
 
 Useful narrower variants:
 
@@ -122,14 +124,19 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 ## Deterministic timing contract
 
 Timing assertions require a `ResilienceScenarioClock` around an exact
-`Microsoft.Extensions.Time.Testing.FakeTimeProvider` used by the client pipeline. Register `clock.TimeProvider` and
-pass that provider plus `clock.Advance` to the scenario. Admission explicitly loads
-`Microsoft.Extensions.TimeProvider.Testing.dll` from the dependency path beside the package assembly, checks the
-expected Microsoft strong-name public-key token, and compares the provider type with the type from that assembly;
-`TimeProvider.System`, consumer-authored derived or delegating providers, same-name assemblies from another path, and
-resolver-hook substitutions are rejected. The check does not attest a consumer-replaced file at that exact path. The
-scenario advances directly to the next tracked provider timer when available and uses `AdvanceStep` only when no timer
-deadline is available. It waits for scripted-downstream progress only after a timer fires; if a fired timer's
+`Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0` used
+by the client pipeline. Other testing-package versions are unverified and rejected by admission. Keep
+`AutoAdvanceAmount` at zero, register `clock.TimeProvider`, and pass that provider plus `clock.Advance` to the scenario.
+The wrapper verifies that its delegate moves the admitted provider once by exactly the requested duration and detects
+direct or other unexpected provider movement. Admission explicitly loads
+`Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the dependency path beside the package
+assembly, checks the expected Microsoft strong-name public-key token, and compares the provider type with the type from
+that assembly; `TimeProvider.System`, consumer-authored derived or delegating providers, same-name assemblies from
+another path, and resolver-hook substitutions are rejected. The check does not attest a consumer-replaced file at that
+exact path. The scenario advances directly to the next tracked provider timer when available and uses `AdvanceStep`
+only when no timer deadline is available. Exact assertions compare injected-clock values for equality and reject the
+specific observation if fallback sampling affected it; `AdvanceStep` is not a tolerance. It waits for
+scripted-downstream progress only after a timer fires; if a fired timer's
 continuation does not reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` without
 another virtual advance. The observation window is a watchdog, not a timing measurement. A virtual-budget or no-advance
 cutoff returns `Pending` and is not reported as request settlement. Cancellation cleanup is separately bounded by
@@ -141,14 +148,10 @@ the wait runs on the injected clock, so it is deliberately not exposed.
 ## Dependency audit evidence
 
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required` fails closed unless direct and transitive advisory data is
-available. The audit previously identified `Microsoft.Build.Tasks.Git 8.0.0`, brought in by the private
-`Microsoft.SourceLink.GitHub 8.0.0` build dependency, through advisory `GHSA-23fw-v26w-5fgq`. The repository now
-uses `Microsoft.SourceLink.GitHub 10.0.401`, aligned with the selected .NET SDK. The final required audit passed on
-2026-09-16: all three projects reported no vulnerable packages from `https://api.nuget.org/v3/index.json`.
-
-The earlier advisory finding is resolved by the SourceLink update and the passing audit. Keep the required mode
-fail-closed and rerun it before any release tag or publication; treat a non-zero result as a release blocker. No
-release action is authorized by this note.
+available and every project reports no vulnerable packages from `https://api.nuget.org/v3/index.json`. Windows and
+macOS Full validation run this audit; Linux does not. Audit evidence is valid only for the exact candidate and hosted
+run that produced it, so use the current candidate's CI conclusion rather than a dated statement in this document.
+Treat a non-zero result as a release blocker. No release action is authorized by a passing audit.
 
 ## Release preparation
 

@@ -46,4 +46,9 @@ public sealed record HttpAttempt(
     HttpStatusCode? StatusCode,
     TimeSpan? RetryAfter,
     TimeSpan? StartedAfter,
-    TimeSpan? Duration);
+    TimeSpan? Duration)
+{
+    internal bool StartedAfterIsExact { get; init; }
+
+    internal bool DurationIsExact { get; init; }
+}

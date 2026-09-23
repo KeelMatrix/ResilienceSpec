@@ -198,13 +198,13 @@ public static class ResilienceAssertions
                 "no recorded attempt carried a Retry-After value");
     }
 
-    /// <summary>Asserts the injected-clock delay between every pair of consecutive attempts.</summary>
+    /// <summary>Asserts exact equality for the injected-clock delay between every pair of consecutive attempts.</summary>
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="expected">The expected inter-attempt delay.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
     /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
-    /// <exception cref="ResilienceAssertionException">The observed delays differ from the expectation.</exception>
+    /// <exception cref="ResilienceAssertionException">Exact timing evidence is unavailable or the observed delays differ from the expectation.</exception>
     public static HttpAttemptReport ShouldHaveRetryDelay(this HttpAttemptReport report, TimeSpan expected)
     {
         ArgumentNullException.ThrowIfNull(report);
@@ -220,14 +220,20 @@ public static class ResilienceAssertions
                 $"the downstream served {report.AttemptCount} attempt(s)");
         }
 
-        var step = report.ObservationStep!.Value;
         var intervals = new List<TimeSpan>(report.AttemptCount - 1);
         var passed = true;
         for (var index = 0; index + 1 < report.AttemptCount; index++)
         {
+            var attempt = report.Attempts[index];
+            var next = report.Attempts[index + 1];
+            RequireExactTimingEvidence(
+                report,
+                nameof(ShouldHaveRetryDelay),
+                attempt.StartedAfterIsExact && attempt.DurationIsExact && next.StartedAfterIsExact,
+                $"the interval between attempts #{attempt.Ordinal} and #{next.Ordinal}");
             var observed = Interval(report.Attempts[index], report.Attempts[index + 1]);
             intervals.Add(observed);
-            passed &= observed >= expected && observed <= expected + step;
+            passed &= observed == expected;
         }
 
         report.RecordAssertion(passed);
@@ -240,7 +246,7 @@ public static class ResilienceAssertions
                 $"the observed inter-attempt delays were {string.Join(", ", intervals.ConvertAll(TimeFormat.Describe))}");
     }
 
-    /// <summary>Asserts how long one attempt lasted on the injected clock.</summary>
+    /// <summary>Asserts exact equality for how long one attempt lasted on the injected clock.</summary>
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="ordinal">The one-based attempt ordinal.</param>
     /// <param name="expected">The expected injected-clock duration of that attempt.</param>
@@ -282,8 +288,12 @@ public static class ResilienceAssertions
                 "incomplete timing evidence: observation cleanup ended the attempt before a genuine completion");
         }
 
-        var step = report.ObservationStep!.Value;
-        var passed = observed >= expected && observed <= expected + step;
+        RequireExactTimingEvidence(
+            report,
+            nameof(ShouldHaveAttemptDuration),
+            attempt.DurationIsExact,
+            $"attempt #{ordinal}'s duration");
+        var passed = observed == expected;
         report.RecordAssertion(passed);
 
         return passed
@@ -294,13 +304,13 @@ public static class ResilienceAssertions
                 $"it lasted {TimeFormat.Describe(observed)}");
     }
 
-    /// <summary>Asserts the total injected-clock time a genuinely completed request or strategy timeout needed to settle.</summary>
+    /// <summary>Asserts exact equality for the total injected-clock time a genuinely completed request or strategy timeout needed to settle.</summary>
     /// <param name="report">The attempt report to assert on.</param>
     /// <param name="expected">The expected injected-clock time until the run settled.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
     /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
-    /// <exception cref="ResilienceAssertionException">The run was cut off while pending or settled at a different time.</exception>
+    /// <exception cref="ResilienceAssertionException">The run was cut off while pending, exact timing evidence is unavailable, or it settled at a different time.</exception>
     public static HttpAttemptReport ShouldHaveSettledAtVirtualTime(this HttpAttemptReport report, TimeSpan expected)
     {
         ArgumentNullException.ThrowIfNull(report);
@@ -318,8 +328,12 @@ public static class ResilienceAssertions
                     : "the run has not finished yet");
         }
 
-        var step = report.ObservationStep!.Value;
-        var passed = observed >= expected && observed <= expected + step;
+        RequireExactTimingEvidence(
+            report,
+            nameof(ShouldHaveSettledAtVirtualTime),
+            report.SettledVirtualElapsedIsExact,
+            "the settlement observation");
+        var passed = observed == expected;
         report.RecordAssertion(passed);
 
         return passed
@@ -444,6 +458,27 @@ public static class ResilienceAssertions
                 $"{assertion} to have complete timing evidence",
                 $"attempt #{attempt.Ordinal} has no genuine completion duration");
         }
+    }
+
+    private static void RequireExactTimingEvidence(
+        HttpAttemptReport report,
+        string assertion,
+        bool hasExactTimingEvidence,
+        string observation)
+    {
+        if (hasExactTimingEvidence)
+        {
+            return;
+        }
+
+        report.RecordAssertion(false);
+        throw Fail(
+            report,
+            $"{assertion} to have exact timing evidence",
+            $"{observation} was available only through fallback sampling at " +
+            $"{TimeFormat.Describe(report.ObservationStep!.Value)} intervals. " +
+            "Use a supported provider timer deadline for the observed operation; AdvanceStep is a sampling interval, " +
+            "not an implicit tolerance for exact assertions");
     }
 
     private static TimeSpan Interval(HttpAttempt attempt, HttpAttempt next) =>

@@ -29,18 +29,21 @@ internal sealed class AttemptEntry
     private readonly AttemptPublicationSeam? _publicationSeam;
     private Completion? _completion;
     private TimeSpan? _duration;
+    private bool _durationIsExact;
 
     internal AttemptEntry(
         int ordinal,
         HttpMethod method,
         HttpFault? fault,
         TimeSpan? startedAfter,
+        bool startedAfterIsExact,
         AttemptPublicationSeam? publicationSeam = null)
     {
         Ordinal = ordinal;
         Method = method;
         Fault = fault;
         StartedAfter = startedAfter;
+        StartedAfterIsExact = startedAfterIsExact;
         _publicationSeam = publicationSeam;
     }
 
@@ -52,6 +55,8 @@ internal sealed class AttemptEntry
 
     internal TimeSpan? StartedAfter { get; }
 
+    internal bool StartedAfterIsExact { get; }
+
     internal void Complete(HttpAttemptOutcome outcome, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null)
     {
         // Publish all response metadata through one immutable reference. A live report can therefore observe either
@@ -61,11 +66,12 @@ internal sealed class AttemptEntry
         _publicationSeam?.Observe(AttemptPublicationPoint.AfterCompletionPublication);
     }
 
-    internal void Finish(TimeSpan? duration)
+    internal void Finish(TimeSpan? duration, bool durationIsExact)
     {
         lock (_gate)
         {
             _duration = duration;
+            _durationIsExact = durationIsExact;
         }
     }
 
@@ -74,9 +80,11 @@ internal sealed class AttemptEntry
         _publicationSeam?.Observe(AttemptPublicationPoint.BeforeSnapshotRead);
         var completion = Volatile.Read(ref _completion);
         TimeSpan? duration;
+        bool durationIsExact;
         lock (_gate)
         {
             duration = _duration;
+            durationIsExact = _durationIsExact;
         }
 
         return new HttpAttempt(
@@ -86,7 +94,11 @@ internal sealed class AttemptEntry
             completion?.StatusCode,
             completion?.RetryAfter,
             StartedAfter,
-            duration);
+            duration)
+        {
+            StartedAfterIsExact = StartedAfterIsExact,
+            DurationIsExact = durationIsExact,
+        };
     }
 
     private sealed record Completion(
@@ -166,6 +178,7 @@ internal sealed class ScenarioObserver
     private TaskCompletionSource<bool> _progress = NewProgressSource();
     private bool _settled;
     private TimeSpan? _settledVirtualElapsed;
+    private bool _settledVirtualElapsedIsExact;
 
     internal ScenarioObserver(HttpFaultScript script, TimeProvider? clock, ResilienceScenarioOptions options)
     {
@@ -228,8 +241,14 @@ internal sealed class ScenarioObserver
             _inFlight++;
             _settled = false;
             _settledVirtualElapsed = null;
+            _settledVirtualElapsedIsExact = false;
             var ordinal = ++_ordinal;
-            entry = new AttemptEntry(ordinal, method, _script.StepAt(ordinal), Elapsed());
+            entry = new AttemptEntry(
+                ordinal,
+                method,
+                _script.StepAt(ordinal),
+                Elapsed(),
+                HasExactTimingEvidence());
             if (_entries.Count < HttpAttemptReport.MaximumRecordedAttempts)
             {
                 _entries.Add(entry);
@@ -254,10 +273,12 @@ internal sealed class ScenarioObserver
         lock (_gate)
         {
             var finished = Elapsed();
+            var durationIsExact = HasExactTimingEvidence();
             entry.Finish(
                 !_observationCleanupActive && finished is { } end && entry.StartedAfter is { } start
                     ? end - start
-                    : null);
+                    : null,
+                !_observationCleanupActive && entry.StartedAfterIsExact && durationIsExact);
             _inFlight--;
             failed = entry.Fault?.IsFailure == true;
         }
@@ -278,16 +299,20 @@ internal sealed class ScenarioObserver
         }
     }
 
-    internal void MarkSettled(TimeSpan? virtualElapsed)
+    internal TimeSpan? MarkSettled()
     {
+        var virtualElapsed = Elapsed();
+        var virtualElapsedIsExact = HasExactTimingEvidence();
         lock (_gate)
         {
             _settled = true;
             _observationCutoff = false;
             _settledVirtualElapsed = virtualElapsed;
+            _settledVirtualElapsedIsExact = virtualElapsedIsExact;
         }
 
         SignalProgress();
+        return virtualElapsed;
     }
 
     internal void MarkObservationCutoff()
@@ -297,6 +322,7 @@ internal sealed class ScenarioObserver
             _settled = false;
             _observationCutoff = true;
             _settledVirtualElapsed = null;
+            _settledVirtualElapsedIsExact = false;
         }
 
         SignalProgress();
@@ -367,11 +393,15 @@ internal sealed class ScenarioObserver
                 _observationCutoff,
                 _settledVirtualElapsed,
                 _clock is null ? null : _options.AdvanceStep,
+                _settledVirtualElapsedIsExact,
                 Telemetry);
         }
     }
 
     private TimeSpan? Elapsed() => _clock?.GetElapsedTime(_startTimestamp);
+
+    private bool HasExactTimingEvidence() =>
+        _clock is not null && ResilienceScenarioClock.HasExactTimingEvidence(_clock);
 
     private void SignalProgress()
     {

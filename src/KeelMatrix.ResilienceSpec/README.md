@@ -18,8 +18,10 @@ dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 ```
 
 The additional commands install the fake-clock and Microsoft standard-handler packages used by this example. They are
-not runtime dependencies of `KeelMatrix.ResilienceSpec`; use matching supported versions when testing another
-`Microsoft.Extensions.Http.Resilience` release.
+not runtime dependencies of `KeelMatrix.ResilienceSpec`. `Microsoft.Extensions.TimeProvider.Testing` `10.10.0` is the
+supported timing-provider package for this release while `Microsoft.Extensions.Http.Resilience` may vary from `9.8.0`
+up to, but not including, `11.0.0`. Other testing-package versions are unverified and are not admitted for timing
+evidence.
 
 ## Quick Example
 
@@ -72,14 +74,17 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 - The package verifies behaviour; it does not add resilience, recommend retry values, or inspect Polly pipeline
   descriptors.
 - Timing assertions require a `ResilienceScenarioClock` around an exact
-  `Microsoft.Extensions.Time.Testing.FakeTimeProvider`. Register its `TimeProvider` property in the client pipeline
-  and pass that property plus `clock.Advance` to the scenario. Without the wrapper, timing scenarios fail with
+  `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`.
+  Keep `AutoAdvanceAmount` at zero, register the wrapper's `TimeProvider` property in the client pipeline, and pass
+  that property plus `clock.Advance` to the scenario. The wrapper verifies that each advance moves the admitted
+  provider once by exactly the requested duration and rejects direct or different-provider movement. Without the
+  wrapper, timing scenarios fail with
   `MissingTimeProviderException` instead of falling back to sleeps. The wrapper explicitly loads
-  `Microsoft.Extensions.TimeProvider.Testing.dll` from the dependency path beside the package assembly, checks the
-  expected Microsoft strong-name public-key token, and requires the provider type from that assembly. It rejects
-  `TimeProvider.System`, consumer-authored derived or delegating providers, same-name assemblies loaded from another
-  path, and resolver-hook substitutions. This provenance check does not attest a consumer-replaced file at that exact
-  dependency path, so wall-clock timing cannot become timing evidence through loader substitution.
+  `Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the dependency path beside the package
+  assembly, checks the expected Microsoft strong-name public-key token, and requires the provider type from that
+  assembly. It rejects other testing-package versions, `TimeProvider.System`, consumer-authored derived or delegating
+  providers, same-name assemblies loaded from another path, and resolver-hook substitutions. This provenance check
+  does not attest a consumer-replaced file at that exact dependency path.
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
 - Timing observations use `ResilienceScenarioOptions.AdvanceStep` only as a fallback when no provider timer deadline
@@ -87,7 +92,10 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   deadline; `ResilienceScenarioClock` records provider timers that fire. If a fired timer's continuation does not
   reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` at the current virtual
   time instead of allowing another advance. Intermediate virtual delays stay wall-clock cheap because they do not
-  require a watchdog wait before a timer fires.
+  require a watchdog wait before a timer fires. `ShouldHaveRetryDelay`, `ShouldHaveAttemptDuration`, and
+  `ShouldHaveSettledAtVirtualTime` require exact equality and reject an observation affected by fallback sampling;
+  `AdvanceStep` is a sampling interval, not a tolerance. `ShouldRespectRetryAfter` intentionally remains a minimum
+  assertion, so a longer wait is valid.
 - When the virtual budget or pending observation expires, `SendAsync` returns `Pending` and the report marks
   `IsObservationCutoff`; `ShouldHaveSettledAtVirtualTime` accepts only genuine request settlement. An attempt ended by
   observation cleanup has incomplete timing evidence, so `ShouldHaveAttemptDuration` rejects it instead of treating
@@ -117,8 +125,11 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 ## Supported Integration Range
 
 The integration tests cover `Microsoft.Extensions.Http.Resilience` **9.8.0 and newer, below 11.0**, and are run
-against the lowest tested release and the current release. The core package does not reference
-`Microsoft.Extensions.Http.Resilience` or Polly.
+against the lowest tested release and the current release. Both endpoints use
+`Microsoft.Extensions.TimeProvider.Testing` `10.10.0`; other testing-package versions are unverified. The
+implementation-neutral script, report, and assertion core does not reference `Microsoft.Extensions.Http.Resilience`
+or Polly. The shipping package intentionally references `Microsoft.Extensions.Http` for its factory adapter and
+`KeelMatrix.Telemetry`; Polly and `Microsoft.Extensions.Http.Resilience` remain outside its runtime dependency graph.
 
 ## Telemetry
 

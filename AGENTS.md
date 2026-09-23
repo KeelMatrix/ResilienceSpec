@@ -32,8 +32,10 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 
 - The terminal handler replaces only the network boundary. Never bypass, replace, or duplicate the resilience layer
   of the client under test, and never depend on reflection over Polly or Microsoft internals for correctness.
-- The core package uses only `System.Net.Http`. `Microsoft.Extensions.Http.Resilience` and Polly belong to test and
-  sample projects only.
+- The implementation-neutral script, report, and assertion core does not depend on Polly or
+  `Microsoft.Extensions.Http.Resilience`. The shipping package intentionally references `Microsoft.Extensions.Http`
+  for its `IHttpClientFactory` adapter and `KeelMatrix.Telemetry`; Polly and
+  `Microsoft.Extensions.Http.Resilience` remain outside the runtime package dependency graph.
 - Scripts, attempt records, and diagnostics stay privacy-safe: ordinal, method, broad outcome, scripted status or
   `Retry-After` value, and injected-clock timing only. Never record or echo URIs, query strings, headers, cookies,
   authorization values, bodies, or exception messages.

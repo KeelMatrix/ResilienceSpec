@@ -30,6 +30,7 @@ public sealed class HttpAttemptReport
         bool observationCutoff,
         TimeSpan? settledVirtualElapsed,
         TimeSpan? observationStep,
+        bool settledVirtualElapsedIsExact,
         ScenarioTelemetry telemetry)
     {
         _attempts = Array.AsReadOnly(attempts);
@@ -39,6 +40,7 @@ public sealed class HttpAttemptReport
         IsObservationCutoff = observationCutoff;
         SettledVirtualElapsed = settledVirtualElapsed;
         ObservationStep = observationStep;
+        SettledVirtualElapsedIsExact = settledVirtualElapsedIsExact;
         Telemetry = telemetry;
         Timeline = BuildTimeline(_attempts, attemptCount, overflowed);
     }
@@ -84,9 +86,9 @@ public sealed class HttpAttemptReport
     public TimeSpan? SettledVirtualElapsed { get; }
 
     /// <summary>
-    /// Gets the injected-clock granularity of the scenario, or <see langword="null"/> when no controllable clock
-    /// was supplied. Timing assertions compare an observed duration with the expected value, allowing at most one
-    /// advance step of additional time.
+    /// Gets the fallback injected-clock sampling interval of the scenario, or <see langword="null"/> when no
+    /// controllable clock was supplied. Exact timing assertions never use this value as a tolerance and reject
+    /// observations that required fallback sampling.
     /// </summary>
     public TimeSpan? ObservationStep { get; }
 
@@ -95,6 +97,8 @@ public sealed class HttpAttemptReport
     /// inter-attempt assertions can still reject incomplete evidence from an observation cutoff.
     /// </summary>
     public bool HasTiming => ObservationStep is not null;
+
+    internal bool SettledVirtualElapsedIsExact { get; }
 
     /// <summary>
     /// Gets the compact local timeline: one line per recorded attempt, followed by one explicit truncation line when

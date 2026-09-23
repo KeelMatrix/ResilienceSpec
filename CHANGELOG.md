@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ### Fixed
 
+- Exact retry-delay, attempt-duration, and settlement assertions now require equality on exact injected-clock evidence;
+  fallback sampling is reported as unavailable exact evidence instead of acting as an implicit tolerance.
+- `ResilienceScenarioClock` now rejects testing-provider versions other than `10.10.0`, non-zero automatic advancement,
+  unexpected provider movement, and advance delegates that do not move the admitted provider by exactly the requested
+  duration.
 - Observation-cutoff cleanup no longer supplies a virtual duration that can satisfy a per-attempt timeout assertion;
   genuinely completed earlier attempts remain independently assertable.
 - Native `HttpClient.Timeout` cancellation is classified as `Timeout`, while caller and unrelated cancellations remain
