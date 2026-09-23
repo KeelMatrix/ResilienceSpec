@@ -3,8 +3,10 @@
     <!-- A pinned pack revision makes source-control manager discovery unnecessary and origin-dependent. -->
     <EnableSourceControlManagerQueries
       Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">false</EnableSourceControlManagerQueries>
+    <_RepositorySourceRoot
+      Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../'))</_RepositorySourceRoot>
     <!-- Keep compiler document paths stable even when the source tree is reached through a filesystem alias. -->
-    <PathMap Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">$(MSBuildThisFileDirectory)=/_/</PathMap>
+    <PathMap Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">$(_RepositorySourceRoot)=/_/</PathMap>
   </PropertyGroup>
 
   <Target Name="NormalizeGeneratedSourceLineEndings"
@@ -45,7 +47,7 @@
         <RepositoryUrl>$(RepositoryUrl)</RepositoryUrl>
         <RevisionId>$(SourceRevisionId)</RevisionId>
       </SourceRoot>
-      <SourceRoot Include="$(MSBuildThisFileDirectory)" Condition="'$(_HasGitSourceRoot)' != 'true'">
+      <SourceRoot Include="$(_RepositorySourceRoot)" Condition="'$(_HasGitSourceRoot)' != 'true'">
         <SourceControl>git</SourceControl>
         <RepositoryUrl>$(RepositoryUrl)</RepositoryUrl>
         <ScmRepositoryUrl>$(RepositoryUrl)</ScmRepositoryUrl>
