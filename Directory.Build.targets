@@ -7,7 +7,7 @@
       Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../'))</_RepositorySourceRoot>
     <!-- Keep compiler document paths stable even when the source tree is reached through a filesystem alias. -->
     <PathMap Condition="('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '') and '$(OS)' == 'Windows_NT'">$(_RepositorySourceRoot)=/_/</PathMap>
-    <PathMap Condition="('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '') and '$(OS)' != 'Windows_NT'">$(_RepositorySourceRoot)=/_/;/var/=/_/;/private/var/=/_/</PathMap>
+    <PathMap Condition="('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '') and '$(OS)' != 'Windows_NT'">$(_RepositorySourceRoot)=/_/,/var/=/_/,/private/var/=/_/</PathMap>
   </PropertyGroup>
 
   <Target Name="NormalizeGeneratedSourceLineEndings"
