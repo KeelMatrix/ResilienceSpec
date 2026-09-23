@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Reflection.Metadata;
 using System.Security.Cryptography;
 using System.Text;
 using Xunit;
@@ -161,7 +162,8 @@ public sealed class ReleaseContractTests
                     $"Artifact identity differed between '{first.ShapeName}' and '{identity.ShapeName}'. " +
                     string.Join("; ", identities.Select(FormatIdentity)) +
                     $" Package entry differences: {FormatArchiveDifferences(first.PackagePath, identity.PackagePath)}." +
-                    $" Symbols entry differences: {FormatArchiveDifferences(first.SymbolsPath, identity.SymbolsPath)}");
+                    $" Symbols entry differences: {FormatArchiveDifferences(first.SymbolsPath, identity.SymbolsPath)}." +
+                    $" PDB document differences: {FormatPdbDocumentDifferences(first.SymbolsPath, identity.SymbolsPath)}");
             }
         }
         finally
@@ -261,6 +263,38 @@ public sealed class ReleaseContractTests
         using var memory = new MemoryStream();
         stream.CopyTo(memory);
         return memory.ToArray();
+    }
+
+    private static string FormatPdbDocumentDifferences(string expectedPath, string actualPath)
+    {
+        var expected = ReadPdbDocuments(expectedPath);
+        var actual = ReadPdbDocuments(actualPath);
+        return string.Join(
+            ", ",
+            expected.Keys
+                .Union(actual.Keys, StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .Where(name => !expected.TryGetValue(name, out var expectedRecord) ||
+                    !actual.TryGetValue(name, out var actualRecord) ||
+                    !string.Equals(expectedRecord, actualRecord, StringComparison.Ordinal))
+                .Select(name => $"{name}={expected.GetValueOrDefault(name, "missing")}->{actual.GetValueOrDefault(name, "missing")}"));
+    }
+
+    private static Dictionary<string, string> ReadPdbDocuments(string symbolsPath)
+    {
+        using var archive = ZipFile.OpenRead(symbolsPath);
+        var pdbEntry = archive.Entries.Single(entry => entry.FullName.EndsWith(".pdb", StringComparison.Ordinal));
+        using var stream = new MemoryStream(ReadArchiveEntry(pdbEntry));
+        using var provider = MetadataReaderProvider.FromPortablePdbStream(stream);
+        var reader = provider.GetMetadataReader();
+        return reader.Documents.ToDictionary(
+            handle => Convert.ToHexString(reader.GetBlobBytes(reader.GetDocument(handle).Name)),
+            handle =>
+            {
+                var document = reader.GetDocument(handle);
+                return $"algorithm={document.HashAlgorithm},hash={Convert.ToHexString(reader.GetBlobBytes(document.Hash))}";
+            },
+            StringComparer.Ordinal);
     }
 
     private static string CloneRepository(string source, string destination)
