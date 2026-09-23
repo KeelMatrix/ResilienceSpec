@@ -298,7 +298,7 @@ public sealed class ReleaseContractTests
 
         var temporaryRoot = Directory.CreateTempSubdirectory("resilience-git-environment-contract-");
         var canonicalGitPath = Path.Combine(repositoryRoot, ".git");
-        var savedGitPath = Path.Combine(temporaryRoot.FullName, "canonical-dot-git");
+        var savedGitPath = Path.Combine(repositoryRoot, $".git-resilience-pack-test-backup-{Guid.NewGuid():N}");
         var metadataMoved = false;
         try
         {
