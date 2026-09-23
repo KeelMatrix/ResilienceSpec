@@ -62,6 +62,7 @@ $normalizationScript = Join-Path $PSScriptRoot 'Normalize-PackageArchive.ps1'
 $sampleProject = Join-Path $repo 'samples/KeelMatrix.ResilienceSpec.Sample/KeelMatrix.ResilienceSpec.Sample.csproj'
 $sampleRoot = Join-Path ([IO.Path]::GetTempPath()) "resiliencespec-sample-$([Guid]::NewGuid().ToString('N'))"
 $packageFeed = Join-Path $sampleRoot 'feed'
+$packPackages = Join-Path $sampleRoot 'pack-packages'
 $consumerPackages = Join-Path $sampleRoot 'packages'
 $nugetConfig = Join-Path $sampleRoot 'NuGet.config'
 $httpCache = Join-Path $sampleRoot 'http-cache'
@@ -73,7 +74,7 @@ $snupkgName = "KeelMatrix.ResilienceSpec.$PackageVersion.snupkg"
 $savedEnvironment = @{}
 
 try {
-    New-Item -ItemType Directory -Path $packageFeed, $consumerPackages, $httpCache, $scratch, $pluginsCache, $dotnetHome -Force | Out-Null
+    New-Item -ItemType Directory -Path $packageFeed, $packPackages, $consumerPackages, $httpCache, $scratch, $pluginsCache, $dotnetHome -Force | Out-Null
 
     $expectedCommit = $ExpectedRepositoryCommit
     if ([string]::IsNullOrWhiteSpace($expectedCommit)) {
@@ -98,6 +99,11 @@ try {
     [Environment]::SetEnvironmentVariable('DOTNET_CLI_TELEMETRY_OPTOUT', '1', 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_NOLOGO', '1', 'Process')
     [Environment]::SetEnvironmentVariable('KEELMATRIX_NO_TELEMETRY', '1', 'Process')
+    [Environment]::SetEnvironmentVariable('NUGET_PACKAGES', $packPackages, 'Process')
+    [Environment]::SetEnvironmentVariable('NUGET_HTTP_CACHE_PATH', $httpCache, 'Process')
+    [Environment]::SetEnvironmentVariable('NUGET_SCRATCH', $scratch, 'Process')
+    [Environment]::SetEnvironmentVariable('NUGET_PLUGINS_CACHE_PATH', $pluginsCache, 'Process')
+    [Environment]::SetEnvironmentVariable('DOTNET_CLI_HOME', $dotnetHome, 'Process')
 
     Write-Output 'Pack the shipping project for the sample'
     Invoke-Checked 'dotnet' @(

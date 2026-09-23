@@ -103,6 +103,7 @@ $packageFeed = Join-Path $ArtifactsDirectory 'feed'
 $reproducibilityRoot = Join-Path $smokeRoot 'reproducibility'
 $firstPack = Join-Path $reproducibilityRoot 'first'
 $secondPack = Join-Path $reproducibilityRoot 'second'
+$packPackages = Join-Path $smokeRoot 'pack-packages'
 $consumerPackages = Join-Path $smokeRoot 'packages'
 $nugetConfig = Join-Path $smokeRoot 'NuGet.config'
 $httpCache = Join-Path $smokeRoot 'http-cache'
@@ -114,7 +115,7 @@ $smokeLog = Join-Path $ArtifactsDirectory 'package-smoke.log'
 $savedEnvironment = @{}
 
 try {
-    New-Item -ItemType Directory -Path $packageFeed, $consumerPackages, $httpCache, $scratch, $pluginsCache, $dotnetHome, $firstPack, $secondPack, $consumerSpoofOutput -Force | Out-Null
+    New-Item -ItemType Directory -Path $packageFeed, $packPackages, $consumerPackages, $httpCache, $scratch, $pluginsCache, $dotnetHome, $firstPack, $secondPack, $consumerSpoofOutput -Force | Out-Null
 
     $consumerSpoofPublicKey = Join-Path $consumerSpoofOutput 'MicrosoftPublic.snk'
     [IO.File]::WriteAllBytes(
@@ -189,6 +190,11 @@ try {
         '-p:NuGetAudit=false')
 
     Write-Output 'Pack the shipping project twice for reproducibility'
+    [Environment]::SetEnvironmentVariable('NUGET_PACKAGES', $packPackages, 'Process')
+    [Environment]::SetEnvironmentVariable('NUGET_HTTP_CACHE_PATH', $httpCache, 'Process')
+    [Environment]::SetEnvironmentVariable('NUGET_SCRATCH', $scratch, 'Process')
+    [Environment]::SetEnvironmentVariable('NUGET_PLUGINS_CACHE_PATH', $pluginsCache, 'Process')
+    [Environment]::SetEnvironmentVariable('DOTNET_CLI_HOME', $dotnetHome, 'Process')
     Invoke-Checked 'dotnet' ($packArguments + @('-o', $firstPack))
     Invoke-Checked 'dotnet' ($packArguments + @('-o', $secondPack))
 
@@ -258,8 +264,8 @@ try {
 "@ | Set-Content -LiteralPath $nugetConfig -Encoding utf8
 
     Write-Output 'Restore the clean consumer from the local feed only'
-    # The consumer restore uses an isolated package cache and its own NuGet.config so a stale cache or a project
-    # reference cannot make the smoke pass accidentally. The pack step above deliberately keeps the normal cache.
+    # The pack and consumer restores use isolated package caches so stale global state or a project reference
+    # cannot make the smoke pass accidentally.
     [Environment]::SetEnvironmentVariable('NUGET_PACKAGES', $consumerPackages, 'Process')
     [Environment]::SetEnvironmentVariable('NUGET_HTTP_CACHE_PATH', $httpCache, 'Process')
     [Environment]::SetEnvironmentVariable('NUGET_SCRATCH', $scratch, 'Process')
