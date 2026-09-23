@@ -288,13 +288,26 @@ public sealed class ReleaseContractTests
         using var provider = MetadataReaderProvider.FromPortablePdbStream(stream);
         var reader = provider.GetMetadataReader();
         return reader.Documents.ToDictionary(
-            handle => Convert.ToHexString(reader.GetBlobBytes(reader.GetDocument(handle).Name)),
+            handle => DecodeDocumentName(reader, reader.GetDocument(handle).Name),
             handle =>
             {
                 var document = reader.GetDocument(handle);
                 return $"algorithm={document.HashAlgorithm},hash={Convert.ToHexString(reader.GetBlobBytes(document.Hash))}";
             },
             StringComparer.Ordinal);
+    }
+
+    private static string DecodeDocumentName(MetadataReader reader, BlobHandle nameHandle)
+    {
+        var blob = reader.GetBlobReader(nameHandle);
+        var separator = (char)blob.ReadByte();
+        var segments = new List<string>();
+        while (blob.RemainingBytes > 0)
+        {
+            segments.Add(Encoding.UTF8.GetString(reader.GetBlobBytes(blob.ReadBlobHandle())));
+        }
+
+        return string.Join(separator, segments);
     }
 
     private static string CloneRepository(string source, string destination)
