@@ -63,6 +63,15 @@ jobs:
           --configuration Release
           --no-restore
           -p:Version=${{ steps.release-version.outputs.version }}
+          -p:SourceRevisionId=${{ github.sha }}
+          -p:RepositoryCommit=${{ github.sha }}
+          -p:RepositoryBranch=refs/heads/main
+          -p:RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec
+          -p:PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec
+          -p:ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec
+          -p:GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git
+          -p:GitRepositoryRemoteName=origin
+          -p:PublishRepositoryUrl=true
           -p:NuGetAudit=false
 
       - name: Test
@@ -100,6 +109,12 @@ jobs:
             -p:SourceRevisionId=$env:GITHUB_SHA `
             -p:RepositoryCommit=$env:GITHUB_SHA `
             -p:RepositoryBranch=refs/heads/main `
+            -p:RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec `
+            -p:PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec `
+            -p:ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec `
+            -p:GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git `
+            -p:GitRepositoryRemoteName=origin `
+            -p:PublishRepositoryUrl=true `
             -p:NuGetAudit=false `
             --output $packageDirectory
           if ($LASTEXITCODE -ne 0) {

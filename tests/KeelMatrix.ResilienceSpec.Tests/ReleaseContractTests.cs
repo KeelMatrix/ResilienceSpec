@@ -82,6 +82,35 @@ public sealed class ReleaseContractTests
         Assert.Equal(1, CountOccurrences(symbolsStep, ".snupkg"));
     }
 
+    [Fact]
+    public void EveryPackPathPinsRepositoryMetadata()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var buildTargets = File.ReadAllText(Path.Combine(repositoryRoot, "Directory.Build.targets"));
+
+        Assert.Contains("<Target Name=\"PinSourceControlInformation\"", buildTargets, StringComparison.Ordinal);
+        Assert.Contains("<ScmRepositoryUrl>$(RepositoryUrl)</ScmRepositoryUrl>", buildTargets, StringComparison.Ordinal);
+        Assert.Contains("<PrivateRepositoryUrl>$(RepositoryUrl)</PrivateRepositoryUrl>", buildTargets, StringComparison.Ordinal);
+        Assert.Contains("<SourceRoot Update=\"@(SourceRoot)\"", buildTargets, StringComparison.Ordinal);
+        Assert.Contains("<SourceRoot Include=\"$(MSBuildThisFileDirectory)\"", buildTargets, StringComparison.Ordinal);
+
+        foreach (var relativePath in new[]
+        {
+            Path.Combine("scripts", "Invoke-PackageSmoke.ps1"),
+            Path.Combine("scripts", "Run-Sample.ps1"),
+            Path.Combine(".github", "workflows", "release.yml")
+        })
+        {
+            var packPath = File.ReadAllText(Path.Combine(repositoryRoot, relativePath));
+            Assert.Contains("RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec", packPath, StringComparison.Ordinal);
+            Assert.Contains("PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec", packPath, StringComparison.Ordinal);
+            Assert.Contains("ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec", packPath, StringComparison.Ordinal);
+            Assert.Contains("GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git", packPath, StringComparison.Ordinal);
+            Assert.Contains("GitRepositoryRemoteName=origin", packPath, StringComparison.Ordinal);
+            Assert.Contains("PublishRepositoryUrl=true", packPath, StringComparison.Ordinal);
+        }
+    }
+
     private static ContractResult RunContract(
         string tag,
         string packageVersion,

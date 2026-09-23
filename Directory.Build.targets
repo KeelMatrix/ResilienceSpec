@@ -20,6 +20,28 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
+  <Target Name="PinSourceControlInformation"
+          BeforeTargets="TranslateGitHubUrlsInSourceControlInformation"
+          Condition="'$(IsPackable)' == 'true'">
+    <PropertyGroup>
+      <ScmRepositoryUrl>$(RepositoryUrl)</ScmRepositoryUrl>
+      <PrivateRepositoryUrl>$(RepositoryUrl)</PrivateRepositoryUrl>
+      <_HasGitSourceRoot Condition="'@(SourceRoot-&gt;WithMetadataValue('SourceControl', 'git'))' != ''">true</_HasGitSourceRoot>
+    </PropertyGroup>
+    <ItemGroup>
+      <SourceRoot Update="@(SourceRoot)" Condition="'%(SourceRoot.SourceControl)' == 'git'">
+        <ScmRepositoryUrl>$(RepositoryUrl)</ScmRepositoryUrl>
+        <RepositoryUrl>$(RepositoryUrl)</RepositoryUrl>
+      </SourceRoot>
+      <SourceRoot Include="$(MSBuildThisFileDirectory)" Condition="'$(_HasGitSourceRoot)' != 'true'">
+        <SourceControl>git</SourceControl>
+        <RepositoryUrl>$(RepositoryUrl)</RepositoryUrl>
+        <ScmRepositoryUrl>$(RepositoryUrl)</ScmRepositoryUrl>
+        <RevisionId>$(SourceRevisionId)</RevisionId>
+      </SourceRoot>
+    </ItemGroup>
+  </Target>
+
   <ItemGroup Condition="'$(IsPackable)' == 'true'">
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Link="LICENSE" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
     <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="" Link="icon.png" Condition="Exists('$(MSBuildThisFileDirectory)icon.png')" />

@@ -107,6 +107,12 @@ try {
         "-p:SourceRevisionId=$expectedCommit",
         "-p:RepositoryCommit=$expectedCommit",
         '-p:RepositoryBranch=refs/heads/main',
+        '-p:RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec',
+        '-p:PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec',
+        '-p:ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec',
+        '-p:GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git',
+        '-p:GitRepositoryRemoteName=origin',
+        '-p:PublishRepositoryUrl=true',
         '-p:NuGetAudit=false',
         '-o', $packageFeed)
 
