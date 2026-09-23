@@ -308,7 +308,7 @@ function Assert-Metadata {
     Assert-Contract ($dependencies.Count -eq 2) 'The package must declare exactly two runtime dependencies.'
 
     $expected = @{
-        'KeelMatrix.Telemetry' = '0.1.0'
+        'KeelMatrix.Telemetry' = '0.1.1'
         'Microsoft.Extensions.Http' = '8.0.1'
     }
     foreach ($dependency in $dependencies) {
