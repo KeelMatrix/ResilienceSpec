@@ -175,14 +175,13 @@ public sealed class ReleaseContractTests
         string expectedCommit,
         string sourceRepositoryRoot)
     {
-        var solution = Path.Combine(repositoryRoot, "KeelMatrix.ResilienceSpec.slnx");
         var project = Path.Combine(repositoryRoot, "src", "KeelMatrix.ResilienceSpec", "KeelMatrix.ResilienceSpec.csproj");
         var packageDirectory = Path.Combine(repositoryRoot, "origin-contract-artifacts");
         Directory.CreateDirectory(packageDirectory);
 
         RunProcess(
             "dotnet",
-            new[] { "restore", solution, "--configfile", Path.Combine(repositoryRoot, "NuGet.config"), "-p:NuGetAudit=false" },
+            new[] { "restore", project, "--configfile", Path.Combine(repositoryRoot, "NuGet.config"), "-p:NuGetAudit=false" },
             repositoryRoot).RequireSuccess($"restore the {shapeName} shape");
 
         var packArguments = new List<string>
