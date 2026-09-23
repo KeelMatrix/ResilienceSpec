@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using Xunit;
 
@@ -110,6 +111,181 @@ public sealed class ReleaseContractTests
             Assert.Contains("PublishRepositoryUrl=true", packPath, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public void StrictPackIsIndependentOfRepositoryOriginShape()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var expectedCommit = RunProcess(
+            "git",
+            new List<string> { "rev-parse", "HEAD" },
+            repositoryRoot).RequireSuccess("resolve the repository commit").Output.Trim();
+        var temporaryRoot = Directory.CreateTempSubdirectory("resilience-origin-contract-");
+        try
+        {
+            var localPath = CloneRepository(repositoryRoot, Path.Combine(temporaryRoot.FullName, "local-path"));
+            SyncTrackedFiles(repositoryRoot, localPath);
+            var noOrigin = CloneRepository(repositoryRoot, Path.Combine(temporaryRoot.FullName, "no-origin"));
+            SyncTrackedFiles(repositoryRoot, noOrigin);
+            RunProcess("git", new List<string> { "remote", "remove", "origin" }, noOrigin)
+                .RequireSuccess("remove the no-origin remote");
+
+            var fileOrigin = CloneRepository(
+                new Uri(repositoryRoot).AbsoluteUri,
+                Path.Combine(temporaryRoot.FullName, "file-origin"));
+            SyncTrackedFiles(repositoryRoot, fileOrigin);
+            var gitless = CopyTrackedTree(repositoryRoot, Path.Combine(temporaryRoot.FullName, "gitless"));
+
+            var identities = new List<ArtifactIdentity>();
+            foreach (var shape in new[]
+            {
+                (Name: "local-path", Root: localPath),
+                (Name: "no-origin", Root: noOrigin),
+                (Name: "file-origin", Root: fileOrigin),
+                (Name: "gitless", Root: gitless)
+            })
+            {
+                var identity = PackShape(shape.Root, shape.Name, expectedCommit, repositoryRoot);
+                Console.WriteLine($"ORIGIN_SHAPE={shape.Name} PACKAGE_SHA256={identity.PackageHash} SYMBOLS_SHA256={identity.SymbolsHash}");
+                identities.Add(identity);
+            }
+
+            var first = identities[0];
+            foreach (var identity in identities.Skip(1))
+            {
+                Assert.Equal(first.PackageHash, identity.PackageHash);
+                Assert.Equal(first.SymbolsHash, identity.SymbolsHash);
+            }
+        }
+        finally
+        {
+            DeleteTemporaryTree(temporaryRoot);
+        }
+    }
+
+    private static ArtifactIdentity PackShape(
+        string repositoryRoot,
+        string shapeName,
+        string expectedCommit,
+        string sourceRepositoryRoot)
+    {
+        var solution = Path.Combine(repositoryRoot, "KeelMatrix.ResilienceSpec.slnx");
+        var project = Path.Combine(repositoryRoot, "src", "KeelMatrix.ResilienceSpec", "KeelMatrix.ResilienceSpec.csproj");
+        var packageDirectory = Path.Combine(repositoryRoot, "origin-contract-artifacts");
+        Directory.CreateDirectory(packageDirectory);
+
+        RunProcess(
+            "dotnet",
+            new[] { "restore", solution, "--configfile", Path.Combine(repositoryRoot, "NuGet.config"), "-p:NuGetAudit=false" },
+            repositoryRoot).RequireSuccess($"restore the {shapeName} shape");
+
+        var packArguments = new List<string>
+        {
+            "pack", project, "-c", "Release", "-warnaserror", "--no-restore",
+            "-p:PackageVersion=0.1.0",
+            $"-p:SourceRevisionId={expectedCommit}",
+            $"-p:RepositoryCommit={expectedCommit}",
+            "-p:RepositoryBranch=refs/heads/main",
+            "-p:RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+            "-p:PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+            "-p:ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec",
+            "-p:GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git",
+            "-p:GitRepositoryRemoteName=origin",
+            "-p:PublishRepositoryUrl=true",
+            "-p:NuGetAudit=false",
+            "-o", packageDirectory
+        };
+        RunProcess("dotnet", packArguments, repositoryRoot)
+            .RequireSuccess($"strict-pack the {shapeName} shape");
+
+        var packagePath = Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.nupkg");
+        var symbolsPath = Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.snupkg");
+        var normalizeScript = Path.Combine(sourceRepositoryRoot, "scripts", "Normalize-PackageArchive.ps1");
+        RunProcess("pwsh", new[] { "-NoProfile", "-File", normalizeScript, "-PackagePath", packagePath }, repositoryRoot)
+            .RequireSuccess($"normalize the {shapeName} package");
+        RunProcess("pwsh", new[] { "-NoProfile", "-File", normalizeScript, "-PackagePath", symbolsPath }, repositoryRoot)
+            .RequireSuccess($"normalize the {shapeName} symbols");
+
+        return new ArtifactIdentity(
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(packagePath))),
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(symbolsPath))));
+    }
+
+    private static string CloneRepository(string source, string destination)
+    {
+        RunProcess("git", new[] { "clone", "--no-hardlinks", "--quiet", source, destination }, Directory.GetCurrentDirectory())
+            .RequireSuccess($"clone '{source}'");
+        return destination;
+    }
+
+    private static string CopyTrackedTree(string repositoryRoot, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        SyncTrackedFiles(repositoryRoot, destination);
+        return destination;
+    }
+
+    private static void SyncTrackedFiles(string repositoryRoot, string destination)
+    {
+        var files = RunProcess("git", new List<string> { "ls-files", "-z" }, repositoryRoot)
+            .RequireSuccess("list tracked files")
+            .Output.TrimEnd('\r', '\n').Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var relativePath in files)
+        {
+            var destinationPath = Path.Combine(destination, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(Path.Combine(repositoryRoot, relativePath), destinationPath, overwrite: true);
+        }
+    }
+
+    private static void DeleteTemporaryTree(DirectoryInfo directory)
+    {
+        if (!directory.Exists)
+        {
+            return;
+        }
+
+        foreach (var file in directory.EnumerateFiles("*", SearchOption.AllDirectories))
+        {
+            file.Attributes = FileAttributes.Normal;
+        }
+
+        directory.Delete(recursive: true);
+    }
+
+    private static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments, string workingDirectory)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Unable to start {fileName}.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        Assert.True(process.WaitForExit(180_000), $"Process '{fileName}' did not finish within 180 seconds.");
+        return new ProcessResult(process.ExitCode, $"{output.Result}{Environment.NewLine}{error.Result}");
+    }
+
+    private sealed record ProcessResult(int ExitCode, string Output)
+    {
+        public ProcessResult RequireSuccess(string operation)
+        {
+            Assert.True(ExitCode == 0, $"Failed to {operation}.\n{Output}");
+            return this;
+        }
+    }
+
+    private sealed record ArtifactIdentity(string PackageHash, string SymbolsHash);
 
     private static ContractResult RunContract(
         string tag,

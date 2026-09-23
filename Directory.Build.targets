@@ -1,4 +1,10 @@
 <Project>
+  <PropertyGroup>
+    <!-- A pinned pack revision makes source-control manager discovery unnecessary and origin-dependent. -->
+    <EnableSourceControlManagerQueries
+      Condition="'$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != ''">false</EnableSourceControlManagerQueries>
+  </PropertyGroup>
+
   <Target Name="NormalizeGeneratedSourceLineEndings"
           BeforeTargets="CoreCompile">
     <ItemGroup>
@@ -14,6 +20,8 @@
     <Authors>KeelMatrix</Authors>
     <RepositoryType>git</RepositoryType>
     <RepositoryBranch>refs/heads/main</RepositoryBranch>
+    <!-- Pack identity is supplied explicitly by the repository's pack paths. Do not inspect a clone's remote: it may be
+         a local path, file URI, absent, or unavailable in a source tree without .git. -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>
@@ -21,11 +29,12 @@
   </PropertyGroup>
 
   <Target Name="PinSourceControlInformation"
-          BeforeTargets="TranslateGitHubUrlsInSourceControlInformation"
-          Condition="'$(IsPackable)' == 'true'">
+          BeforeTargets="InitializeSourceControlInformation;TranslateGitHubUrlsInSourceControlInformation"
+          Condition="'$(IsPackable)' == 'true' and ('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '')">
     <PropertyGroup>
       <ScmRepositoryUrl>$(RepositoryUrl)</ScmRepositoryUrl>
       <PrivateRepositoryUrl>$(RepositoryUrl)</PrivateRepositoryUrl>
+      <SourceRevisionId Condition="'$(SourceRevisionId)' == ''">$(RepositoryCommit)</SourceRevisionId>
       <_HasGitSourceRoot Condition="'@(SourceRoot-&gt;WithMetadataValue('SourceControl', 'git'))' != ''">true</_HasGitSourceRoot>
     </PropertyGroup>
     <ItemGroup>
