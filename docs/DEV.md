@@ -140,7 +140,8 @@ scripted-downstream progress only after a timer fires; if a fired timer's
 continuation does not reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` without
 another virtual advance. The observation window is a watchdog, not a timing measurement. A virtual-budget or no-advance
 cutoff returns `Pending` and is not reported as request settlement. Cancellation cleanup is separately bounded by
-`ResilienceScenarioOptions.CleanupTimeout`; the single-consumer lease remains held until late cleanup finishes.
+`ResilienceScenarioOptions.CleanupTimeout`; late cleanup releases retained resources, but a scenario remains consumed
+and cannot be reused after cleanup.
 
 `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
 the wait runs on the injected clock, so it is deliberately not exposed.

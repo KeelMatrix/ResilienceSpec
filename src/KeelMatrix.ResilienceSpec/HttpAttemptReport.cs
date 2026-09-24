@@ -4,7 +4,7 @@ using System.Net;
 namespace KeelMatrix.ResilienceSpec;
 
 /// <summary>
-/// An immutable snapshot of the attempts that reached one scripted downstream, in arrival order.
+/// An immutable snapshot of the attempts that reached one scripted downstream for one logical operation, in arrival order.
 /// </summary>
 /// <remarks>
 /// The report is the local evidence of observable behaviour. It never contains request or response payloads, and

@@ -76,6 +76,7 @@ public sealed class ResilienceScenario : IDisposable
     /// report marks <see cref="HttpAttemptReport.IsObservationCutoff"/> rather than claiming request settlement. An
     /// attempt ended by that cleanup has no duration because cleanup is not timeout evidence.
     /// </returns>
+    /// <exception cref="ConcurrentScriptUseException">The scenario has already been used for another logical call.</exception>
     public async Task<ResilienceResult> SendAsync(
         HttpClient client,
         HttpRequestMessage request,

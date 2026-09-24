@@ -1,15 +1,5 @@
 namespace KeelMatrix.ResilienceSpec;
 
-/// <summary>Describes how many in-flight requests one script may serve.</summary>
-public enum ScriptConcurrency
-{
-    /// <summary>One script serves a single logical call. A concurrent second call fails with <see cref="ConcurrentScriptUseException"/>.</summary>
-    SingleConsumer,
-
-    /// <summary>One script may serve concurrent calls. Attempt ordinals then follow arrival order.</summary>
-    AllowConcurrent,
-}
-
 /// <summary>Controls how a <see cref="ResilienceScenario"/> drives the injected clock and bounds its observation.</summary>
 public sealed class ResilienceScenarioOptions
 {
@@ -57,9 +47,6 @@ public sealed class ResilienceScenarioOptions
     /// Defaults to <see langword="true"/>.
     /// </summary>
     public bool AdvanceClock { get; init; } = true;
-
-    /// <summary>Gets the concurrency model of one script. Defaults to <see cref="ScriptConcurrency.SingleConsumer"/>.</summary>
-    public ScriptConcurrency Concurrency { get; init; } = ScriptConcurrency.SingleConsumer;
 
     /// <summary>
     /// Gets a value indicating whether a scenario created with a controllable clock requires that clock to be

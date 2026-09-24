@@ -180,6 +180,82 @@ public sealed class CancellationTests
         result.ShouldHaveKind(ResilienceResultKind.Canceled);
         scenario.Report.ShouldHaveAttempts(1);
         Assert.Equal(HttpAttemptOutcome.Abandoned, scenario.Report.Attempts[0].Outcome);
+
+        using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/second");
+        await Assert.ThrowsAsync<ConcurrentScriptUseException>(() => scenario.SendAsync(client, secondRequest));
+    }
+
+    [Fact]
+    public async Task AScenarioRejectsASecondSequentialCallAfterANormalResponse()
+    {
+        using var scenario = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Success()));
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var firstRequest = Chains.Request(HttpMethod.Get, "/orders/1");
+        using var first = await scenario.SendAsync(client, firstRequest);
+        first.ShouldHaveStatus(HttpStatusCode.OK);
+
+        using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/2");
+        var failure = await Assert.ThrowsAsync<ConcurrentScriptUseException>(
+            () => scenario.SendAsync(client, secondRequest));
+
+        Assert.Contains("already served one logical request", failure.Message, StringComparison.Ordinal);
+        scenario.Report.ShouldHaveAttempts(1);
+    }
+
+    [Fact]
+    public async Task IndependentPostCallCannotBeMisreportedAsAPostRetry()
+    {
+        using var scenario = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Success()));
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var firstRequest = Chains.Request(HttpMethod.Post, "/orders/1");
+        using var first = await scenario.SendAsync(client, firstRequest);
+        first.ShouldHaveStatus(HttpStatusCode.OK);
+
+        using var secondRequest = Chains.Request(HttpMethod.Post, "/orders/2");
+        await Assert.ThrowsAsync<ConcurrentScriptUseException>(() => scenario.SendAsync(client, secondRequest));
+
+        scenario.Report.ShouldHaveAttempts(1).ShouldNotHaveRetried(HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task ASecondCallCannotSupplyRetryAfterOrDelayEvidence()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)),
+                HttpFault.Success()),
+            clock);
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(1, TimeSpan.FromSeconds(1), clock.TimeProvider, Chains.IsRetryableStatus));
+        using var firstRequest = Chains.Request(HttpMethod.Get, "/orders/1");
+        using var first = await scenario.SendAsync(client, firstRequest);
+        first.ShouldHaveStatus(HttpStatusCode.OK);
+
+        using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/2");
+        await Assert.ThrowsAsync<ConcurrentScriptUseException>(() => scenario.SendAsync(client, secondRequest));
+
+        scenario.Report.ShouldHaveAttempts(2)
+            .ShouldRespectRetryAfter()
+            .ShouldHaveRetryDelay(TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task AScenarioRejectsASecondSequentialCallAfterTimeout()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Timeout()), clock);
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider));
+        using var firstRequest = Chains.Request(HttpMethod.Get, "/orders/1");
+        using var first = await scenario.SendAsync(client, firstRequest);
+        first.ShouldHaveKind(ResilienceResultKind.Timeout);
+
+        using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/2");
+        await Assert.ThrowsAsync<ConcurrentScriptUseException>(() => scenario.SendAsync(client, secondRequest));
+        scenario.Report.ShouldHaveAttempts(1);
     }
 
     [Fact]
@@ -349,28 +425,13 @@ public sealed class CancellationTests
             }
         });
 
-        var reused = false;
-        for (var attempt = 0; attempt < 100 && !reused; attempt++)
-        {
-            try
-            {
-                using var reusableRequest = Chains.Request(HttpMethod.Get, "/orders/reused");
-                using var reusableResult = await scenario.SendAsync(client, reusableRequest);
-                reusableResult.ShouldHaveStatus(HttpStatusCode.OK);
-                reused = true;
-            }
-            catch (ConcurrentScriptUseException)
-            {
-                await Task.Delay(10);
-            }
-        }
-
-        Assert.True(reused, "The single-consumer lease was not released after late cleanup completed.");
-        scenario.Report.ShouldHaveAttempts(2);
+        using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/reused");
+        await Assert.ThrowsAsync<ConcurrentScriptUseException>(() => scenario.SendAsync(client, secondRequest));
+        scenario.Report.ShouldHaveAttempts(1);
     }
 
     [Fact]
-    public async Task LateFaultAfterCleanupDeadlineIsObservedAndScenarioCanBeReused()
+    public async Task LateFaultAfterCleanupDeadlineDoesNotMakeScenarioReusable()
     {
         var releaseFault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var faultObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -400,24 +461,9 @@ public sealed class CancellationTests
         releaseFault.SetResult();
         await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
-        var reused = false;
-        for (var attempt = 0; attempt < 100 && !reused; attempt++)
-        {
-            try
-            {
-                using var reusableRequest = Chains.Request(HttpMethod.Get, "/orders/reused");
-                using var reusableResult = await scenario.SendAsync(client, reusableRequest);
-                reusableResult.ShouldHaveStatus(HttpStatusCode.OK);
-                reused = true;
-            }
-            catch (ConcurrentScriptUseException)
-            {
-                await Task.Delay(10);
-            }
-        }
-
-        Assert.True(reused, "The single-consumer lease was not released after the late fault was observed.");
-        scenario.Report.ShouldHaveAttempts(2);
+        using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/reused");
+        await Assert.ThrowsAsync<ConcurrentScriptUseException>(() => scenario.SendAsync(client, secondRequest));
+        scenario.Report.ShouldHaveAttempts(1);
     }
 
     [Fact]

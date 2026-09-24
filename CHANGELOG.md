@@ -32,6 +32,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   artifacts for a fixed commit, and records a sorted entry-level SHA256 manifest that includes generated nuspec entries
   before consumer smoke.
 - Corrected the root README examples to bind timing scenarios to the tracked `ResilienceScenarioClock`.
+- A `ResilienceScenario` is now permanently single-use: cleanup releases retained resources without making a consumed
+  scenario reusable, and the unsafe public concurrent-script option has been removed.
 
 ## [0.1.0] - Planned
 

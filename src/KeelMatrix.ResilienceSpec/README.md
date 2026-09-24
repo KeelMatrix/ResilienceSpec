@@ -17,11 +17,11 @@ dotnet add package Microsoft.Extensions.Http.Resilience --version 10.10.0
 dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 ```
 
-The additional commands install the fake-clock and Microsoft standard-handler packages used by this example. They are
-not runtime dependencies of `KeelMatrix.ResilienceSpec`. `Microsoft.Extensions.TimeProvider.Testing` `10.10.0` is the
-supported timing-provider package for this release while `Microsoft.Extensions.Http.Resilience` may vary from `9.8.0`
-up to, but not including, `11.0.0`. Other testing-package versions are unverified and are not admitted for timing
-evidence.
+The `Microsoft.Extensions.Http.Resilience` package is an optional integration/example dependency and is not a runtime
+dependency of the ResilienceSpec package. `Microsoft.Extensions.TimeProvider.Testing` is not transitively brought in by
+ResilienceSpec, but timing scenarios require the explicitly referenced supported `10.10.0` package at test runtime.
+`Microsoft.Extensions.Http.Resilience` may vary from `9.8.0` up to, but not including, `11.0.0`; other testing-package
+versions are unverified and are not admitted for timing evidence.
 
 ## Quick Example
 
@@ -101,10 +101,10 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   cleanup's virtual duration as a configured timeout; earlier genuinely completed attempts remain independently
   assertable. Cleanup is bounded by `ResilienceScenarioOptions.CleanupTimeout`; late completion is observed and late
   responses are disposed, but arbitrary user code that ignores cancellation cannot be forcibly terminated. The
-  single-consumer lease remains held until late cleanup completes, so reuse fails clearly during that window and is safe
-  only afterward.
-- One script serves one logical call. Concurrent use fails with `ConcurrentScriptUseException` unless
-  `ScriptConcurrency.AllowConcurrent` is requested.
+  single-consumer lease remains held until late cleanup completes. Cleanup releases retained resources, but the scenario
+  remains consumed permanently and a second logical call always fails with `ConcurrentScriptUseException`.
+- One `ResilienceScenario` serves exactly one logical call for its lifetime. Overlapping and sequential reuse both fail
+  with `ConcurrentScriptUseException`; create one scenario per logical call.
 - `ShouldRespectRetryAfter` verifies the advertised value as a minimum wait; use `ShouldHaveRetryDelay` for an exact
   configured delay. A response that advertises `Retry-After` without a following retry produces a specific diagnostic.
 - The recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client whose

@@ -34,12 +34,11 @@ public sealed class AttemptStateOverflowException : InvalidOperationException
 }
 
 /// <summary>
-/// Represents the failure raised when one script is consumed by more than one in-flight request.
+/// Represents the failure raised when a scenario is consumed by a second logical request or overlapping attempt.
 /// </summary>
 /// <remarks>
-/// A script has deterministic single-consumer semantics by default. Use
-/// <see cref="ScriptConcurrency.AllowConcurrent"/> only when the scenario under test really is concurrent, and
-/// use one scenario per test case otherwise.
+/// A <see cref="ResilienceScenario"/> represents exactly one logical request for its lifetime. Cleanup can release
+/// retained resources, but it never makes the scenario reusable; create one scenario per logical request.
 /// </remarks>
 public sealed class ConcurrentScriptUseException : InvalidOperationException
 {

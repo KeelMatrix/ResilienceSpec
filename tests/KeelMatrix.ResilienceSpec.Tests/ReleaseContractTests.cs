@@ -7,6 +7,12 @@ using Xunit;
 
 namespace KeelMatrix.ResilienceSpec.Tests;
 
+[CollectionDefinition("Release contract", DisableParallelization = true)]
+public sealed class ReleaseContractTestGroup
+{
+}
+
+[Collection("Release contract")]
 public sealed class ReleaseContractTests
 {
     [Fact]

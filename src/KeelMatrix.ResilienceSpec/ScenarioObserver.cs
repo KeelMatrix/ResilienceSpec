@@ -171,7 +171,7 @@ internal sealed class ScenarioObserver
     private int _inFlight;
     private int _ordinal;
     private bool _overflowed;
-    private int _logicalCalls;
+    private bool _logicalCallConsumed;
     private bool _observationCleanupActive;
     private bool _observationCutoff;
     private long _progressVersion;
@@ -195,15 +195,14 @@ internal sealed class ScenarioObserver
     {
         lock (_gate)
         {
-            if (_options.Concurrency == ScriptConcurrency.SingleConsumer && _logicalCalls > 0)
+            if (_logicalCallConsumed)
             {
                 throw new ConcurrentScriptUseException(
-                    "The scripted downstream is already serving one logical request, so a second request cannot consume the script deterministically. " +
-                    "Create one scenario per logical call, or use ScriptConcurrency.AllowConcurrent when the scenario under test is genuinely concurrent.");
+                    "This ResilienceScenario has already served one logical request and cannot be reused. " +
+                    "Create one scenario per logical call.");
             }
 
-            _logicalCalls++;
-            _observationCleanupActive = false;
+            _logicalCallConsumed = true;
         }
 
         return new LogicalCallScope(this);
@@ -231,11 +230,11 @@ internal sealed class ScenarioObserver
         AttemptEntry entry;
         lock (_gate)
         {
-            if (_options.Concurrency == ScriptConcurrency.SingleConsumer && _inFlight > 0)
+            if (_inFlight > 0)
             {
                 throw new ConcurrentScriptUseException(
                     "The scripted downstream is already serving one in-flight request, so a second request cannot consume the script deterministically. " +
-                    "Create one scenario per logical call, or use ScriptConcurrency.AllowConcurrent when the scenario under test is genuinely concurrent.");
+                    "Create one scenario per logical call.");
             }
 
             _inFlight++;
@@ -371,7 +370,8 @@ internal sealed class ScenarioObserver
     {
         lock (_gate)
         {
-            _logicalCalls--;
+            // The call lease releases retained cleanup resources, but consumption is permanent for the scenario.
+            _logicalCallConsumed = true;
         }
     }
 

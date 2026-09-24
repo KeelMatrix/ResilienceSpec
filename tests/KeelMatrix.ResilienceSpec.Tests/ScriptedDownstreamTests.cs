@@ -87,22 +87,20 @@ public sealed class ScriptedDownstreamTests
     }
 
     [Fact]
-    public async Task ConcurrencyCanBeEnabledExplicitly()
+    public async Task LiveSnapshotsRemainSafeWhileAttemptsComplete()
     {
-        var script = HttpFaultScript.Sequence(HttpFault.Success(), HttpFault.Success());
-        var options = new ResilienceScenarioOptions { Concurrency = ScriptConcurrency.AllowConcurrent };
-        using var scenario = new ResilienceScenario(script, options: options);
+        var script = HttpFaultScript.Repeat(
+            HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)),
+            2);
+        using var scenario = new ResilienceScenario(script);
         using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
         using var first = Chains.Request(HttpMethod.Get, "/orders/1");
+        using var firstResponse = await invoker.SendAsync(first, CancellationToken.None);
         using var second = Chains.Request(HttpMethod.Get, "/orders/2");
+        using var secondResponse = await invoker.SendAsync(second, CancellationToken.None);
 
-        var responses = await Task.WhenAll(
-            invoker.SendAsync(first, CancellationToken.None),
-            invoker.SendAsync(second, CancellationToken.None));
-
-        Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
-        Assert.All(responses, response => response.Dispose());
-        scenario.Report.ShouldHaveAtMostAttempts(2);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, firstResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, secondResponse.StatusCode);
         Assert.Equal(2, scenario.Report.AttemptCount);
     }
 
@@ -201,10 +199,8 @@ public sealed class ScriptedDownstreamTests
         var errors = new ConcurrentQueue<Exception>();
         var snapshotStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var snapshotsFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var options = new ResilienceScenarioOptions { Concurrency = ScriptConcurrency.AllowConcurrent };
         using var scenario = new ResilienceScenario(
-            HttpFaultScript.Repeat(HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)), callCount),
-            options: options);
+            HttpFaultScript.Repeat(HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)), callCount));
         using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
 
         var snapshotter = Task.Run(() =>
@@ -236,8 +232,13 @@ public sealed class ScriptedDownstreamTests
         });
 
         await snapshotStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var sends = Enumerable.Range(0, callCount).Select(_ => SendOneAsync());
-        using var responses = new ResponseCollection(await Task.WhenAll(sends));
+        var responseList = new List<HttpResponseMessage>(callCount);
+        for (var index = 0; index < callCount; index++)
+        {
+            responseList.Add(await SendOneAsync());
+        }
+
+        using var responses = new ResponseCollection(responseList);
         snapshotsFinished.SetResult();
         await snapshotter;
 

@@ -75,8 +75,6 @@ KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceClock.get -> bool
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceClock.init -> void
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceStep.get -> System.TimeSpan
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.AdvanceStep.init -> void
-KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.Concurrency.get -> KeelMatrix.ResilienceSpec.ScriptConcurrency
-KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.Concurrency.init -> void
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.CleanupTimeout.get -> System.TimeSpan
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.CleanupTimeout.init -> void
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.ObservationWindow.get -> System.TimeSpan
@@ -89,9 +87,6 @@ KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.ResilienceScenarioOptions() 
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.VirtualBudget.get -> System.TimeSpan
 KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.VirtualBudget.init -> void
 KeelMatrix.ResilienceSpec.ResilienceSpecHttpClientBuilderExtensions
-KeelMatrix.ResilienceSpec.ScriptConcurrency
-KeelMatrix.ResilienceSpec.ScriptConcurrency.AllowConcurrent = 1 -> KeelMatrix.ResilienceSpec.ScriptConcurrency
-KeelMatrix.ResilienceSpec.ScriptConcurrency.SingleConsumer = 0 -> KeelMatrix.ResilienceSpec.ScriptConcurrency
 KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler
 KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler.Report.get -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
 KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler.ScriptedHttpMessageHandler(KeelMatrix.ResilienceSpec.HttpFaultScript! script, System.TimeProvider? timeProvider = null, KeelMatrix.ResilienceSpec.ResilienceScenarioOptions? options = null) -> void

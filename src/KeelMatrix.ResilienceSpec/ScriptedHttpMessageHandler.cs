@@ -16,6 +16,12 @@ namespace KeelMatrix.ResilienceSpec;
 /// The handler answers in memory. It never resolves a name, opens a socket, or binds a listener, and its responses
 /// carry no content and no headers other than the scripted <c>Retry-After</c> value.
 /// </para>
+/// <para>
+/// One handler, script, and report is intended to represent the attempt stream of one logical client operation when
+/// call-sensitive assertions are used. Direct low-level handler use cannot identify boundaries between separate
+/// top-level operations; create a separate handler or <see cref="ResilienceScenario"/> for each operation instead of
+/// interpreting an aggregate stream as one retry sequence.
+/// </para>
 /// </remarks>
 public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
 {
