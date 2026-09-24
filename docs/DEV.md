@@ -126,8 +126,8 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 Timing assertions require a `ResilienceScenarioClock` around an exact
 `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0` used
 by the client pipeline. Other testing-package versions are unverified and rejected by admission. Keep
-`AutoAdvanceAmount` at zero, register `clock.TimeProvider`, and pass that provider plus `clock.Advance` to the scenario.
-The wrapper verifies that its delegate moves the admitted provider once by exactly the requested duration and detects
+`AutoAdvanceAmount` at zero, register `clock.TimeProvider`, and pass the clock object to the scenario. The scenario
+invokes the wrapper's verified advance operation itself. The wrapper verifies that its delegate moves the admitted provider once by exactly the requested duration and detects
 direct or other unexpected provider movement. Admission explicitly loads
 `Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the dependency path beside the package
 assembly, checks the expected Microsoft strong-name public-key token, and compares the provider type with the type from

@@ -45,8 +45,7 @@ var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(
         HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
         HttpFault.Success()),
-    clock.TimeProvider,
-    clock.Advance);
+    clock);
 
 var services = new ServiceCollection();
 services.AddSingleton<TimeProvider>(clock.TimeProvider);
@@ -107,8 +106,7 @@ var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(
         HttpFault.Response(HttpStatusCode.ServiceUnavailable),
         HttpFault.Success()),
-    clock.TimeProvider,
-    clock.Advance);
+    clock);
 
 // ... configure the client as in the quick start ...
 
@@ -155,8 +153,7 @@ var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(
         HttpFault.Response(HttpStatusCode.TooManyRequests, retryAfter: TimeSpan.FromSeconds(5)),
         HttpFault.Success()),
-    clock.TimeProvider,
-    clock.Advance);
+    clock);
 
 // ... run the request ...
 
@@ -171,8 +168,7 @@ supported; see [Timing Limitations](#timing-limitations).
 ```csharp
 var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(HttpFault.NetworkError(), HttpFault.Success()),
-    clock.TimeProvider,
-    clock.Advance);
+    clock);
 
 using var result = await scenario.SendAsync(client, request);
 
@@ -184,8 +180,7 @@ scenario.Report.ShouldHaveAttempts(2);
 ```csharp
 var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(HttpFault.Timeout()),
-    clock.TimeProvider,
-    clock.Advance);
+    clock);
 
 using var caller = new CancellationTokenSource();
 var run = scenario.SendAsync(client, request, caller.Token);
@@ -203,13 +198,13 @@ was consumed by two in-flight requests.
 
 ## Deterministic Timing
 
-Timing assertions are available only when a scenario is created with an exact
-`Microsoft.Extensions.Time.Testing.FakeTimeProvider` instance and the operation that advances it:
+Timing assertions are available only when a scenario is created with a `ResilienceScenarioClock` around an exact
+`Microsoft.Extensions.Time.Testing.FakeTimeProvider` instance:
 
 ```csharp
 var underlyingClock = new FakeTimeProvider();
 var clock = new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance);
-var scenario = new ResilienceScenario(script, clock.TimeProvider, clock.Advance);
+var scenario = new ResilienceScenario(script, clock);
 ```
 
 `ResilienceScenarioClock` must wrap the controllable provider used by the resilience pipeline. Its advance delegate
@@ -217,8 +212,8 @@ must advance that provider once by exactly the requested duration; no-op, partia
 or direct out-of-band advances fail as harness configuration errors instead of producing timing evidence. The
 provider's `AutoAdvanceAmount` must be zero when the wrapper is created and throughout the run, so reading the clock
 cannot move virtual time. Register the wrapper's
-`TimeProvider` property with `services.AddSingleton<TimeProvider>(clock.TimeProvider)` and pass that same property to
-the scenario. The wrapper records which provider timers fire during each advance, so the scenario can distinguish an
+`TimeProvider` property with `services.AddSingleton<TimeProvider>(clock.TimeProvider)` and pass the clock object to
+the scenario. The scenario invokes the wrapper's verified advance operation itself. The wrapper records which provider timers fire during each advance, so the scenario can distinguish an
 ordinary intermediate delay from a timer whose continuation has not reached the scripted downstream. The adapter
 fails configuration with a `MissingTimeProviderException` when the scenario clock is missing or a different provider
 instance is registered. Admission loads `Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the
@@ -265,8 +260,7 @@ var options = new ResilienceScenarioOptions
 
 var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(2), HttpFault.Success())),
-    clock.TimeProvider,
-    clock.Advance,
+    clock,
     options);
 
 // ... run the request ...
@@ -391,7 +385,7 @@ evidence covers the verification path and not the optional telemetry transport.
 | Symptom | Cause and next step |
 | --- | --- |
 | `MissingTimeProviderException` when creating a client | The scenario has a controllable clock but the container has no matching tracking provider. Register `clock.TimeProvider` with `services.AddSingleton<TimeProvider>(clock.TimeProvider)`, or set `RequireRegisteredTimeProvider` to `false` when the pipeline time source is configured another way. |
-| `MissingTimeProviderException` from a timing scenario | Use an exact `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`, keep `AutoAdvanceAmount` at zero, wrap it with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)`, and pass `clock.TimeProvider` plus `clock.Advance` to the scenario. Other testing-package versions and derived, delegating, same-name cross-assembly, or resolver-hook-spoofed providers are rejected. |
+| `MissingTimeProviderException` from a timing scenario | Use an exact `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`, keep `AutoAdvanceAmount` at zero, wrap it with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)`, and pass that clock object to the scenario. Other testing-package versions and derived, delegating, same-name cross-assembly, or resolver-hook-spoofed providers are rejected. |
 | `ConcurrentScriptUseException` | Two in-flight requests consumed one script. Create one scenario per logical call, or opt in to `ScriptConcurrency.AllowConcurrent`. |
 | `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |
 | `AttemptStateOverflowException` | The client under test served more attempts than `HttpAttemptReport.MaximumRecordedAttempts`, so the recorded timeline is incomplete and cannot judge attempt state. Lower the client's configured maximum attempts; a script cannot describe more attempts than `HttpFaultScript.MaximumSteps` steps. |

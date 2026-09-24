@@ -29,8 +29,7 @@ public sealed class AssertionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance);
+            clock);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));
@@ -51,8 +50,7 @@ public sealed class AssertionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance);
+            clock);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));
@@ -74,8 +72,7 @@ public sealed class AssertionTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance);
+            clock);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));

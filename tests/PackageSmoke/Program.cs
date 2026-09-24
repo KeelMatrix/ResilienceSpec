@@ -124,8 +124,7 @@ await RunAsync("GET 503 -> 200 through the standard resilience handler", async (
         HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
             HttpFault.Success()),
-        clock.TimeProvider,
-        clock.Advance);
+        clock);
 
     using var provider = BuildProvider("orders", scenario, options =>
     {
@@ -161,8 +160,7 @@ await RunAsync("POST is not retried when unsafe retries are disabled", async () 
         HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable),
             HttpFault.Success()),
-        clock.TimeProvider,
-        clock.Advance);
+        clock);
 
     using var provider = BuildProvider("payments", scenario, options =>
     {
@@ -185,6 +183,41 @@ await RunAsync("POST is not retried when unsafe retries are disabled", async () 
 
     inMemoryAttempts += scenario.Report.AttemptCount;
     Console.WriteLine($"    {scenario.Report.Timeline[0]}");
+});
+
+await RunAsync("Scenario-owned clock rejects bypass advances", async () =>
+{
+    await AssertScenarioAdvanceFailsClosedAsync("no-op", () =>
+    {
+        var (provider, _) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        return (provider, (Action<TimeSpan>)(_ => { }));
+    });
+    await AssertScenarioAdvanceFailsClosedAsync("different-provider", () =>
+    {
+        var (provider, _) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var (_, otherAdvance) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        return (provider, otherAdvance);
+    });
+    await AssertScenarioAdvanceFailsClosedAsync("half-step", () =>
+    {
+        var (provider, advance) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        return (provider, (Action<TimeSpan>)(amount => advance(amount / 2)));
+    });
+    await AssertScenarioAdvanceFailsClosedAsync("double-step", () =>
+    {
+        var (provider, advance) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        return (provider, (Action<TimeSpan>)(amount => advance(amount + amount)));
+    });
+    await AssertScenarioAdvanceFailsClosedAsync("offset-step", () =>
+    {
+        var (provider, advance) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        return (provider, (Action<TimeSpan>)(amount => advance(amount + TimeSpan.FromTicks(1))));
+    });
+    await AssertScenarioAdvanceFailsClosedAsync("progress-only", () =>
+    {
+        var (provider, _) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        return (provider, (Action<TimeSpan>)(_ => { Thread.Yield(); }));
+    });
 });
 
 Console.WriteLine(
@@ -260,6 +293,35 @@ async Task RunAsync(string title, Func<Task> scenario)
     {
         failures.Add($"{title}: {exception.GetType().Name}: {exception.Message}");
         Console.WriteLine($"  FAIL {exception.GetType().Name}");
+    }
+}
+
+async Task AssertScenarioAdvanceFailsClosedAsync(
+    string name,
+    Func<(TimeProvider Provider, Action<TimeSpan> Advance)> createAdvance)
+{
+    var (provider, advance) = createAdvance();
+    var clock = new ResilienceScenarioClock(provider, advance);
+    using var scenario = new ResilienceScenario(
+        HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(1), HttpFault.Success())),
+        clock,
+        new ResilienceScenarioOptions { CleanupTimeout = TimeSpan.FromMilliseconds(100) });
+    using var client = new HttpClient(scenario.Handler);
+    using var request = new HttpRequestMessage(HttpMethod.Get, "https://clock-binding.invalid");
+
+    try
+    {
+        using var result = await scenario.SendAsync(client, request);
+        throw new InvalidOperationException($"The {name} advance unexpectedly completed a scenario.");
+    }
+    catch (InvalidOperationException exception) when (exception.Message.Contains("exactly", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine($"  {name}=REJECTED");
+    }
+
+    if (scenario.Report.SettledVirtualElapsed is not null)
+    {
+        throw new InvalidOperationException($"The {name} advance produced settlement timing evidence.");
     }
 }
 

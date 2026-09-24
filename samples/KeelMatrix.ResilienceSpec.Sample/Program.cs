@@ -15,8 +15,7 @@ await RunAsync("GET 503 -> 200 with the standard resilience handler", async () =
         HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
             HttpFault.Success()),
-        clock.TimeProvider,
-        clock.Advance);
+        clock);
 
     var services = new ServiceCollection();
     services.AddSingleton<TimeProvider>(clock.TimeProvider);
@@ -54,8 +53,7 @@ await RunAsync("POST must not be retried when unsafe retries are disabled", asyn
         HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable),
             HttpFault.Success()),
-        clock.TimeProvider,
-        clock.Advance);
+        clock);
 
     var services = new ServiceCollection();
     services.AddSingleton<TimeProvider>(clock.TimeProvider);

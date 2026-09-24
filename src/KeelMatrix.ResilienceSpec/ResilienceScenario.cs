@@ -18,57 +18,30 @@ namespace KeelMatrix.ResilienceSpec;
 /// </remarks>
 public sealed class ResilienceScenario : IDisposable
 {
-    private readonly Action<TimeSpan>? _advanceTime;
+    private readonly ResilienceScenarioClock? _clock;
     private bool _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="ResilienceScenario"/> class.</summary>
     /// <param name="script">The script of downstream outcomes, one step per attempt.</param>
-    /// <param name="timeProvider">
-    /// The tracking provider exposed by a <see cref="ResilienceScenarioClock"/> that the resilience pipeline must use,
-    /// or <see langword="null"/> for a run that only asserts attempts and outcomes.
-    /// </param>
-    /// <param name="advanceTime">
-    /// The operation that advances the wrapped provider, normally <c>clock.Advance</c>. It is required whenever a
-    /// controllable clock is supplied.
+    /// <param name="clock">
+    /// The scenario clock that owns the tracking provider and verified advance operation, or <see langword="null"/>
+    /// for a run that only asserts attempts and outcomes.
     /// </param>
     /// <param name="options">Scenario options, or <see langword="null"/> for <see cref="ResilienceScenarioOptions.Default"/>.</param>
     public ResilienceScenario(
         HttpFaultScript script,
-        TimeProvider? timeProvider = null,
-        Action<TimeSpan>? advanceTime = null,
+        ResilienceScenarioClock? clock = null,
         ResilienceScenarioOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(script);
         options ??= ResilienceScenarioOptions.Default;
         options.Validate();
 
-        if (timeProvider is null && advanceTime is not null)
-        {
-            throw new ArgumentException(
-                "An advance operation requires the controllable clock it advances.",
-                nameof(advanceTime));
-        }
-
-        if (timeProvider is not null && advanceTime is null)
-        {
-            throw new MissingTimeProviderException(
-                "A controllable clock must be supplied together with the operation that advances it, for example " +
-                "new ResilienceScenario(script, clock.TimeProvider, clock.Advance), where clock is a ResilienceScenarioClock. " +
-                "Timing assertions never fall back to the wall clock.");
-        }
-
-        if (timeProvider is not null && !ResilienceScenarioClock.IsTrackingProvider(timeProvider))
-        {
-            throw new MissingTimeProviderException(
-                "Timing scenarios require a ResilienceScenarioClock so the scenario can detect timers released by " +
-                "each virtual advance. Wrap the controllable provider and use the wrapper in both the scenario and " +
-                "the client pipeline.");
-        }
-
+        var timeProvider = clock?.TimeProvider;
         Script = script;
         TimeProvider = timeProvider;
         Options = options;
-        _advanceTime = advanceTime;
+        _clock = clock;
         Handler = new ScriptedHttpMessageHandler(script, timeProvider, options);
     }
 
@@ -137,7 +110,7 @@ public sealed class ResilienceScenario : IDisposable
 
             if (!settled)
             {
-                if (_advanceTime is not null && Options.AdvanceClock)
+                if (_clock is not null && Options.AdvanceClock)
                 {
                     while (!settled && virtualElapsed < Options.VirtualBudget)
                     {
@@ -161,7 +134,7 @@ public sealed class ResilienceScenario : IDisposable
                         var advance = nextTimerDue is { } timer && timer < remainingBudget
                             ? timer
                             : remainingBudget < Options.AdvanceStep ? remainingBudget : Options.AdvanceStep;
-                        _advanceTime(advance);
+                        _clock.Advance(advance);
                         virtualElapsed += advance;
 
                         // A clock advance may release a retry timer whose continuation still has to schedule the next

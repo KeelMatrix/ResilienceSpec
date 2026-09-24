@@ -50,7 +50,7 @@ public sealed class ScriptedDownstreamTests
     {
         var clock = Chains.CreateClock();
         var script = HttpFaultScript.Sequence(HttpFault.Response(HttpStatusCode.ServiceUnavailable));
-        using var scenario = new ResilienceScenario(script, clock.TimeProvider, clock.Advance);
+        using var scenario = new ResilienceScenario(script, clock);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));
@@ -113,7 +113,7 @@ public sealed class ScriptedDownstreamTests
         var script = HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable),
             HttpFault.Success());
-        using var scenario = new ResilienceScenario(script, clock.TimeProvider, clock.Advance);
+        using var scenario = new ResilienceScenario(script, clock);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));

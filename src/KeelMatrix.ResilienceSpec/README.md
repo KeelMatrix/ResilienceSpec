@@ -38,8 +38,7 @@ var scenario = new ResilienceScenario(
     HttpFaultScript.Sequence(
         HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
         HttpFault.Success()),
-    clock.TimeProvider,
-    clock.Advance);
+    clock);
 
 var services = new ServiceCollection();
 services.AddSingleton<TimeProvider>(clock.TimeProvider);
@@ -76,7 +75,7 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 - Timing assertions require a `ResilienceScenarioClock` around an exact
   `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`.
   Keep `AutoAdvanceAmount` at zero, register the wrapper's `TimeProvider` property in the client pipeline, and pass
-  that property plus `clock.Advance` to the scenario. The wrapper verifies that each advance moves the admitted
+  the clock object to the scenario. The scenario invokes the wrapper's verified advance operation. The wrapper verifies that each advance moves the admitted
   provider once by exactly the requested duration and rejects direct or different-provider movement. Without the
   wrapper, timing scenarios fail with
   `MissingTimeProviderException` instead of falling back to sleeps. The wrapper explicitly loads

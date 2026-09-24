@@ -52,8 +52,7 @@ public sealed class PrivacyTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance);
+            clock);
         using var client = Chains.CreateClient(
             scenario.Handler,
             new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus));
@@ -83,8 +82,7 @@ public sealed class PrivacyTests
         var clock = Chains.CreateClock();
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Response(HttpStatusCode.ServiceUnavailable)),
-            clock.TimeProvider,
-            clock.Advance);
+            clock);
         using var client = Chains.CreateClient(scenario.Handler);
         using var request = Chains.SecretRequest();
         using var result = await scenario.SendAsync(client, request);
@@ -168,8 +166,7 @@ public sealed class TelemetryTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance,
+            clock,
             Options(sink));
         using var client = Chains.CreateClient(
             scenario.Handler,
@@ -220,8 +217,7 @@ public sealed class TelemetryTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance,
+            clock,
             Options(sink));
         services.AddHttpClient("orders")
             .AddHttpMessageHandler(() => new RetryHandler(1, TimeSpan.Zero, clock.TimeProvider, Chains.IsRetryableStatus))

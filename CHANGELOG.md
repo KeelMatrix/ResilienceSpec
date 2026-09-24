@@ -20,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   distinct.
 - Direct scripted-handler use now rejects untracked time providers instead of presenting wall-clock timing as
   deterministic.
+- Timing scenarios now accept the `ResilienceScenarioClock` object and invoke its verified advance operation, so an
+  independently supplied provider or advance delegate cannot create timing evidence.
 - `ResilienceScenarioClock` admits only the `FakeTimeProvider` type loaded from the strong-name-token-checked
   `Microsoft.Extensions.TimeProvider.Testing.dll` at the dependency path beside the package assembly. `TimeProvider.System`,
   consumer-authored derived/delegating providers, same-name assemblies from another path, and resolver-hook substitutions
@@ -29,7 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Package validation pins the complete `.NET SDK 10.0.401` toolchain, produces byte-identical `.nupkg` and `.snupkg`
   artifacts for a fixed commit, and records a sorted entry-level SHA256 manifest that includes generated nuspec entries
   before consumer smoke.
-- Corrected the root README examples to pass the tracked `clock.TimeProvider`.
+- Corrected the root README examples to bind timing scenarios to the tracked `ResilienceScenarioClock`.
 
 ## [0.1.0] - Planned
 

@@ -65,7 +65,7 @@ KeelMatrix.ResilienceSpec.ResilienceScenario.Dispose() -> void
 KeelMatrix.ResilienceSpec.ResilienceScenario.Handler.get -> KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler!
 KeelMatrix.ResilienceSpec.ResilienceScenario.Options.get -> KeelMatrix.ResilienceSpec.ResilienceScenarioOptions!
 KeelMatrix.ResilienceSpec.ResilienceScenario.Report.get -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
-KeelMatrix.ResilienceSpec.ResilienceScenario.ResilienceScenario(KeelMatrix.ResilienceSpec.HttpFaultScript! script, System.TimeProvider? timeProvider = null, System.Action<System.TimeSpan>? advanceTime = null, KeelMatrix.ResilienceSpec.ResilienceScenarioOptions? options = null) -> void
+KeelMatrix.ResilienceSpec.ResilienceScenario.ResilienceScenario(KeelMatrix.ResilienceSpec.HttpFaultScript! script, KeelMatrix.ResilienceSpec.ResilienceScenarioClock? clock = null, KeelMatrix.ResilienceSpec.ResilienceScenarioOptions? options = null) -> void
 KeelMatrix.ResilienceSpec.ResilienceScenario.Script.get -> KeelMatrix.ResilienceSpec.HttpFaultScript!
 KeelMatrix.ResilienceSpec.ResilienceScenario.SendAsync(System.Net.Http.HttpClient! client, System.Net.Http.HttpRequestMessage! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<KeelMatrix.ResilienceSpec.ResilienceResult!>!
 KeelMatrix.ResilienceSpec.ResilienceScenario.SupportsTiming.get -> bool

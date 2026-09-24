@@ -23,8 +23,7 @@ public sealed class QuickStartTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),
                 HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance);
+            clock);
 
         var services = new ServiceCollection();
         services.AddSingleton<TimeProvider>(clock.TimeProvider);
@@ -62,8 +61,7 @@ public sealed class QuickStartTests
             HttpFaultScript.Sequence(
                 HttpFault.Response(HttpStatusCode.ServiceUnavailable),
                 HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance);
+            clock);
 
         var services = new ServiceCollection();
         services.AddSingleton<TimeProvider>(clock.TimeProvider);
@@ -100,8 +98,7 @@ public sealed class QuickStartTests
 
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.NetworkError(), HttpFault.Success()),
-            clock.TimeProvider,
-            clock.Advance);
+            clock);
 
         var services = new ServiceCollection();
         services.AddSingleton<TimeProvider>(clock.TimeProvider);
@@ -135,8 +132,7 @@ public sealed class QuickStartTests
 
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(HttpFault.Timeout()),
-            clock.TimeProvider,
-            clock.Advance,
+            clock,
             new ResilienceScenarioOptions { AdvanceClock = false, PendingObservation = TimeSpan.FromMilliseconds(200) });
 
         var services = new ServiceCollection();
