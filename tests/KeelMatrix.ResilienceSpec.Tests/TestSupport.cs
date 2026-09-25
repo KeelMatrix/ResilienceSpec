@@ -466,6 +466,63 @@ internal sealed class DelayedPostTimerRetryHandler : DelegatingHandler
     }
 }
 
+/// <summary>Schedules a due timer whose callback remains stalled until the test releases it.</summary>
+internal sealed class StalledTimerCallbackHandler : DelegatingHandler
+{
+    private readonly TimeProvider _timeProvider;
+    private readonly TaskCompletionSource _callbackStarted;
+    private readonly TaskCompletionSource _callbackCompleted;
+    private readonly TaskCompletionSource _releaseCallback;
+    private readonly TimeSpan _scheduleDelay;
+    private int _attempt;
+
+    internal StalledTimerCallbackHandler(
+        TimeProvider timeProvider,
+        TaskCompletionSource callbackStarted,
+        TaskCompletionSource callbackCompleted,
+        TaskCompletionSource releaseCallback,
+        TimeSpan scheduleDelay)
+    {
+        _timeProvider = timeProvider;
+        _callbackStarted = callbackStarted;
+        _callbackCompleted = callbackCompleted;
+        _releaseCallback = releaseCallback;
+        _scheduleDelay = scheduleDelay;
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (Interlocked.Increment(ref _attempt) == 1)
+        {
+            var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response.Dispose();
+            await Task.Delay(_scheduleDelay, _timeProvider, cancellationToken).ConfigureAwait(false);
+            return await Task.Run(
+                async () =>
+                {
+                    var progressedResponse = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                    progressedResponse.Dispose();
+                    using var timer = _timeProvider.CreateTimer(
+                        static state => ((StalledTimerCallbackHandler)state!).InvokeTimerCallback(),
+                        this,
+                        TimeSpan.Zero,
+                        TimeSpan.FromSeconds(1));
+
+                    return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                }).ConfigureAwait(false);
+        }
+
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void InvokeTimerCallback()
+    {
+        _callbackStarted.TrySetResult();
+        _releaseCallback.Task.GetAwaiter().GetResult();
+        _callbackCompleted.TrySetResult();
+    }
+}
+
 internal static class Chains
 {
     internal static readonly DateTimeOffset ClockStart = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);

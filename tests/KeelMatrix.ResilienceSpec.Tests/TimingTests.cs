@@ -351,6 +351,61 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public async Task StalledDueTimerCallbackIsBoundedAndLateReleaseKeepsScenarioConsumed()
+    {
+        var clock = Chains.CreateClock();
+        var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success(),
+                HttpFault.Success()),
+            clock,
+            new ResilienceScenarioOptions
+            {
+                VirtualBudget = TimeSpan.FromSeconds(2),
+                ObservationWindow = TimeSpan.FromMilliseconds(25),
+                CleanupTimeout = TimeSpan.FromMilliseconds(50),
+            });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new StalledTimerCallbackHandler(
+                clock.TimeProvider,
+                callbackStarted,
+                callbackCompleted,
+                releaseCallback,
+                TimeSpan.FromMilliseconds(1)));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var run = scenario.SendAsync(client, request);
+        try
+        {
+            await callbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            var completed = await Task.WhenAny(run, Task.Delay(TimeSpan.FromMilliseconds(500)));
+            Assert.Same(run, completed);
+
+            using var result = await run;
+            result.ShouldBePending();
+            Assert.True(scenario.Report.IsObservationCutoff);
+
+            releaseCallback.TrySetResult();
+            await callbackCompleted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            await Assert.ThrowsAsync<ScenarioConsumedException>(
+                () => scenario.SendAsync(client, Chains.Request(HttpMethod.Get)));
+        }
+        finally
+        {
+            releaseCallback.TrySetResult();
+            if (!run.IsCompleted)
+            {
+                await run.WaitAsync(TimeSpan.FromSeconds(1));
+            }
+        }
+    }
+
+    [Fact]
     public async Task RetryAfterWithoutAFollowingRetryHasATruthfulDiagnostic()
     {
         var clock = Chains.CreateClock();

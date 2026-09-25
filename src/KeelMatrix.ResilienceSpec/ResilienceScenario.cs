@@ -132,7 +132,14 @@ public sealed class ResilienceScenario : IDisposable
                             // FakeTimeProvider can queue a released timer callback after Advance returns. Wait for
                             // callback dispatch before sampling observer progress; otherwise a slow host can report
                             // Pending while the due timer is already in flight.
-                            await _clock.WaitForTimerCallbackAsync(timerVersion).ConfigureAwait(false);
+                            var timerCallbackCompleted = await CompleteWithinAsync(
+                                _clock.WaitForTimerCallbackAsync(timerVersion),
+                                Options.ObservationWindow).ConfigureAwait(false);
+                            if (!timerCallbackCompleted)
+                            {
+                                break;
+                            }
+
                             var progressed = await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow)
                                 .ConfigureAwait(false);
                             settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
@@ -153,7 +160,13 @@ public sealed class ResilienceScenario : IDisposable
 
                         if (targetsTimerDeadline)
                         {
-                            await _clock.WaitForTimerCallbackAsync(timerVersion).ConfigureAwait(false);
+                            var timerCallbackCompleted = await CompleteWithinAsync(
+                                _clock.WaitForTimerCallbackAsync(timerVersion),
+                                Options.ObservationWindow).ConfigureAwait(false);
+                            if (!timerCallbackCompleted)
+                            {
+                                break;
+                            }
                         }
 
                         // A clock advance may release a retry timer whose continuation still has to schedule the next
