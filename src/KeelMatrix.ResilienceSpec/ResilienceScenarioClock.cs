@@ -106,6 +106,9 @@ public sealed class ResilienceScenarioClock
 
     internal static bool IsTrackingProvider(TimeProvider provider) => provider is TrackingTimeProvider;
 
+    internal Task WaitForTimerCallbackAsync(long observedVersion) =>
+        _provider.WaitForTimerCallbackAsync(observedVersion);
+
     private const string SupportedControllableProviderTypeName = "Microsoft.Extensions.Time.Testing.FakeTimeProvider";
     private const string SupportedControllableProviderAssemblyName = "Microsoft.Extensions.TimeProvider.Testing";
     private const string SupportedControllableProviderAssemblyFileName = "Microsoft.Extensions.TimeProvider.Testing.dll";
@@ -381,6 +384,7 @@ public sealed class ResilienceScenarioClock
         private readonly TimeProvider _inner;
         private readonly List<TrackedTimer> _timers = new();
         private long _timerCallbackVersion;
+        private TaskCompletionSource<bool> _timerCallbackCompletion = NewTimerCallbackCompletion();
 
         internal TrackingTimeProvider(TimeProvider inner, ProviderController controller)
         {
@@ -390,7 +394,23 @@ public sealed class ResilienceScenarioClock
 
         internal long TimerCallbackVersion => Interlocked.Read(ref _timerCallbackVersion);
 
+        internal Task WaitForTimerCallbackAsync(long observedVersion)
+        {
+            lock (_gate)
+            {
+                if (_timerCallbackVersion != observedVersion)
+                {
+                    return Task.CompletedTask;
+                }
+
+                return _timerCallbackCompletion.Task;
+            }
+        }
+
         internal bool HasExactTimingEvidence => _controller.HasExactTimingEvidence;
+
+        private static TaskCompletionSource<bool> NewTimerCallbackCompletion() =>
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         internal TimeSpan? NextTimerDue
         {
@@ -431,9 +451,20 @@ public sealed class ResilienceScenarioClock
                 {
                     timer.DueTimestamp = TimestampAfter(_controller.ObserveTimestamp(), timer.Period);
                 }
+            }
+        }
 
+        internal void CompleteTimerCallback()
+        {
+            TaskCompletionSource<bool> previous;
+            lock (_gate)
+            {
+                previous = _timerCallbackCompletion;
+                _timerCallbackCompletion = NewTimerCallbackCompletion();
                 _timerCallbackVersion++;
             }
+
+            previous.TrySetResult(true);
         }
 
         public override DateTimeOffset GetUtcNow()
@@ -581,7 +612,14 @@ public sealed class ResilienceScenarioClock
         internal void Invoke(object? _)
         {
             _owner.MarkTimerCallback(this);
-            _callback(_state);
+            try
+            {
+                _callback(_state);
+            }
+            finally
+            {
+                _owner.CompleteTimerCallback();
+            }
         }
 
         internal void SetSchedule(TimeSpan dueTime, TimeSpan period)

@@ -129,6 +129,10 @@ public sealed class ResilienceScenario : IDisposable
                         var nextTimerDue = GetNextTimerDue();
                         if (nextTimerDue is { } due && due <= TimeSpan.Zero)
                         {
+                            // FakeTimeProvider can queue a released timer callback after Advance returns. Wait for
+                            // callback dispatch before sampling observer progress; otherwise a slow host can report
+                            // Pending while the due timer is already in flight.
+                            await _clock.WaitForTimerCallbackAsync(timerVersion).ConfigureAwait(false);
                             var progressed = await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow)
                                 .ConfigureAwait(false);
                             settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
@@ -143,8 +147,14 @@ public sealed class ResilienceScenario : IDisposable
                         var advance = nextTimerDue is { } timer && timer < remainingBudget
                             ? timer
                             : remainingBudget < Options.AdvanceStep ? remainingBudget : Options.AdvanceStep;
+                        var targetsTimerDeadline = nextTimerDue is { } target && target == advance;
                         _clock.Advance(advance);
                         virtualElapsed += advance;
+
+                        if (targetsTimerDeadline)
+                        {
+                            await _clock.WaitForTimerCallbackAsync(timerVersion).ConfigureAwait(false);
+                        }
 
                         // A clock advance may release a retry timer whose continuation still has to schedule the next
                         // operation. A timer callback is the supported quiescence boundary: if it fired, wait for the
