@@ -13,7 +13,11 @@ namespace KeelMatrix.ResilienceSpec;
 /// instead of on the wall clock.
 /// </para>
 /// <para>
-/// A scenario is deterministic for a single logical call. Create one scenario per test case.
+/// A scenario owns exactly one logical call. Start it only with <see cref="SendAsync"/>; direct sends through
+/// <see cref="Handler"/>, a manually constructed client, or a factory client fail with
+/// <see cref="ScenarioConsumedException"/> before consuming a script step or changing <see cref="Report"/>.
+/// Genuine retries and timeouts produced inside the configured handler chain inherit that logical-call lease. Create
+/// one scenario per test case.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenario : IDisposable
@@ -54,7 +58,10 @@ public sealed class ResilienceScenario : IDisposable
     /// <summary>Gets the options that control clock advancement and observation.</summary>
     public ResilienceScenarioOptions Options { get; }
 
-    /// <summary>Gets the terminal handler that replaces the network boundary of the client under test.</summary>
+    /// <summary>
+    /// Gets the terminal handler that replaces the network boundary of the client under test. Install it in the
+    /// configured chain, but start every operation with <see cref="SendAsync"/>.
+    /// </summary>
     public ScriptedHttpMessageHandler Handler { get; }
 
     /// <summary>Gets a value indicating whether the scenario can assert timing behaviour.</summary>
@@ -76,7 +83,7 @@ public sealed class ResilienceScenario : IDisposable
     /// report marks <see cref="HttpAttemptReport.IsObservationCutoff"/> rather than claiming request settlement. An
     /// attempt ended by that cleanup has no duration because cleanup is not timeout evidence.
     /// </returns>
-    /// <exception cref="ConcurrentScriptUseException">The scenario has already been used for another logical call.</exception>
+    /// <exception cref="ScenarioConsumedException">The scenario has already been used for another logical call.</exception>
     public async Task<ResilienceResult> SendAsync(
         HttpClient client,
         HttpRequestMessage request,
@@ -87,6 +94,7 @@ public sealed class ResilienceScenario : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var logicalCall = Handler.Observer.BeginLogicalCall();
+        using var execution = logicalCall.Enter(request);
         var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var cleanupOwnsLease = false;
         var virtualElapsed = TimeSpan.Zero;

@@ -34,11 +34,27 @@ public sealed class AttemptStateOverflowException : InvalidOperationException
 }
 
 /// <summary>
-/// Represents the failure raised when a scenario is consumed by a second logical request or overlapping attempt.
+/// Represents the failure raised when a request reaches a scenario's terminal handler without the active logical-call lease.
 /// </summary>
 /// <remarks>
-/// A <see cref="ResilienceScenario"/> represents exactly one logical request for its lifetime. Cleanup can release
-/// retained resources, but it never makes the scenario reusable; create one scenario per logical request.
+/// A request must start at <see cref="ResilienceScenario.SendAsync"/>. Direct sends through the exposed terminal handler
+/// or through a client configured with the adapter fail before consuming a script step or changing the report.
+/// </remarks>
+public sealed class ScenarioConsumedException : InvalidOperationException
+{
+    internal ScenarioConsumedException(string message)
+        : base(message)
+    {
+    }
+}
+
+/// <summary>
+/// Represents the failure raised when two attempts overlap inside one logical call.
+/// </summary>
+/// <remarks>
+/// A request that bypasses the owning scenario's logical-call runner raises <see cref="ScenarioConsumedException"/>
+/// instead. This exception is reserved for a genuine overlapping attempt that reached the terminal handler from the
+/// active logical call.
 /// </remarks>
 public sealed class ConcurrentScriptUseException : InvalidOperationException
 {

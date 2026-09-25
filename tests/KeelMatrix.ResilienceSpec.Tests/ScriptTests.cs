@@ -115,28 +115,20 @@ public sealed class ResilienceScenarioConfigurationTests
     {
         var script = HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(1), HttpFault.Success()));
         Assert.Throws<MissingTimeProviderException>(() => new ResilienceScenario(script));
-        Assert.Throws<MissingTimeProviderException>(() => new ScriptedHttpMessageHandler(script));
     }
 
     [Fact]
-    public void DirectHandlerRejectsAnUntrackedProvider()
-    {
-        Assert.Throws<MissingTimeProviderException>(() =>
-            new ScriptedHttpMessageHandler(Script(), TimeProvider.System));
-    }
-
-    [Fact]
-    public async Task DirectHandlerAcceptsTheSupportedTrackingProvider()
+    public async Task ScenarioAcceptsTheSupportedTrackingProvider()
     {
         var clock = Chains.CreateClock();
-        using var handler = new ScriptedHttpMessageHandler(Script(), clock.TimeProvider);
-        using var client = new HttpClient(handler, disposeHandler: false);
+        using var scenario = new ResilienceScenario(Script(), clock);
+        using var client = new HttpClient(scenario.Handler, disposeHandler: false);
         using var request = Chains.Request(HttpMethod.Get);
 
-        using var response = await client.SendAsync(request);
+        using var result = await scenario.SendAsync(client, request);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        handler.Report.ShouldHaveAttempts(1).ShouldHaveAttemptDuration(1, TimeSpan.Zero);
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        scenario.Report.ShouldHaveAttempts(1).ShouldHaveAttemptDuration(1, TimeSpan.Zero);
     }
 
     [Theory]

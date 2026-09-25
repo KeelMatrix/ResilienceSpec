@@ -26,6 +26,17 @@ ResilienceSpec, but timing scenarios require the explicitly referenced supported
 `10.10.0` package at test runtime. Other testing-package versions are unverified and are not admitted for timing
 evidence. The supported resilience integration range is `9.8.0` up to, but not including, `11.0.0`.
 
+## Logical Call Contract
+
+One `ResilienceScenario` owns exactly one logical operation. Start that operation with
+`ResilienceScenario.SendAsync`; this is the only supported root entry point. `scenario.Handler` may be installed in a
+manually constructed `HttpClient`, or through `UseResilienceSpecDownstream`, but the request must still be executed
+through `scenario.SendAsync`. A direct `HttpClient.SendAsync`, `HttpClient.GetAsync`, factory-client call, or
+`HttpMessageInvoker` call that bypasses the runner fails with `ScenarioConsumedException` before consuming a script
+step or mutating the report. Genuine retries and timeouts produced inside the configured handler chain inherit the
+active logical-call lease. After settlement, cancellation, timeout, or an observation cutoff, the scenario remains
+permanently consumed and cannot be reused.
+
 ## Quick Start
 
 Install the scripted downstream on the client under test, keep the resilience configuration you ship, and run the
@@ -196,7 +207,8 @@ cancellation. The result distinguishes them: `ResilienceResultKind.Canceled` whe
 `ResilienceResultKind.Timeout` when the chain abandoned the attempt without you asking, `DownstreamError` when an
 exception reached the caller, `ScriptExhausted` when the script ran out of steps, and `ConcurrentUse` for the
 low-level overlapping-attempt diagnostic. A second top-level `ResilienceScenario.SendAsync` call throws
-`ConcurrentScriptUseException` before it can consume the script.
+`ScenarioConsumedException` before it can consume the script. `ConcurrentScriptUseException` is reserved for two
+attempts overlapping inside one active logical call.
 
 ## Deterministic Timing
 
@@ -280,7 +292,7 @@ Earlier attempts that genuinely completed remain independently assertable. Cance
 user code that ignores cancellation cannot be forcibly terminated. If cleanup outlives that bound, the scenario retains
 its single-consumer lease until the late request and cancellation callbacks finish. Cleanup releases retained
 resources, but the scenario remains consumed permanently; every second logical call fails with
-`ConcurrentScriptUseException`.
+`ScenarioConsumedException`.
 
 ### Timing Limitations
 
@@ -317,8 +329,10 @@ attempts than that — for example by retrying a harness failure such as `Script
 served `AttemptCount`, a report whose `IsOverflowed` is `true`, and a timeline that ends with an explicit truncation
 line. Assertions over attempt state then fail with `AttemptStateOverflowException` instead of judging a partial
 timeline, so the served attempt count is never silently truncated. A `ResilienceScenario` represents exactly one
-logical call for its lifetime: a second or overlapping top-level request fails with `ConcurrentScriptUseException`
-instead of silently interleaving outcomes. Create one scenario per logical call.
+logical call for its lifetime. Only `ResilienceScenario.SendAsync` may start it; direct handler, manual-client,
+factory-client, and invoker sends fail with `ScenarioConsumedException` before consuming a step or mutating the
+report. A second root call also fails with `ScenarioConsumedException`. `ConcurrentScriptUseException` is reserved
+for overlapping attempts inside the active call. Create one scenario per logical call.
 
 The recording and verification path described here needs no listener, socket, DNS lookup, container, or hosted
 service. Only the optional telemetry described under [Telemetry](#telemetry) can resolve a name or open a socket, and
@@ -389,7 +403,8 @@ evidence covers the verification path and not the optional telemetry transport.
 | --- | --- |
 | `MissingTimeProviderException` when creating a client | The scenario has a controllable clock but the container has no matching tracking provider. Register `clock.TimeProvider` with `services.AddSingleton<TimeProvider>(clock.TimeProvider)`, or set `RequireRegisteredTimeProvider` to `false` when the pipeline time source is configured another way. |
 | `MissingTimeProviderException` from a timing scenario | Use an exact `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`, keep `AutoAdvanceAmount` at zero, wrap it with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)`, and pass that clock object to the scenario. Other testing-package versions and derived, delegating, same-name cross-assembly, or resolver-hook-spoofed providers are rejected. |
-| `ConcurrentScriptUseException` | A scenario or handler is being consumed by a second logical request or overlapping attempt. Create one scenario per logical call. |
+| `ScenarioConsumedException` | A direct handler/client/invoker send bypassed `ResilienceScenario.SendAsync`, or the one logical call was already consumed. The request failed before script/report mutation. |
+| `ConcurrentScriptUseException` | Two attempts overlapped inside one active logical call. Create one scenario per logical call. |
 | `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |
 | `AttemptStateOverflowException` | The client under test served more attempts than `HttpAttemptReport.MaximumRecordedAttempts`, so the recorded timeline is incomplete and cannot judge attempt state. Lower the client's configured maximum attempts; a script cannot describe more attempts than `HttpFaultScript.MaximumSteps` steps. |
 | A timing assertion says exact evidence is unavailable | The observation required fallback sampling because no supported provider timer deadline was available. `AdvanceStep` is a sampling interval, not a tolerance. Make the operation expose a timer on `clock.TimeProvider`, or use a non-timing assertion. |

@@ -20,13 +20,13 @@ public sealed class ScriptedDownstreamTests
     public async Task SingleCallIsAnsweredInMemoryWithoutContent()
     {
         using var scenario = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Success()));
-        using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
+        using var client = Chains.CreateClient(scenario.Handler);
         using var request = Chains.Request(HttpMethod.Get);
-        using var response = await invoker.SendAsync(request, CancellationToken.None);
+        using var result = await scenario.SendAsync(client, request);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(string.Empty, await response.Content!.ReadAsStringAsync());
-        Assert.Empty(response.Headers);
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        Assert.Equal(string.Empty, await result.Response!.Content!.ReadAsStringAsync());
+        Assert.Empty(result.Response.Headers);
         scenario.Report.ShouldHaveAttempts(1).ShouldHaveMethodSequence(HttpMethod.Get);
         Assert.Equal(HttpAttemptOutcome.Response, scenario.Report.LastAttempt!.Outcome);
     }
@@ -37,11 +37,11 @@ public sealed class ScriptedDownstreamTests
         var script = HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)));
         using var scenario = new ResilienceScenario(script);
-        using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
+        using var client = Chains.CreateClient(scenario.Handler);
         using var request = Chains.Request(HttpMethod.Get);
-        using var response = await invoker.SendAsync(request, CancellationToken.None);
+        using var result = await scenario.SendAsync(client, request);
 
-        Assert.Equal(TimeSpan.FromSeconds(2), response.Headers.RetryAfter!.Delta);
+        Assert.Equal(TimeSpan.FromSeconds(2), result.Response!.Headers.RetryAfter!.Delta);
         Assert.Equal(TimeSpan.FromSeconds(2), scenario.Report.LastAttempt!.RetryAfter);
     }
 
@@ -64,26 +64,18 @@ public sealed class ScriptedDownstreamTests
     }
 
     [Fact]
-    public async Task SingleConsumerScriptFailsClearlyOnConcurrentUse()
+    public async Task DirectHandlerUseFailsClearlyBeforeLogicalCall()
     {
         var script = HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success());
         using var scenario = new ResilienceScenario(script);
         using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
-        using var caller = new CancellationTokenSource();
-        using var first = Chains.Request(HttpMethod.Get, "/orders/1");
-        using var second = Chains.Request(HttpMethod.Get, "/orders/2");
+        using var request = Chains.Request(HttpMethod.Get, "/orders/1");
 
-        var firstCall = invoker.SendAsync(first, caller.Token);
-        var failure = await Assert.ThrowsAsync<ConcurrentScriptUseException>(
-            () => invoker.SendAsync(second, CancellationToken.None));
+        var failure = await Assert.ThrowsAsync<ScenarioConsumedException>(
+            () => invoker.SendAsync(request, CancellationToken.None));
 
-        Assert.Contains("one scenario per logical call", failure.Message, StringComparison.Ordinal);
-
-        await caller.CancelAsync();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstCall);
-
-        // The rejected caller never consumed a script step, so the timeline still describes one request.
-        scenario.Report.ShouldHaveAttempts(1);
+        Assert.Contains("ResilienceScenario.SendAsync", failure.Message, StringComparison.Ordinal);
+        scenario.Report.ShouldHaveAttempts(0);
     }
 
     [Fact]
@@ -93,14 +85,13 @@ public sealed class ScriptedDownstreamTests
             HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)),
             2);
         using var scenario = new ResilienceScenario(script);
-        using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
-        using var first = Chains.Request(HttpMethod.Get, "/orders/1");
-        using var firstResponse = await invoker.SendAsync(first, CancellationToken.None);
-        using var second = Chains.Request(HttpMethod.Get, "/orders/2");
-        using var secondResponse = await invoker.SendAsync(second, CancellationToken.None);
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(1, TimeSpan.Zero, TimeProvider.System, Chains.IsRetryableStatus));
+        using var request = Chains.Request(HttpMethod.Get, "/orders/1");
+        using var result = await scenario.SendAsync(client, request);
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, firstResponse.StatusCode);
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, secondResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, result.StatusCode);
         Assert.Equal(2, scenario.Report.AttemptCount);
     }
 
@@ -147,9 +138,9 @@ public sealed class ScriptedDownstreamTests
         using var scenario = new ResilienceScenario(HttpFaultScript.Repeat(HttpFault.Success(), 2));
         var before = scenario.Report;
 
-        using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
         using var request = Chains.Request(HttpMethod.Get);
-        using var response = await invoker.SendAsync(request, CancellationToken.None);
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var result = await scenario.SendAsync(client, request);
 
         Assert.Equal(0, before.AttemptCount);
         Assert.Equal(1, scenario.Report.AttemptCount);
@@ -201,7 +192,9 @@ public sealed class ScriptedDownstreamTests
         var snapshotsFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Repeat(HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(1)), callCount));
-        using var invoker = new HttpMessageInvoker(scenario.Handler, disposeHandler: false);
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(callCount - 1, TimeSpan.Zero, TimeProvider.System, Chains.IsRetryableStatus));
 
         var snapshotter = Task.Run(() =>
         {
@@ -232,13 +225,9 @@ public sealed class ScriptedDownstreamTests
         });
 
         await snapshotStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var responseList = new List<HttpResponseMessage>(callCount);
-        for (var index = 0; index < callCount; index++)
-        {
-            responseList.Add(await SendOneAsync());
-        }
-
-        using var responses = new ResponseCollection(responseList);
+        using var request = Chains.Request(HttpMethod.Get);
+        using var result = await scenario.SendAsync(client, request);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, result.StatusCode);
         snapshotsFinished.SetResult();
         await snapshotter;
 
@@ -252,25 +241,5 @@ public sealed class ScriptedDownstreamTests
             Assert.Equal(TimeSpan.FromSeconds(1), attempt.RetryAfter);
         });
 
-        async Task<HttpResponseMessage> SendOneAsync()
-        {
-            using var request = Chains.Request(HttpMethod.Get);
-            return await invoker.SendAsync(request, CancellationToken.None);
-        }
-    }
-}
-
-internal sealed class ResponseCollection : IDisposable
-{
-    private readonly IReadOnlyList<HttpResponseMessage> _responses;
-
-    internal ResponseCollection(IReadOnlyList<HttpResponseMessage> responses) => _responses = responses;
-
-    public void Dispose()
-    {
-        foreach (var response in _responses)
-        {
-            response.Dispose();
-        }
     }
 }

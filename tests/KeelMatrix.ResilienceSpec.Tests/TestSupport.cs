@@ -219,6 +219,37 @@ internal sealed class RetryEveryExceptionHandler : DelegatingHandler
     }
 }
 
+/// <summary>Starts two terminal attempts inside one logical call to prove overlap remains a distinct failure.</summary>
+internal sealed class ConcurrentAttemptHandler : DelegatingHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var first = base.SendAsync(request, linked.Token);
+        try
+        {
+            return await base.SendAsync(request, linked.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            await linked.CancelAsync().ConfigureAwait(false);
+            await ObserveAsync(first).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task ObserveAsync(Task<HttpResponseMessage> task)
+    {
+        try
+        {
+            using var response = await task.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+        }
+    }
+}
+
 /// <summary>A per-attempt timeout, expressed on the injected clock.</summary>
 internal sealed class AttemptTimeoutHandler : DelegatingHandler
 {

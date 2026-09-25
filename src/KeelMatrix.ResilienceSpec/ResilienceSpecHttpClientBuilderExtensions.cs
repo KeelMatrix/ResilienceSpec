@@ -10,7 +10,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// <remarks>
 /// The core package is usable without dependency injection. This adapter is an ergonomic layer over
 /// <see cref="ResilienceScenario.Handler"/> and adds no behaviour of its own beyond a configuration guard for the
-/// injected clock.
+/// injected clock. Requests from the resulting client must still be started through
+/// <see cref="ResilienceScenario.SendAsync"/>; direct factory-client calls fail with
+/// <see cref="ScenarioConsumedException"/> before consuming the scenario.
 /// </remarks>
 public static class ResilienceSpecHttpClientBuilderExtensions
 {

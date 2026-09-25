@@ -2,6 +2,41 @@ using System.Net;
 
 namespace KeelMatrix.ResilienceSpec;
 
+internal static class LogicalCallOwnership
+{
+    internal static readonly HttpRequestOptionsKey<LogicalCallToken> RequestOption =
+        new("KeelMatrix.ResilienceSpec.LogicalCall");
+
+    internal static readonly AsyncLocal<LogicalCallToken?> Current = new();
+
+    internal static bool IsOwnedBy(ScenarioObserver observer, HttpRequestMessage request)
+    {
+        var currentToken = Current.Value;
+        if (currentToken is null ||
+            !ReferenceEquals(currentToken.Owner, observer) ||
+            !currentToken.IsActive)
+        {
+            return false;
+        }
+
+        return !request.Options.TryGetValue(RequestOption, out var requestToken) ||
+            ReferenceEquals(requestToken, currentToken);
+    }
+}
+
+internal sealed class LogicalCallToken
+{
+    private int _active = 1;
+
+    internal LogicalCallToken(ScenarioObserver owner) => Owner = owner;
+
+    internal ScenarioObserver Owner { get; }
+
+    internal bool IsActive => Volatile.Read(ref _active) == 1;
+
+    internal void Retire() => Volatile.Write(ref _active, 0);
+}
+
 internal enum AttemptPublicationPoint
 {
     AfterCompletionPublication,
@@ -140,9 +175,23 @@ internal sealed class AttemptScope : IDisposable
 internal sealed class LogicalCallScope : IDisposable
 {
     private readonly ScenarioObserver _observer;
+    private readonly LogicalCallToken _token;
     private bool _disposed;
 
-    internal LogicalCallScope(ScenarioObserver observer) => _observer = observer;
+    internal LogicalCallScope(ScenarioObserver observer)
+    {
+        _observer = observer;
+        _token = new LogicalCallToken(observer);
+    }
+
+    internal IDisposable Enter(HttpRequestMessage request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.Options.Set(LogicalCallOwnership.RequestOption, _token);
+        var previous = LogicalCallOwnership.Current.Value;
+        LogicalCallOwnership.Current.Value = _token;
+        return new ExecutionContextScope(previous);
+    }
 
     public void Dispose()
     {
@@ -152,7 +201,27 @@ internal sealed class LogicalCallScope : IDisposable
         }
 
         _disposed = true;
+        _token.Retire();
         _observer.EndLogicalCall();
+    }
+
+    private sealed class ExecutionContextScope : IDisposable
+    {
+        private readonly LogicalCallToken? _previous;
+        private bool _disposed;
+
+        internal ExecutionContextScope(LogicalCallToken? previous) => _previous = previous;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            LogicalCallOwnership.Current.Value = _previous;
+        }
     }
 }
 
@@ -197,7 +266,7 @@ internal sealed class ScenarioObserver
         {
             if (_logicalCallConsumed)
             {
-                throw new ConcurrentScriptUseException(
+                throw new ScenarioConsumedException(
                     "This ResilienceScenario has already served one logical request and cannot be reused. " +
                     "Create one scenario per logical call.");
             }
@@ -225,8 +294,16 @@ internal sealed class ScenarioObserver
         }
     }
 
-    internal AttemptScope BeginAttempt(HttpMethod method)
+    internal AttemptScope BeginAttempt(HttpRequestMessage request)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!LogicalCallOwnership.IsOwnedBy(this, request))
+        {
+            throw new ScenarioConsumedException(
+                "This request did not start through ResilienceScenario.SendAsync, so it cannot reach the scripted " +
+                "downstream. Run one logical operation through the scenario and create one scenario per logical call.");
+        }
+
         AttemptEntry entry;
         lock (_gate)
         {
@@ -244,7 +321,7 @@ internal sealed class ScenarioObserver
             var ordinal = ++_ordinal;
             entry = new AttemptEntry(
                 ordinal,
-                method,
+                request.Method,
                 _script.StepAt(ordinal),
                 Elapsed(),
                 HasExactTimingEvidence());

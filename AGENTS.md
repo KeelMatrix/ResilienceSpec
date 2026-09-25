@@ -42,7 +42,9 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 - Timing assertions run on an injected clock only. Never introduce a wall-clock sleep, an elapsed-time tolerance, or a
   silent fallback that makes a timing claim true.
 - Parameterless scripts, attempt state, and timelines stay bounded, and each scenario keeps permanent single-logical-call
-  semantics. Create one scenario per logical call.
+  semantics. Only `ResilienceScenario.SendAsync` starts the call. Direct handler, manual-client, factory-client, and
+  invoker sends fail with `ScenarioConsumedException` before consuming a step or mutating the report; genuine retries
+  inherit the active call lease. Create one scenario per logical call.
 - Public API changes are recorded in the analyzer baseline next to the package project; new API goes to
   `PublicAPI.Unshipped.txt` and is promoted to `PublicAPI.Shipped.txt` during release preparation.
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is

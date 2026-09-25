@@ -7,6 +7,9 @@ using Polly;
 
 var failures = 0;
 
+// Every operation starts through ResilienceScenario.SendAsync. Direct sends through the configured client or
+// terminal handler bypass the logical-call lease and fail closed before consuming a script step or report state.
+
 await RunAsync("GET 503 -> 200 with the standard resilience handler", async () =>
 {
     var underlyingClock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));

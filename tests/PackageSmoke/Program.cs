@@ -11,6 +11,8 @@ using Polly;
 // The package is consumed here exactly as a user would consume it: from a restored package, through
 // IHttpClientFactory, with Microsoft's standard resilience handler in place and only the terminal network boundary
 // replaced. The hosts are reserved '.invalid' names, so a request that left the process could not answer with 200.
+// Every operation starts through ResilienceScenario.SendAsync; direct client or terminal-handler sends fail closed
+// before consuming a script step or mutating the report.
 
 var failures = new List<string>();
 using var observer = new NetworkActivityObserver();
@@ -381,19 +383,16 @@ async Task<int> RunColdLoadSpoofAsync()
             var clock = new ResilienceScenarioClock(coldLoadSpoof, static _ => { });
             Console.WriteLine("RESULT=ADMITTED");
 
-            using var handler = new ScriptedHttpMessageHandler(
+            using var scenario = new ResilienceScenario(
                 HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromMilliseconds(20), HttpFault.Success())),
-                clock.TimeProvider);
-            using var client = new HttpClient(handler);
+                clock);
+            using var client = new HttpClient(scenario.Handler);
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://spoof-endpoint.invalid");
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            using var result = await client.SendAsync(request, cancellation.Token);
-            if (result.StatusCode != HttpStatusCode.OK)
-            {
-                throw new InvalidOperationException($"Expected 200 OK, observed {(int)result.StatusCode}.");
-            }
+            using var result = await scenario.SendAsync(client, request, cancellation.Token);
+            result.ShouldHaveStatus(HttpStatusCode.OK);
 
-            handler.Report.ShouldHaveAttemptDuration(1, TimeSpan.FromMilliseconds(20));
+            scenario.Report.ShouldHaveAttemptDuration(1, TimeSpan.FromMilliseconds(20));
             Console.WriteLine("SPOOF_WALL_CLOCK_DURATION_ASSERTION=PASSED");
             return 1;
         }

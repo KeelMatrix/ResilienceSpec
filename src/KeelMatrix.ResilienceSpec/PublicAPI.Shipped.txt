@@ -2,6 +2,7 @@
 const KeelMatrix.ResilienceSpec.HttpFaultScript.MaximumSteps = 512 -> int
 const KeelMatrix.ResilienceSpec.HttpAttemptReport.MaximumRecordedAttempts = 512 -> int
 KeelMatrix.ResilienceSpec.ConcurrentScriptUseException
+KeelMatrix.ResilienceSpec.ScenarioConsumedException
 KeelMatrix.ResilienceSpec.AttemptStateOverflowException
 KeelMatrix.ResilienceSpec.HttpAttempt
 KeelMatrix.ResilienceSpec.HttpAttempt.Duration.get -> System.TimeSpan?
@@ -89,7 +90,6 @@ KeelMatrix.ResilienceSpec.ResilienceScenarioOptions.VirtualBudget.init -> void
 KeelMatrix.ResilienceSpec.ResilienceSpecHttpClientBuilderExtensions
 KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler
 KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler.Report.get -> KeelMatrix.ResilienceSpec.HttpAttemptReport!
-KeelMatrix.ResilienceSpec.ScriptedHttpMessageHandler.ScriptedHttpMessageHandler(KeelMatrix.ResilienceSpec.HttpFaultScript! script, System.TimeProvider? timeProvider = null, KeelMatrix.ResilienceSpec.ResilienceScenarioOptions? options = null) -> void
 KeelMatrix.ResilienceSpec.ScriptExhaustedException
 override KeelMatrix.ResilienceSpec.HttpFault.ToString() -> string!
 override KeelMatrix.ResilienceSpec.HttpFaultScript.ToString() -> string!

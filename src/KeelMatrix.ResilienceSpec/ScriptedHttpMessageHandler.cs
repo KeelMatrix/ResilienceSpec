@@ -18,9 +18,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// </para>
 /// <para>
 /// One handler, script, and report is intended to represent the attempt stream of one logical client operation when
-/// call-sensitive assertions are used. Direct low-level handler use cannot identify boundaries between separate
-/// top-level operations; create a separate handler or <see cref="ResilienceScenario"/> for each operation instead of
-/// interpreting an aggregate stream as one retry sequence.
+/// call-sensitive assertions are used. The handler is owned by <see cref="ResilienceScenario"/> and can only be reached
+/// by a request that started through <see cref="ResilienceScenario.SendAsync"/>. Direct <c>HttpClient.SendAsync</c>
+/// or <see cref="HttpMessageInvoker.SendAsync"/> calls through this handler fail before consuming a script step.
 /// </para>
 /// </remarks>
 public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
@@ -37,7 +37,7 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
     /// delay steps and no timing is asserted.
     /// </param>
     /// <param name="options">Scenario options, or <see langword="null"/> for <see cref="ResilienceScenarioOptions.Default"/>.</param>
-    public ScriptedHttpMessageHandler(
+    internal ScriptedHttpMessageHandler(
         HttpFaultScript script,
         TimeProvider? timeProvider = null,
         ResilienceScenarioOptions? options = null)
@@ -56,7 +56,7 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
         if (timeProvider is not null && !ResilienceScenarioClock.IsTrackingProvider(timeProvider))
         {
             throw new MissingTimeProviderException(
-                "Direct ScriptedHttpMessageHandler use with timing requires a ResilienceScenarioClock. Wrap the " +
+                "The scenario clock requires a ResilienceScenarioClock. Wrap the " +
                 "controllable provider and pass clock.TimeProvider so timing assertions cannot use wall-clock durations.");
         }
 
@@ -74,12 +74,13 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
     /// <param name="cancellationToken">The token that ends a hanging attempt.</param>
     /// <returns>The scripted response.</returns>
     /// <exception cref="ScriptExhaustedException">The script has no step left for this attempt.</exception>
-    /// <exception cref="ConcurrentScriptUseException">The script is already serving an in-flight attempt.</exception>
+    /// <exception cref="ScenarioConsumedException">The request bypassed the owning scenario's logical-call runner.</exception>
+    /// <exception cref="ConcurrentScriptUseException">The script is already serving an in-flight attempt within the logical call.</exception>
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        using var attempt = _observer.BeginAttempt(request.Method);
+        using var attempt = _observer.BeginAttempt(request);
         var fault = attempt.Entry.Fault;
         if (fault is null)
         {

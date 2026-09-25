@@ -23,6 +23,15 @@ This document is for maintainers of KeelMatrix.ResilienceSpec. Package consumers
 | `samples/KeelMatrix.ResilienceSpec.Sample` | Runnable walkthrough of the documented quick start |
 | `scripts` | Restore, build, test, pack, inspect, smoke, and audit gates |
 
+## Logical-call contract
+
+One `ResilienceScenario` owns exactly one logical operation, and `ResilienceScenario.SendAsync` is the only supported
+root entry point. `scenario.Handler` can be installed in a manual `HttpClient` or by
+`UseResilienceSpecDownstream`, but every operation must still be started through `scenario.SendAsync`. Direct
+`HttpClient`/factory-client/`HttpMessageInvoker` sends fail with `ScenarioConsumedException` before consuming a script
+step or mutating the report. Retries and timeouts generated inside the configured handler chain inherit the active
+lease. Settlement, cancellation, timeout, and observation cutoff all leave the scenario permanently consumed.
+
 ## Validation path
 
 Run the whole gate:

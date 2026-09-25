@@ -17,3 +17,7 @@ The sample exits with a non-zero code when an expectation does not hold.
 The sample uses a `PackageReference` to `KeelMatrix.ResilienceSpec`. `scripts/Run-Sample.ps1` maps only that package
 ID to its temporary feed; Microsoft, Polly, System, and telemetry dependencies restore from NuGet.org. This keeps
 the sample on the same package-consumer path as the built artifact without a source-project reference.
+
+Every sample operation starts through `ResilienceScenario.SendAsync`. Direct sends through the configured client or
+terminal handler are outside the logical-call contract and fail closed with `ScenarioConsumedException` before they
+can consume a script step or mutate the report.

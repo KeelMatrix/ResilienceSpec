@@ -23,6 +23,17 @@ ResilienceSpec, but timing scenarios require the explicitly referenced supported
 `Microsoft.Extensions.Http.Resilience` may vary from `9.8.0` up to, but not including, `11.0.0`; other testing-package
 versions are unverified and are not admitted for timing evidence.
 
+## Logical Call Contract
+
+One `ResilienceScenario` owns exactly one logical operation. Start that operation with
+`ResilienceScenario.SendAsync`; this is the only supported root entry point. `scenario.Handler` may be installed in a
+manually constructed `HttpClient`, or through `UseResilienceSpecDownstream`, but the request must still be executed
+through `scenario.SendAsync`. A direct `HttpClient.SendAsync`, `HttpClient.GetAsync`, factory-client call, or
+`HttpMessageInvoker` call that bypasses the runner fails with `ScenarioConsumedException` before consuming a script
+step or mutating the report. Genuine retries and timeouts produced inside the configured handler chain inherit the
+active logical-call lease. After settlement, cancellation, timeout, or an observation cutoff, the scenario remains
+permanently consumed and cannot be reused.
+
 ## Quick Example
 
 ```csharp
@@ -59,8 +70,10 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 
 - `HttpFault` and `HttpFaultScript` describe a deterministic sequence of responses, network-like failures, gated
   timeouts, and clock-based delays.
-- `ScriptedHttpMessageHandler` replaces only the terminal network boundary. The verification path answers in memory
-  and never opens a socket, resolves a name, or binds a listener.
+- `ScriptedHttpMessageHandler` replaces only the terminal network boundary and is owned by its
+  `ResilienceScenario`. The verification path answers in memory and never opens a socket, resolves a name, or binds
+  a listener. Direct handler/client/invoker sends fail closed with `ScenarioConsumedException`; use
+  `ResilienceScenario.SendAsync` for every logical operation.
 - `HttpAttemptReport` is an immutable timeline of the attempts that reached that boundary. Records contain only the
   ordinal, method, broad outcome, scripted status or `Retry-After` value, and injected-clock timing.
 - Assertions cover exact and maximum attempt counts, method sequence, unsafe-method retries, final status or
@@ -102,9 +115,10 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   assertable. Cleanup is bounded by `ResilienceScenarioOptions.CleanupTimeout`; late completion is observed and late
   responses are disposed, but arbitrary user code that ignores cancellation cannot be forcibly terminated. The
   single-consumer lease remains held until late cleanup completes. Cleanup releases retained resources, but the scenario
-  remains consumed permanently and a second logical call always fails with `ConcurrentScriptUseException`.
-- One `ResilienceScenario` serves exactly one logical call for its lifetime. Overlapping and sequential reuse both fail
-  with `ConcurrentScriptUseException`; create one scenario per logical call.
+  remains consumed permanently and a second logical call always fails with `ScenarioConsumedException`.
+- One `ResilienceScenario` serves exactly one logical call for its lifetime. Direct sends that bypass the runner and
+  sequential reuse both fail with `ScenarioConsumedException`; `ConcurrentScriptUseException` is reserved for genuine
+  overlapping attempts inside the active call. Create one scenario per logical call.
 - `ShouldRespectRetryAfter` verifies the advertised value as a minimum wait; use `ShouldHaveRetryDelay` for an exact
   configured delay. A response that advertises `Retry-After` without a following retry produces a specific diagnostic.
 - The recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client whose
