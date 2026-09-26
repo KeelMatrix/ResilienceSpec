@@ -145,12 +145,18 @@ another path, and resolver-hook substitutions are rejected. The check does not a
 exact path. The scenario advances directly to the next tracked provider timer when available and uses `AdvanceStep`
 only when no timer deadline is available. Exact assertions compare injected-clock values for equality and reject the
 specific observation if fallback sampling affected it; `AdvanceStep` is not a tolerance. It waits for
-scripted-downstream progress only after a timer fires; if a fired timer's
-continuation does not reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` without
-another virtual advance. The observation window is a watchdog, not a timing measurement. A virtual-budget or no-advance
-cutoff returns `Pending` and is not reported as request settlement. Cancellation cleanup is separately bounded by
+scripted-downstream progress only after a timer fires. A continuation that schedules another legitimate timer may reach
+that next deadline; a completed or disabled one-shot timer does not leave a phantom deadline. If no progress and no real
+tracked deadline remain within `ObservationWindow`, the scenario returns `Pending` without another virtual advance. The
+observation window is a watchdog, not a timing measurement. A virtual-budget or no-advance cutoff returns `Pending` and
+is not reported as request settlement. Cancellation cleanup is separately bounded by
 `ResilienceScenarioOptions.CleanupTimeout`; late cleanup releases retained resources, but a scenario remains consumed
 and cannot be reused after cleanup.
+
+Scripted `HttpFault.Delay` durations and `Retry-After` deltas accept whole milliseconds only and are capped at
+`TimeSpan.FromMilliseconds(int.MaxValue)`, so construction rejects precision or range that the controlled timer cannot
+execute faithfully. `AdvanceStep` and `VirtualBudget` describe injected virtual time; `ObservationWindow`,
+`PendingObservation`, and `CleanupTimeout` are millisecond-precision wall-clock watchdogs.
 
 `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
 the wait runs on the injected clock, so it is deliberately not exposed.

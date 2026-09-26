@@ -13,10 +13,42 @@ public sealed class HttpFaultTests
     }
 
     [Fact]
+    public void ResponseRejectsUnrepresentableStatusCode()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => HttpFault.Response((HttpStatusCode)(-1)));
+        HttpFault.Response((HttpStatusCode)999);
+    }
+
+    [Fact]
+    public void ResponseRejectsFractionalOrOutOfRangeRetryAfter()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            HttpFault.Response(HttpStatusCode.ServiceUnavailable, TimeSpan.FromTicks(1)));
+        Assert.Throws<ArgumentException>(() =>
+            HttpFault.Response(HttpStatusCode.ServiceUnavailable, TimeSpan.FromMilliseconds(1.5)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            HttpFault.Response(
+                HttpStatusCode.ServiceUnavailable,
+                TimeSpan.FromTicks((long)int.MaxValue * TimeSpan.TicksPerMillisecond + TimeSpan.TicksPerMillisecond)));
+    }
+
+    [Fact]
     public void DelayRejectsNonPositiveDuration()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => HttpFault.Delay(TimeSpan.Zero, HttpFault.Success()));
         Assert.Throws<ArgumentOutOfRangeException>(() => HttpFault.Delay(TimeSpan.FromSeconds(-1), HttpFault.Success()));
+    }
+
+    [Fact]
+    public void DelayRejectsFractionalOrOutOfRangeDurationButAcceptsTheSupportedMaximum()
+    {
+        Assert.Throws<ArgumentException>(() => HttpFault.Delay(TimeSpan.FromTicks(1), HttpFault.Success()));
+        Assert.Throws<ArgumentException>(() => HttpFault.Delay(TimeSpan.FromMilliseconds(1.5), HttpFault.Success()));
+
+        var maximum = TimeSpan.FromTicks((long)int.MaxValue * TimeSpan.TicksPerMillisecond);
+        HttpFault.Delay(maximum, HttpFault.Success());
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            HttpFault.Delay(maximum + TimeSpan.FromMilliseconds(1), HttpFault.Success()));
     }
 
     [Fact]
@@ -169,6 +201,10 @@ public sealed class ResilienceScenarioConfigurationTests
             Script(),
             clock,
             new ResilienceScenarioOptions { ObservationWindow = unsupported }));
+        Assert.Throws<ArgumentException>(() => new ResilienceScenario(
+            Script(),
+            clock,
+            new ResilienceScenarioOptions { ObservationWindow = TimeSpan.FromMilliseconds(1.5) }));
     }
 
     [Fact]

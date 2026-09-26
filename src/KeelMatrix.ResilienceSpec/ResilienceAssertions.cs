@@ -146,13 +146,14 @@ public static class ResilienceAssertions
 
     /// <summary>
     /// Asserts that every scripted <c>Retry-After</c> delay was honoured as a minimum: the following attempt waited
-    /// at least the advertised injected-clock time. Use <see cref="ShouldHaveRetryDelay"/> for an exact delay.
+    /// at least the advertised injected-clock time with exact timing evidence. Use <see cref="ShouldHaveRetryDelay"/>
+    /// for an exact delay.
     /// </summary>
     /// <param name="report">The attempt report to assert on.</param>
     /// <returns>The same report, so assertions can be chained.</returns>
     /// <exception cref="AttemptStateOverflowException">The run served more attempts than the recorded timeline holds.</exception>
     /// <exception cref="MissingTimeProviderException">The scenario has no controllable clock.</exception>
-    /// <exception cref="ResilienceAssertionException">No response advertised <c>Retry-After</c>, no retry followed it, or it was not honoured.</exception>
+    /// <exception cref="ResilienceAssertionException">No response advertised <c>Retry-After</c>, no retry followed it, the timing evidence was sampled or incomplete, or the minimum was not honoured.</exception>
     public static HttpAttemptReport ShouldRespectRetryAfter(this HttpAttemptReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
@@ -177,6 +178,13 @@ public static class ResilienceAssertions
                     "the response advertised Retry-After but no following attempt was observed");
             }
 
+            var attempt = report.Attempts[index];
+            var next = report.Attempts[index + 1];
+            RequireExactTimingEvidence(
+                report,
+                nameof(ShouldRespectRetryAfter),
+                HasExactIntervalTimingEvidence(attempt, next),
+                $"the interval between attempts #{attempt.Ordinal} and #{next.Ordinal}");
             var observed = Interval(report.Attempts[index], report.Attempts[index + 1]);
             if (observed < delay)
             {
@@ -229,7 +237,7 @@ public static class ResilienceAssertions
             RequireExactTimingEvidence(
                 report,
                 nameof(ShouldHaveRetryDelay),
-                attempt.StartedAfterIsExact && attempt.DurationIsExact && next.StartedAfterIsExact,
+                HasExactIntervalTimingEvidence(attempt, next),
                 $"the interval between attempts #{attempt.Ordinal} and #{next.Ordinal}");
             var observed = Interval(report.Attempts[index], report.Attempts[index + 1]);
             intervals.Add(observed);
@@ -483,6 +491,9 @@ public static class ResilienceAssertions
 
     private static TimeSpan Interval(HttpAttempt attempt, HttpAttempt next) =>
         next.StartedAfter!.Value - (attempt.StartedAfter!.Value + attempt.Duration!.Value);
+
+    private static bool HasExactIntervalTimingEvidence(HttpAttempt attempt, HttpAttempt next) =>
+        attempt.StartedAfterIsExact && attempt.DurationIsExact && next.StartedAfterIsExact;
 
     private static string Describe(HttpMethod[] methods) =>
         string.Join(" -> ", Array.ConvertAll(methods, method => method.Method));

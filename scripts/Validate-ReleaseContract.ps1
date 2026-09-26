@@ -42,7 +42,8 @@ try {
         Fail-Contract "Changelog was not found: $ChangelogPath"
     }
 
-    $tagMatch = [regex]::Match($Tag, '^v(?<version>\d+\.\d+\.\d+)$')
+    $stableTagPattern = '^v(?<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$'
+    $tagMatch = [regex]::Match($Tag, $stableTagPattern)
     if (-not $tagMatch.Success) {
         Fail-Contract "Tag '$Tag' is not a stable vX.Y.Z release tag."
     }
@@ -107,8 +108,15 @@ try {
         Fail-Contract "Version $tagVersion is still marked as planned, unreleased, TBD, pending, or equivalent."
     }
 
-    if ($target.Date -notmatch '^\d{4}-\d{2}-\d{2}$') {
-        Fail-Contract "Version $tagVersion must have a finalized YYYY-MM-DD release date."
+    $releaseDate = [datetime]::MinValue
+    $hasValidReleaseDate = [datetime]::TryParseExact(
+        $target.Date,
+        'yyyy-MM-dd',
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::None,
+        [ref]$releaseDate)
+    if (-not $hasValidReleaseDate -or $releaseDate.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) -cne $target.Date) {
+        Fail-Contract "Version $tagVersion must have a valid finalized ISO YYYY-MM-DD release date."
     }
 
     $categories = @([regex]::Matches($entry, '(?im)^###\s+(?<name>.+?)\s*$') | ForEach-Object { $_.Groups['name'].Value.Trim() })

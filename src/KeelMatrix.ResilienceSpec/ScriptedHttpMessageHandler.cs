@@ -14,7 +14,8 @@ namespace KeelMatrix.ResilienceSpec;
 /// </para>
 /// <para>
 /// The handler answers in memory. It never resolves a name, opens a socket, or binds a listener, and its responses
-/// carry no content and no headers other than the scripted <c>Retry-After</c> value.
+/// carry no content and no headers other than the scripted <c>Retry-After</c> value. A response attempt is published
+/// in the report only after the response and that supported metadata have been constructed successfully.
 /// </para>
 /// <para>
 /// One handler, script, and report is intended to represent the attempt stream of one logical client operation when
@@ -103,8 +104,9 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
             switch (step.Kind)
             {
                 case HttpFaultKind.Response:
+                    var response = CreateResponse(step, request);
                     attempt.Complete(HttpAttemptOutcome.Response, step.StatusCode, step.RetryAfter);
-                    return CreateResponse(step, request);
+                    return response;
 
                 case HttpFaultKind.NetworkError:
                     attempt.Complete(HttpAttemptOutcome.NetworkError);

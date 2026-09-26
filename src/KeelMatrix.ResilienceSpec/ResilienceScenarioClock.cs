@@ -443,7 +443,7 @@ public sealed class ResilienceScenarioClock
         {
             lock (_gate)
             {
-                if (timer.Period == Timeout.InfiniteTimeSpan)
+                if (timer.Period == Timeout.InfiniteTimeSpan || timer.Period == TimeSpan.Zero)
                 {
                     timer.DueTimestamp = null;
                 }

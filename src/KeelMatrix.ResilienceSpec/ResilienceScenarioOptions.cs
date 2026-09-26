@@ -10,8 +10,8 @@ public sealed class ResilienceScenarioOptions
     /// Gets the fallback amount of injected-clock time added while a request is pending when the tracking clock has no
     /// scheduled timer to target. The value is reported by <see cref="HttpAttemptReport.ObservationStep"/> as the
     /// sampling interval. Exact timing assertions fail closed after fallback sampling; this value is never an implicit
-    /// tolerance. When a supported tracking clock exposes a timer deadline, the scenario advances directly to that
-    /// deadline. Defaults to 100 milliseconds.
+    /// tolerance. It is an injected-clock duration and may use sub-millisecond precision. When a supported tracking
+    /// clock exposes a timer deadline, the scenario advances directly to that deadline. Defaults to 100 milliseconds.
     /// </summary>
     public TimeSpan AdvanceStep { get; init; } = TimeSpan.FromMilliseconds(100);
 
@@ -30,14 +30,15 @@ public sealed class ResilienceScenarioOptions
     public TimeSpan ObservationWindow { get; init; } = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    /// Gets the wall-clock window used to watch a pending request when the scenario cannot advance the clock.
-    /// Defaults to 1 second.
+    /// Gets the wall-clock window used to watch a pending request when the scenario cannot advance the clock. It uses
+    /// whole-millisecond precision and the range supported by <see cref="Task.Delay(TimeSpan)"/>. Defaults to 1 second.
     /// </summary>
     public TimeSpan PendingObservation { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Gets the maximum wall-clock time spent waiting for cancellation callbacks and an abandoned request to
-    /// cooperate before the scenario reports a pending observation cutoff. Defaults to 1 second.
+    /// cooperate before the scenario reports a pending observation cutoff. It uses whole-millisecond precision and the
+    /// range supported by <see cref="Task.Delay(TimeSpan)"/>. Defaults to 1 second.
     /// </summary>
     public TimeSpan CleanupTimeout { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -75,31 +76,20 @@ public sealed class ResilienceScenarioOptions
             throw new ArgumentOutOfRangeException(nameof(ObservationWindow), ObservationWindow, "An observation window must be greater than zero.");
         }
 
-        ValidateTaskDelayWindow(nameof(ObservationWindow), ObservationWindow);
+        DurationContract.ValidateWatchdogDuration(nameof(ObservationWindow), ObservationWindow, "An observation window");
 
         if (PendingObservation <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(PendingObservation), PendingObservation, "A pending observation window must be greater than zero.");
         }
 
-        ValidateTaskDelayWindow(nameof(PendingObservation), PendingObservation);
+        DurationContract.ValidateWatchdogDuration(nameof(PendingObservation), PendingObservation, "A pending observation window");
 
         if (CleanupTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(CleanupTimeout), CleanupTimeout, "A cleanup timeout must be greater than zero.");
         }
 
-        ValidateTaskDelayWindow(nameof(CleanupTimeout), CleanupTimeout);
-    }
-
-    private static void ValidateTaskDelayWindow(string name, TimeSpan value)
-    {
-        if (value > TimeSpan.FromMilliseconds(int.MaxValue))
-        {
-            throw new ArgumentOutOfRangeException(
-                name,
-                value,
-                "The observation window exceeds the maximum duration supported by Task.Delay.");
-        }
+        DurationContract.ValidateWatchdogDuration(nameof(CleanupTimeout), CleanupTimeout, "A cleanup timeout");
     }
 }

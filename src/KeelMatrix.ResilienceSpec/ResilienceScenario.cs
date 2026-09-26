@@ -72,7 +72,8 @@ public sealed class ResilienceScenario : IDisposable
 
     /// <summary>
     /// Runs one request through the client under test while advancing the injected clock deterministically until the
-    /// request settles or the virtual budget is exhausted.
+    /// request settles or the virtual budget is exhausted. Legitimate timer-to-timer continuations are followed to
+    /// their next tracked deadline, while completed or disabled one-shot timers do not create phantom deadlines.
     /// </summary>
     /// <param name="client">The configured client whose real handler chain must stay in place.</param>
     /// <param name="request">The request to send.</param>
@@ -140,7 +141,10 @@ public sealed class ResilienceScenario : IDisposable
                                 break;
                             }
 
-                            var progressed = await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow)
+                            var progressed = await Handler.Observer.WaitForProgressAsync(
+                                    progressVersion,
+                                    Options.ObservationWindow,
+                                    () => GetNextTimerDue() is not null)
                                 .ConfigureAwait(false);
                             settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
                             if (settled || !progressed)
@@ -176,7 +180,10 @@ public sealed class ResilienceScenario : IDisposable
                         var timerFired = HasTimerCallbackSince(timerVersion);
                         if (timerFired)
                         {
-                            var progressed = await Handler.Observer.WaitForProgressAsync(progressVersion, Options.ObservationWindow)
+                            var progressed = await Handler.Observer.WaitForProgressAsync(
+                                    progressVersion,
+                                    Options.ObservationWindow,
+                                    () => GetNextTimerDue() is not null)
                                 .ConfigureAwait(false);
                             // A terminal strategy timeout can settle the client task without another scripted attempt.
                             // Observe that completion before applying the no-progress cutoff; only an unsettled request

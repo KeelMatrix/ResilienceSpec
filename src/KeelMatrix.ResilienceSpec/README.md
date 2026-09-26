@@ -99,15 +99,20 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   does not attest a consumer-replaced file at that exact dependency path.
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
+- Scripted delays and `Retry-After` deltas accept whole-millisecond precision only and are capped at
+  `TimeSpan.FromMilliseconds(int.MaxValue)`, matching the controlled timer contract. Fractional-millisecond and
+  out-of-range values fail during script construction instead of being rounded, dropped, or reported differently.
 - Timing observations use `ResilienceScenarioOptions.AdvanceStep` only as a fallback when no provider timer deadline
   is available. When the supported tracking clock exposes a timer deadline, the scenario advances directly to that
-  deadline; `ResilienceScenarioClock` records provider timers that fire. If a fired timer's continuation does not
-  reach the scripted downstream within `ObservationWindow`, the scenario returns `Pending` at the current virtual
-  time instead of allowing another advance. Intermediate virtual delays stay wall-clock cheap because they do not
-  require a watchdog wait before a timer fires. `ShouldHaveRetryDelay`, `ShouldHaveAttemptDuration`, and
-  `ShouldHaveSettledAtVirtualTime` require exact equality and reject an observation affected by fallback sampling;
-  `AdvanceStep` is a sampling interval, not a tolerance. `ShouldRespectRetryAfter` intentionally remains a minimum
-  assertion, so a longer wait is valid.
+  deadline; `ResilienceScenarioClock` records provider timers that fire. A continuation that schedules another
+  legitimate timer may reach that next deadline, while a completed or disabled one-shot timer does not leave a phantom
+  deadline. If a fired timer's continuation neither progresses nor leaves a real tracked deadline within
+  `ObservationWindow`, the scenario returns `Pending` at the current virtual time instead of allowing another advance.
+  Intermediate virtual delays stay wall-clock cheap because they do not require a watchdog wait before a timer fires.
+  `ShouldHaveRetryDelay`, `ShouldHaveAttemptDuration`, and `ShouldHaveSettledAtVirtualTime` require exact equality and
+  reject an observation affected by fallback sampling; `AdvanceStep` is a sampling interval, not a tolerance.
+  `ShouldRespectRetryAfter` is still a minimum assertion, so a longer exact wait is valid, but sampled or incomplete
+  timing evidence is rejected.
 - When the virtual budget or pending observation expires, `SendAsync` returns `Pending` and the report marks
   `IsObservationCutoff`; `ShouldHaveSettledAtVirtualTime` accepts only genuine request settlement. An attempt ended by
   observation cleanup has incomplete timing evidence, so `ShouldHaveAttemptDuration` rejects it instead of treating
@@ -120,7 +125,8 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   sequential reuse both fail with `ScenarioConsumedException`; `ConcurrentScriptUseException` is reserved for genuine
   overlapping attempts inside the active call. Create one scenario per logical call.
 - `ShouldRespectRetryAfter` verifies the advertised value as a minimum wait; use `ShouldHaveRetryDelay` for an exact
-  configured delay. A response that advertises `Retry-After` without a following retry produces a specific diagnostic.
+  configured delay. It requires exact timing evidence for the interval it evaluates. A response that advertises
+  `Retry-After` without a following retry produces a specific diagnostic.
 - The recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client whose
   retry predicate covers harness failures cannot grow attempt state inside the test process. Such a run reports
   `HttpAttemptReport.IsOverflowed` and fails attempt-state assertions with `AttemptStateOverflowException` instead of

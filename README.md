@@ -174,6 +174,8 @@ scenario.Report.ShouldRespectRetryAfter().ShouldHaveRetryDelay(TimeSpan.FromSeco
 
 The delta form is deterministic because the wait runs on the injected clock. The HTTP-date form is deliberately not
 supported; see [Timing Limitations](#timing-limitations).
+Scripted `Retry-After` values use whole-millisecond precision and must not exceed the maximum duration supported by the
+controlled timer (`TimeSpan.FromMilliseconds(int.MaxValue)`).
 
 ## Exceptions And Cancellation
 
@@ -240,20 +242,23 @@ produce a timing-eligible report.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances to the next tracked provider timer when one is
 available and otherwise uses `AdvanceStep` as a fallback. It waits for scripted-downstream progress only after a timer
-fires, using `ObservationWindow` as a bounded watchdog; if progress does not arrive, it returns `Pending` without
-another advance. This is the fail-closed quiescence boundary and keeps ordinary virtual delays wall-clock cheap.
+fires, using `ObservationWindow` as a bounded watchdog. A continuation that schedules another legitimate timer is
+allowed to reach that next deadline; a completed or disabled one-shot timer does not create a phantom deadline, and a
+genuinely stalled continuation still returns `Pending` without another advance. This is the fail-closed quiescence
+boundary and keeps ordinary virtual delays wall-clock cheap.
 `ShouldHaveRetryDelay`, `ShouldHaveAttemptDuration`, and `ShouldHaveSettledAtVirtualTime` require exact equality on the
 injected clock. `HttpAttemptReport.ObservationStep` reports the fallback sampling interval; it is never an implicit
 tolerance. If the specific observation was available only through fallback sampling, the exact assertion fails with an
 actionable diagnostic even when the sampled number happens to equal the expectation. Nothing is measured with the wall
 clock and there are no elapsed-time tolerances. `ShouldRespectRetryAfter` remains a minimum assertion: a longer exact
-wait is valid when the observed wait is at least the advertised delta.
+wait is valid when the observed wait is at least the advertised delta, but sampled or incomplete timing evidence is
+rejected.
 
 Assertions that ship with the timing subset:
 
 | Assertion | What it proves |
 | --- | --- |
-| `ShouldRespectRetryAfter()` | Every scripted `Retry-After` delta was honoured as the minimum wait before the next attempt |
+| `ShouldRespectRetryAfter()` | Every scripted `Retry-After` delta was honoured as the minimum wait before the next attempt with exact timing evidence |
 | `ShouldHaveRetryDelay(expected)` | Every inter-attempt delay matches the configured backoff |
 | `ShouldHaveAttemptDuration(ordinal, expected)` | One attempt lasted the configured per-attempt timeout |
 | `ShouldHaveSettledAtVirtualTime(expected)` | The request settled at the configured total timeout |
@@ -314,6 +319,12 @@ resources, but the scenario remains consumed permanently; every second logical c
   does not attest a file a consumer replaces at that exact path.
 - **`Retry-After` is asserted for delta responses only.** A response without `Retry-After` is governed by the
   configured backoff, which `ShouldHaveRetryDelay` verifies.
+- **Script duration precision is explicit.** `HttpFault.Delay` and `HttpFault.Response` retry-after deltas accept
+  non-negative whole milliseconds only, with positive delays and deltas capped at `TimeSpan.FromMilliseconds(int.MaxValue)`.
+  Fractional-millisecond and out-of-range values are rejected while the script is constructed; they are never silently
+  rounded or reported as a different duration. `AdvanceStep` and `VirtualBudget` are injected-clock durations, while
+  `ObservationWindow`, `PendingObservation`, and `CleanupTimeout` are wall-clock watchdogs with the same whole-
+  millisecond timer range.
 
 ## Recording And Privacy
 

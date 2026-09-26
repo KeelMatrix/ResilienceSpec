@@ -41,6 +41,9 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   authorization values, bodies, or exception messages.
 - Timing assertions run on an injected clock only. Never introduce a wall-clock sleep, an elapsed-time tolerance, or a
   silent fallback that makes a timing claim true.
+- Scripted delays and `Retry-After` deltas use whole-millisecond precision and reject values above the controlled
+  timer's `int.MaxValue` millisecond limit; observation, pending, and cleanup durations are separate watchdog inputs
+  with the same Task.Delay range contract.
 - Parameterless scripts, attempt state, and timelines stay bounded, and each scenario keeps permanent single-logical-call
   semantics. Only `ResilienceScenario.SendAsync` starts the call. Direct handler, manual-client, factory-client, and
   invoker sends fail with `ScenarioConsumedException` before consuming a step or mutating the report; genuine retries
