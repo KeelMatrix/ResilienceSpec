@@ -237,7 +237,7 @@ try {
     Write-Output ("Symbols: {0} ({1:n0} bytes)" -f $snupkg, (Get-Item -LiteralPath $snupkg).Length)
 
     Write-Output 'Inspect the packed package'
-    & pwsh -NoProfile -File $inspectionScript -PackagePath $nupkg -SymbolsPath $snupkg -ExpectedVersion $PackageVersion -ExpectedRepositoryCommit $expectedCommit
+    & pwsh -NoProfile -WindowStyle Hidden -File $inspectionScript -PackagePath $nupkg -SymbolsPath $snupkg -ExpectedVersion $PackageVersion -ExpectedRepositoryCommit $expectedCommit
     Assert-Contract ($LASTEXITCODE -eq 0) 'Package inspection failed.'
 
     $escapedFeed = [Security.SecurityElement]::Escape($packageFeed)
