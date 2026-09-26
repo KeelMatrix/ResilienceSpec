@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ### Fixed
 
+- `ShouldRespectRetryAfter` now fails closed when the evaluated interval used sampled or incomplete timing evidence,
+  while retaining the minimum-wait rule for exact equal or longer waits.
+- Virtual-time observation now follows legitimate timer-to-timer continuations and correctly retires zero-period,
+  infinite-period, disabled, changed, and disposed one-shot timers without inventing due-now callbacks.
+- Scripted response statuses and duration inputs are validated before execution; fractional-millisecond or
+  out-of-range timer durations are rejected, and response completion is published only after response construction
+  succeeds.
+- Release validation now parses exact invariant ISO calendar dates and shares the canonical stable-tag grammar with the
+  release workflow.
 - Exact retry-delay, attempt-duration, and settlement assertions now require equality on exact injected-clock evidence;
   fallback sampling is reported as unavailable exact evidence instead of acting as an implicit tolerance.
 - `ResilienceScenarioClock` now rejects testing-provider versions other than `10.10.0`, non-zero automatic advancement,

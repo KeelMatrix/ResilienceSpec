@@ -33,6 +33,66 @@ public sealed class ReleaseContractTests
         Assert.Contains("does not match", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("2026-00-10")]
+    [InlineData("2026-04-31")]
+    [InlineData("2025-02-29")]
+    public void InvalidCalendarDateFailsClosed(string date)
+    {
+        var result = RunContractForDate(date);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("date", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LeapDayOnALeapYearPasses()
+    {
+        var result = RunContractForDate("2024-02-29");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Release contract passed", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingTargetEntryFailsClosed()
+    {
+        var result = RunContractWithChangelog(
+            "v0.1.0",
+            "0.1.0",
+            "# Changelog\n\n## [Unreleased]\n\n### Added\n- Provides the initial package contract.");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("exactly one", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DuplicateTargetEntriesFailClosed()
+    {
+        var result = RunContractWithChangelog(
+            "v0.1.0",
+            "0.1.0",
+            "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-09-16\n\n### Added\n- First entry.\n\n## [0.1.0] - 2026-09-17\n\n### Added\n- Duplicate entry.");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("exactly one", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("v01.2.3")]
+    [InlineData("v1.2")]
+    [InlineData("v1.2.3-preview.1")]
+    public void NonCanonicalStableTagFailsClosed(string tag)
+    {
+        var result = RunContractWithChangelog(
+            tag,
+            "0.1.0",
+            "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-09-16\n\n### Added\n- First entry.");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("stable", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void RemediationMarkerFailsClosed()
     {
@@ -715,6 +775,21 @@ public sealed class ReleaseContractTests
         };
         entry.AddRange(additionalEntryLines);
         return RunContractWithChangelog(tag, packageVersion, string.Join(Environment.NewLine, entry));
+    }
+
+    private static ContractResult RunContractForDate(string date)
+    {
+        var changelog = string.Join(
+            Environment.NewLine,
+            "# Changelog",
+            "",
+            "## [Unreleased]",
+            "",
+            $"## [0.1.0] - {date}",
+            "",
+            "### Added",
+            "- Provides the initial package contract.");
+        return RunContractWithChangelog("v0.1.0", "0.1.0", changelog);
     }
 
     private static ContractResult RunContractWithChangelog(

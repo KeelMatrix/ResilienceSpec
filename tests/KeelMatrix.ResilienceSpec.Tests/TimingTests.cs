@@ -213,6 +213,151 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
+    public async Task SamplingOnlyRetryAfterCannotMasqueradeAsMinimumEvidence()
+    {
+        var release = new TaskCompletionSource();
+        var step = TimeSpan.FromMilliseconds(100);
+        var provider = new FakeTimeProvider(Chains.ClockStart);
+        var clock = new ResilienceScenarioClock(provider, amount =>
+        {
+            provider.Advance(amount);
+            release.TrySetResult();
+        });
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: step),
+                HttpFault.Success()),
+            clock,
+            new ResilienceScenarioOptions { AdvanceStep = step });
+        using var client = Chains.CreateClient(scenario.Handler, new SamplingRetryHandler(release.Task));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        Assert.False(scenario.Report.Attempts[1].StartedAfterIsExact);
+        var failure = Assert.Throws<ResilienceAssertionException>(
+            () => scenario.Report.ShouldRespectRetryAfter());
+        Assert.Contains("exact timing evidence", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SequentialVirtualDelaysContinueToTheSecondDeadlineBeforeTheAttempt()
+    {
+        const int delaySeconds = 1;
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            clock,
+            new ResilienceScenarioOptions { VirtualBudget = TimeSpan.FromSeconds(3) });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new SequentialDelayHandler(clock.TimeProvider, TimeSpan.FromSeconds(delaySeconds)));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        scenario.Report.ShouldHaveAttempts(1).ShouldHaveSettledAtVirtualTime(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task CompletedZeroPeriodOneShotDoesNotObstructLaterTimerDeadline()
+    {
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            clock,
+            new ResilienceScenarioOptions { VirtualBudget = TimeSpan.FromSeconds(3) });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new OneShotThenLaterTimerHandler(clock.TimeProvider));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        scenario.Report.ShouldHaveAttempts(1).ShouldHaveSettledAtVirtualTime(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task TrackingTimerConformsToOneShotDisabledChangeImmediateAndDisposalSemantics()
+    {
+        var clock = Chains.CreateClock();
+        var callbacks = 0;
+        var immediateCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var disabled = clock.TimeProvider.CreateTimer(
+            _ => Interlocked.Increment(ref callbacks),
+            null,
+            Timeout.InfiniteTimeSpan,
+            TimeSpan.FromSeconds(1));
+        Assert.Null(ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+
+        using var changed = clock.TimeProvider.CreateTimer(
+            _ =>
+            {
+                Interlocked.Increment(ref callbacks);
+                immediateCallback.TrySetResult();
+            },
+            null,
+            TimeSpan.FromSeconds(5),
+            Timeout.InfiniteTimeSpan);
+        Assert.Equal(TimeSpan.FromSeconds(5), ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+        Assert.True(changed.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan));
+        Assert.Equal(TimeSpan.FromSeconds(1), ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await immediateCallback.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.Equal(1, callbacks);
+        Assert.Null(ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+
+        var disposedCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (var disposed = clock.TimeProvider.CreateTimer(
+                   _ => disposedCallback.TrySetResult(),
+                   null,
+                   TimeSpan.FromSeconds(1),
+                   Timeout.InfiniteTimeSpan))
+        {
+            Assert.Equal(TimeSpan.FromSeconds(1), ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+            disposed.Dispose();
+        }
+
+        Assert.Null(ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.False(disposedCallback.Task.IsCompleted);
+
+        var immediate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (clock.TimeProvider.CreateTimer(
+                   _ => immediate.TrySetResult(),
+                   null,
+                   TimeSpan.Zero,
+                   Timeout.InfiniteTimeSpan))
+        {
+            await immediate.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Null(ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+        }
+
+        var callbackTimeChange = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ITimer? callbackTimer = null;
+        callbackTimer = clock.TimeProvider.CreateTimer(
+            _ =>
+            {
+                Assert.True(callbackTimer!.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan));
+                callbackTimeChange.TrySetResult();
+            },
+            null,
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(1));
+        using (callbackTimer)
+        {
+            Assert.Equal(TimeSpan.FromSeconds(1), ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+            clock.Advance(TimeSpan.FromSeconds(1));
+            await callbackTimeChange.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Equal(TimeSpan.FromSeconds(1), ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
+        }
+    }
+
+    [Fact]
     public async Task SamplingOnlyAttemptDurationCannotMasqueradeAsExactEvidence()
     {
         var release = new TaskCompletionSource();
@@ -1026,5 +1171,55 @@ internal sealed class SamplingRetryHandler : DelegatingHandler
             cancellationToken,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default).Unwrap();
+    }
+}
+
+internal sealed class SequentialDelayHandler : DelegatingHandler
+{
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _delay;
+
+    internal SequentialDelayHandler(TimeProvider timeProvider, TimeSpan delay)
+    {
+        _timeProvider = timeProvider;
+        _delay = delay;
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        await Task.Delay(_delay, _timeProvider, cancellationToken).ConfigureAwait(false);
+        await Task.Delay(_delay, _timeProvider, cancellationToken).ConfigureAwait(false);
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+}
+
+internal sealed class OneShotThenLaterTimerHandler : DelegatingHandler
+{
+    private readonly TimeProvider _timeProvider;
+
+    internal OneShotThenLaterTimerHandler(TimeProvider timeProvider) => _timeProvider = timeProvider;
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var oneShot = _timeProvider.CreateTimer(
+            static state => ((TaskCompletionSource)state!).TrySetResult(),
+            first,
+            TimeSpan.FromSeconds(1),
+            TimeSpan.Zero);
+        using var later = _timeProvider.CreateTimer(
+            static state => ((TaskCompletionSource)state!).TrySetResult(),
+            second,
+            TimeSpan.FromSeconds(2),
+            Timeout.InfiniteTimeSpan);
+
+        await first.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await second.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }

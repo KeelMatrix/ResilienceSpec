@@ -35,19 +35,15 @@ jobs:
         id: release-version
         shell: pwsh
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          if ($tag -notmatch '^v(?<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$') {
-            throw "Malformed release tag '$tag'. Expected vX.Y.Z."
+          $validation = @(./scripts/Validate-ReleaseContract.ps1 -Tag $env:GITHUB_REF_NAME -PackageProject ./src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj -ChangelogPath ./CHANGELOG.md)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release contract validation failed."
+          }
+          $passed = $validation | Where-Object { $_ -match '^Release contract passed:' } | Select-Object -First 1
+          if ($passed -notmatch 'version=(?<version>\S+)') {
+            throw "Release contract validator did not return a canonical package version."
           }
           "version=$($Matches.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Validate changelog and package version
-        shell: pwsh
-        run: >-
-          ./scripts/Validate-ReleaseContract.ps1
-          -Tag "$env:GITHUB_REF_NAME"
-          -PackageProject ./src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj
-          -ChangelogPath ./CHANGELOG.md
 
       - name: Restore
         run: >-

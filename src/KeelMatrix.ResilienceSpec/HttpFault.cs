@@ -71,17 +71,30 @@ public sealed class HttpFault
     };
 
     /// <summary>Creates a step that answers the attempt with the given status code.</summary>
-    /// <param name="statusCode">The status code the scripted downstream returns.</param>
+    /// <param name="statusCode">The status code the scripted downstream returns; it must be between 0 and 999.</param>
     /// <param name="retryAfter">
     /// An optional <c>Retry-After</c> delay. The delta-seconds form is deterministic on an injected clock; the
-    /// HTTP-date form is deliberately not supported.
+    /// HTTP-date form is deliberately not supported. A value uses whole-millisecond precision and cannot exceed
+    /// <see cref="int.MaxValue"/> milliseconds.
     /// </param>
     /// <returns>The script step.</returns>
     public static HttpFault Response(HttpStatusCode statusCode, TimeSpan? retryAfter = null)
     {
-        if (retryAfter is { } delta && delta < TimeSpan.Zero)
+        if ((int)statusCode is < 0 or > 999)
         {
-            throw new ArgumentOutOfRangeException(nameof(retryAfter), delta, "A Retry-After value must not be negative.");
+            throw new ArgumentOutOfRangeException(
+                nameof(statusCode),
+                statusCode,
+                "A scripted response status must be representable by HttpResponseMessage (0 through 999).");
+        }
+
+        if (retryAfter is { } delta)
+        {
+            DurationContract.ValidateScriptDuration(
+                nameof(retryAfter),
+                delta,
+                allowZero: true,
+                "A Retry-After delta");
         }
 
         return new HttpFault(HttpFaultKind.Response, statusCode, retryAfter, null, null);
@@ -105,17 +118,14 @@ public sealed class HttpFault
     /// <summary>
     /// Creates a step that waits for the given duration on the injected clock and then applies the wrapped step.
     /// </summary>
-    /// <param name="duration">The amount of injected-clock time the downstream takes before it answers.</param>
+    /// <param name="duration">The positive whole-millisecond amount of injected-clock time the downstream takes before it answers; it cannot exceed <see cref="int.MaxValue"/> milliseconds.</param>
     /// <param name="fault">The step applied when the wait completes.</param>
     /// <returns>The script step.</returns>
     public static HttpFault Delay(TimeSpan duration, HttpFault fault)
     {
         ArgumentNullException.ThrowIfNull(fault);
 
-        if (duration <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(duration), duration, "A scripted delay must be greater than zero.");
-        }
+        DurationContract.ValidateScriptDuration(nameof(duration), duration, allowZero: false, "A scripted delay");
 
         if (fault.Kind == HttpFaultKind.Delay)
         {
@@ -138,4 +148,49 @@ public sealed class HttpFault
         HttpFaultKind.Timeout => "no response",
         _ => $"delay {TimeFormat.Describe(DelayDuration!.Value)} then {InnerFault!.Describe()}",
     };
+}
+
+internal static class DurationContract
+{
+    internal static TimeSpan MaximumTaskDelay { get; } = TimeSpan.FromMilliseconds(int.MaxValue);
+
+    internal static void ValidateScriptDuration(string parameterName, TimeSpan value, bool allowZero, string description)
+    {
+        if (value < TimeSpan.Zero || (!allowZero && value == TimeSpan.Zero))
+        {
+            var comparison = allowZero ? "must not be negative" : "must be greater than zero";
+            throw new ArgumentOutOfRangeException(parameterName, value, $"{description} {comparison}.");
+        }
+
+        ValidateTaskDelayPrecisionAndRange(parameterName, value, description);
+    }
+
+    internal static void ValidateWatchdogDuration(string parameterName, TimeSpan value, string description)
+    {
+        if (value <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(parameterName, value, $"{description} must be greater than zero.");
+        }
+
+        ValidateTaskDelayPrecisionAndRange(parameterName, value, description);
+    }
+
+    private static void ValidateTaskDelayPrecisionAndRange(string parameterName, TimeSpan value, string description)
+    {
+        if (value > MaximumTaskDelay)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                value,
+                $"{description} exceeds the maximum duration supported by the controlled Task.Delay timer ({MaximumTaskDelay}).");
+        }
+
+        if (value.Ticks % TimeSpan.TicksPerMillisecond != 0)
+        {
+            throw new ArgumentException(
+                $"{description} must use whole-millisecond precision because the controlled Task.Delay timer executes " +
+                "only the duration represented by its millisecond contract.",
+                parameterName);
+        }
+    }
 }

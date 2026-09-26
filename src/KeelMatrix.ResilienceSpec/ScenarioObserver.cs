@@ -415,7 +415,10 @@ internal sealed class ScenarioObserver
         }
     }
 
-    internal async Task<bool> WaitForProgressAsync(long observedVersion, TimeSpan timeout)
+    internal async Task<bool> WaitForProgressAsync(
+        long observedVersion,
+        TimeSpan timeout,
+        Func<bool>? hasPendingTimer = null)
     {
         Task progress;
         lock (_gate)
@@ -426,6 +429,14 @@ internal sealed class ScenarioObserver
             }
 
             progress = _progress.Task;
+        }
+
+        // A timer-to-timer continuation can make legitimate scheduling progress without reaching the downstream or
+        // changing the attempt report yet. The caller supplies the tracking-clock view so this wait does not confuse
+        // an active future deadline with a stalled continuation.
+        if (hasPendingTimer?.Invoke() == true)
+        {
+            return true;
         }
 
         var completed = await Task.WhenAny(progress, Task.Delay(timeout)).ConfigureAwait(false);
@@ -439,7 +450,7 @@ internal sealed class ScenarioObserver
         // pipeline under parallel test load.
         lock (_gate)
         {
-            return _progressVersion != observedVersion;
+            return _progressVersion != observedVersion || hasPendingTimer?.Invoke() == true;
         }
     }
 
