@@ -237,7 +237,13 @@ try {
     Write-Output ("Symbols: {0} ({1:n0} bytes)" -f $snupkg, (Get-Item -LiteralPath $snupkg).Length)
 
     Write-Output 'Inspect the packed package'
-    & pwsh -NoProfile -WindowStyle Hidden -File $inspectionScript -PackagePath $nupkg -SymbolsPath $snupkg -ExpectedVersion $PackageVersion -ExpectedRepositoryCommit $expectedCommit
+    $inspectionArguments = @('-NoProfile', '-File', $inspectionScript, '-PackagePath', $nupkg, '-SymbolsPath', $snupkg, '-ExpectedVersion', $PackageVersion, '-ExpectedRepositoryCommit', $expectedCommit)
+    if ($IsWindows) {
+        # Keep child PowerShell windows hidden on Windows; pwsh does not implement
+        # -WindowStyle on Unix-like hosts.
+        $inspectionArguments = @('-NoProfile', '-WindowStyle', 'Hidden', '-File', $inspectionScript, '-PackagePath', $nupkg, '-SymbolsPath', $snupkg, '-ExpectedVersion', $PackageVersion, '-ExpectedRepositoryCommit', $expectedCommit)
+    }
+    & pwsh @inspectionArguments
     Assert-Contract ($LASTEXITCODE -eq 0) 'Package inspection failed.'
 
     $escapedFeed = [Security.SecurityElement]::Escape($packageFeed)
