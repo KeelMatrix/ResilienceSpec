@@ -48,20 +48,6 @@ public sealed class HttpFault
 
     internal HttpFault? InnerFault { get; }
 
-    internal bool ContainsResponseFault => Kind switch
-    {
-        HttpFaultKind.Response => (int)StatusCode >= 400,
-        HttpFaultKind.Delay => InnerFault!.ContainsResponseFault,
-        _ => false,
-    };
-
-    internal bool ContainsExceptionFault => Kind switch
-    {
-        HttpFaultKind.NetworkError or HttpFaultKind.Timeout => true,
-        HttpFaultKind.Delay => InnerFault!.ContainsExceptionFault,
-        _ => false,
-    };
-
     /// <summary>Creates a step that answers the attempt with the given status code.</summary>
     /// <param name="statusCode">The status code the scripted downstream returns; it must be between 0 and 999.</param>
     /// <param name="retryAfter">

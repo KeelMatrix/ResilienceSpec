@@ -23,10 +23,6 @@ public sealed class HttpFaultScript
 
     internal bool RequiresControlledClock => Array.Exists(_faults, fault => fault.Kind == HttpFaultKind.Delay);
 
-    internal bool ContainsResponseFault => Array.Exists(_faults, fault => fault.ContainsResponseFault);
-
-    internal bool ContainsExceptionFault => Array.Exists(_faults, fault => fault.ContainsExceptionFault);
-
     /// <summary>Creates a script from the given steps.</summary>
     /// <param name="faults">The steps, in attempt order. At least one step is required.</param>
     /// <returns>The script.</returns>

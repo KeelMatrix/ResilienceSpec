@@ -117,7 +117,7 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
                     throw new HttpRequestException(NetworkErrorMessage);
 
                 default:
-                    attempt.MarkFailureObserved();
+                    attempt.MarkExceptionFaultObserved();
                     await WaitForCancellationAsync(cancellationToken).ConfigureAwait(false);
                     throw new OperationCanceledException(cancellationToken);
             }

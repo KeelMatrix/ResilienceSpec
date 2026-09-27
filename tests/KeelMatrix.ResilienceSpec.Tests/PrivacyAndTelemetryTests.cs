@@ -214,6 +214,132 @@ public sealed class TelemetryTests
     }
 
     [Fact]
+    public async Task TelemetryCategoriesDescribeOnlyFailuresThatReachedTheDownstream()
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success(),
+                HttpFault.NetworkError()),
+            options: Options(sink));
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(1, TimeSpan.Zero, TimeProvider.System, Chains.IsRetryableStatus));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        var signal = Assert.Single(sink.Signals);
+        Assert.True(signal.ResponseFault);
+        Assert.False(signal.ExceptionFault);
+    }
+
+    [Fact]
+    public async Task UnusedLaterResponseAndTimeoutFaultsDoNotBecomeTelemetryCategories()
+    {
+        var responseSink = new RecordingTelemetrySink();
+        using (var responseScenario = new ResilienceScenario(
+                   HttpFaultScript.Sequence(
+                       HttpFault.NetworkError(),
+                       HttpFault.Response(HttpStatusCode.ServiceUnavailable)),
+                   options: Options(responseSink)))
+        using (var responseClient = Chains.CreateClient(responseScenario.Handler))
+        using (var responseRequest = Chains.Request(HttpMethod.Get))
+        using (var responseResult = await responseScenario.SendAsync(responseClient, responseRequest))
+        {
+            responseResult.ShouldHaveException<HttpRequestException>();
+            var responseSignal = Assert.Single(responseSink.Signals);
+            Assert.False(responseSignal.ResponseFault);
+            Assert.True(responseSignal.ExceptionFault);
+        }
+
+        var timeoutSink = new RecordingTelemetrySink();
+        using var timeoutScenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success(),
+                HttpFault.Timeout()),
+            options: Options(timeoutSink));
+        using var timeoutClient = Chains.CreateClient(
+            timeoutScenario.Handler,
+            new RetryHandler(1, TimeSpan.Zero, TimeProvider.System, Chains.IsRetryableStatus));
+        using var timeoutRequest = Chains.Request(HttpMethod.Get);
+        using var timeoutResult = await timeoutScenario.SendAsync(timeoutClient, timeoutRequest);
+
+        timeoutResult.ShouldHaveStatus(HttpStatusCode.OK);
+        var timeoutSignal = Assert.Single(timeoutSink.Signals);
+        Assert.True(timeoutSignal.ResponseFault);
+        Assert.False(timeoutSignal.ExceptionFault);
+    }
+
+    [Fact]
+    public async Task ADelayedFaultCanceledBeforeExecutionDoesNotHideARealResponseFailure()
+    {
+        var clock = Chains.CreateClock();
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Delay(TimeSpan.FromSeconds(2), HttpFault.NetworkError()),
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable)),
+            clock,
+            Options(sink));
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries: 1,
+                delay: TimeSpan.Zero,
+                timeProvider: clock.TimeProvider,
+                shouldRetryResponse: Chains.IsRetryableStatus,
+                retryExceptions: true),
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.ServiceUnavailable);
+        var signal = Assert.Single(sink.Signals);
+        Assert.True(signal.ResponseFault);
+        Assert.False(signal.ExceptionFault);
+    }
+
+    [Fact]
+    public async Task ExecutedMixedFailureChainsAccumulateOnlyTheirPublishedCategories()
+    {
+        var responseChain = await RunTelemetryScenarioAsync(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Response(HttpStatusCode.TooManyRequests),
+                HttpFault.Success()),
+            retryExceptions: false,
+            expectResponse: true,
+            maximumRetries: 2,
+            expectedStatus: HttpStatusCode.OK);
+        Assert.True(responseChain.ResponseFault);
+        Assert.False(responseChain.ExceptionFault);
+
+        var responseThenException = await RunTelemetryScenarioAsync(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.NetworkError()),
+            retryExceptions: true,
+            expectResponse: false);
+        Assert.True(responseThenException.ResponseFault);
+        Assert.True(responseThenException.ExceptionFault);
+
+        var exceptionThenResponse = await RunTelemetryScenarioAsync(
+            HttpFaultScript.Sequence(
+                HttpFault.NetworkError(),
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable)),
+            retryExceptions: true,
+            expectResponse: true,
+            expectedStatus: HttpStatusCode.ServiceUnavailable);
+        Assert.True(exceptionThenResponse.ResponseFault);
+        Assert.True(exceptionThenResponse.ExceptionFault);
+    }
+
+    [Fact]
     public async Task ARealTimeoutFaultActivatesAfterSettlementAndAssertion()
     {
         var clock = Chains.CreateClock();
@@ -276,6 +402,78 @@ public sealed class TelemetryTests
         using var result = await run;
         result.ShouldBePending();
         Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
+    public async Task AnInterimAssertionIsIgnoredIfNoAssertionRunsAfterSettlement()
+    {
+        var clock = Chains.CreateClock();
+        var retryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success()),
+            clock,
+            Options(sink));
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries: 1,
+                delay: TimeSpan.FromSeconds(1),
+                timeProvider: clock.TimeProvider,
+                shouldRetryResponse: Chains.IsRetryableStatus,
+                retryStarted: retryStarted,
+                retryRelease: retryRelease));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var run = scenario.SendAsync(client, request);
+        await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        scenario.Report.ShouldHaveAttempts(1);
+        Assert.Empty(sink.Signals);
+
+        retryRelease.TrySetResult();
+        using var result = await run;
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
+    public async Task ACompletedAssertionReplacesEarlierInterimResults()
+    {
+        var clock = Chains.CreateClock();
+        var retryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success()),
+            clock,
+            Options(sink));
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries: 1,
+                delay: TimeSpan.FromSeconds(1),
+                timeProvider: clock.TimeProvider,
+                shouldRetryResponse: Chains.IsRetryableStatus,
+                retryStarted: retryStarted,
+                retryRelease: retryRelease));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var run = scenario.SendAsync(client, request);
+        await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.Throws<ResilienceAssertionException>(() => scenario.Report.ShouldHaveAttempts(2));
+
+        retryRelease.TrySetResult();
+        using var result = await run;
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        scenario.Report.ShouldHaveAttempts(2);
+        Assert.Equal(AssertionOutcome.Passed, Assert.Single(sink.Signals).Assertion);
     }
 
     [Fact]
@@ -368,4 +566,36 @@ public sealed class TelemetryTests
     }
 
     private static ResilienceScenarioOptions Options(ITelemetrySink sink) => new() { TelemetrySink = sink };
+
+    private static async Task<ScenarioTelemetrySignal> RunTelemetryScenarioAsync(
+        HttpFaultScript script,
+        bool retryExceptions,
+        bool expectResponse,
+        int maximumRetries = 1,
+        HttpStatusCode expectedStatus = HttpStatusCode.ServiceUnavailable)
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(script, options: Options(sink));
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries,
+                delay: TimeSpan.Zero,
+                timeProvider: TimeProvider.System,
+                shouldRetryResponse: Chains.IsRetryableStatus,
+                retryExceptions: retryExceptions));
+        using var request = Chains.Request(HttpMethod.Get);
+        using var result = await scenario.SendAsync(client, request);
+
+        if (expectResponse)
+        {
+            result.ShouldHaveStatus(expectedStatus);
+        }
+        else
+        {
+            result.ShouldHaveException<HttpRequestException>();
+        }
+
+        return Assert.Single(sink.Signals);
+    }
 }

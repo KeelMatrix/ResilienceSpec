@@ -80,6 +80,10 @@ public sealed class MissingTimeProviderException : InvalidOperationException
 }
 
 /// <summary>Represents the failure raised when a resilience expectation does not hold for the observed timeline.</summary>
+/// <remarks>
+/// An assertion evaluated against a live or observation-cutoff report is not a completed-scenario activation event.
+/// Telemetry uses only an assertion evaluated at or after genuine settlement.
+/// </remarks>
 public sealed class ResilienceAssertionException : Exception
 {
     internal ResilienceAssertionException(string message)

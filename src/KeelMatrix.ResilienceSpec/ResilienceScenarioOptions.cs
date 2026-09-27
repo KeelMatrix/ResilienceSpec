@@ -1,6 +1,10 @@
 namespace KeelMatrix.ResilienceSpec;
 
 /// <summary>Controls how a <see cref="ResilienceScenario"/> drives the injected clock and bounds its observation.</summary>
+/// <remarks>
+/// These options do not broaden telemetry activation. Activation still requires genuine scenario settlement, an
+/// injected failure published by an executed attempt, and an assertion evaluated at or after the settlement boundary.
+/// </remarks>
 public sealed class ResilienceScenarioOptions
 {
     /// <summary>Gets the default options.</summary>

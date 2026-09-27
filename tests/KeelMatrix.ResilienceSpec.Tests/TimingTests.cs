@@ -1104,7 +1104,6 @@ public sealed class DeterministicTimingTests
             settledVirtualElapsedIsExact,
             new ScenarioTelemetry(
                 new RecordingTelemetrySink(),
-                HttpFaultScript.Sequence(HttpFault.Success()),
                 timingAssertionsAvailable: true));
 
     [Fact]

@@ -13,6 +13,8 @@ using Polly;
 // replaced. The hosts are reserved '.invalid' names, so a request that left the process could not answer with 200.
 // Every operation starts through ResilienceScenario.SendAsync; direct client or terminal-handler sends fail closed
 // before consuming a script step or mutating the report.
+// The documented assertions run after settlement, so optional activation telemetry observes only executed published
+// failures and completion-boundary assertions.
 
 var failures = new List<string>();
 using var observer = new NetworkActivityObserver();

@@ -49,8 +49,8 @@ internal enum IntegrationPath
 /// </summary>
 /// <param name="PackageVersion">The package version that produced the activation.</param>
 /// <param name="TargetFramework">The target framework of the package.</param>
-/// <param name="ResponseFault">Whether the script contained a failing response step.</param>
-/// <param name="ExceptionFault">Whether the script contained a failing exception step.</param>
+/// <param name="ResponseFault">Whether an executed attempt published a failing response.</param>
+/// <param name="ExceptionFault">Whether an executed attempt published a network or timeout failure.</param>
 /// <param name="TimingAssertion">Whether a controllable clock took part in the scenario.</param>
 /// <param name="AttemptBucket">The coarse attempt-count bucket.</param>
 /// <param name="Assertion">Whether the evaluated assertion held.</param>
@@ -70,7 +70,7 @@ internal sealed record ScenarioTelemetrySignal(
         $"package-version={PackageVersion} tfm={TargetFramework} response-fault={ResponseFault} exception-fault={ExceptionFault} timing-assertion={TimingAssertion} attempts={AttemptBucket} assertion={Assertion} integration={Integration}");
 }
 
-/// <summary>Receives the activation decision of one scenario.</summary>
+/// <summary>Receives the activation decision of one settled scenario.</summary>
 internal interface ITelemetrySink
 {
     void TrackActivation(ScenarioTelemetrySignal signal);
@@ -113,19 +113,21 @@ internal static class TelemetryHost
 }
 
 /// <summary>
-/// Decides whether one scenario counts as an activation: the scripted downstream must have produced at least one
-/// injected failure and at least one resilience assertion must have been evaluated. Constructing a handler, a
-/// script, or a scenario is never an activation on its own.
+/// Decides whether one scenario counts as an activation: the scripted downstream must have published at least one
+/// injected failure, the scenario must have settled, and at least one resilience assertion must have been evaluated
+/// at or after the settlement boundary. Fault categories are accumulated from attempt publication events rather than
+/// from unused planned script steps. Constructing a handler, a script, or a scenario is never an activation on its own.
 /// </summary>
 internal sealed class ScenarioTelemetry
 {
     internal const string SupportedTargetFramework = "net8.0";
 
     private readonly ITelemetrySink _sink;
-    private readonly HttpFaultScript _script;
     private readonly bool _timingAssertionsAvailable;
     private readonly object _gate = new();
     private bool _failureObserved;
+    private bool _responseFaultObserved;
+    private bool _exceptionFaultObserved;
     private bool _activationRequested;
     private bool _scenarioCompleted;
     private bool _assertionEvaluated;
@@ -133,18 +135,19 @@ internal sealed class ScenarioTelemetry
     private int _assertionAttemptCount;
     private IntegrationPath _integration = IntegrationPath.ScriptedDownstream;
 
-    internal ScenarioTelemetry(ITelemetrySink sink, HttpFaultScript script, bool timingAssertionsAvailable)
+    internal ScenarioTelemetry(ITelemetrySink sink, bool timingAssertionsAvailable)
     {
         _sink = sink;
-        _script = script;
         _timingAssertionsAvailable = timingAssertionsAvailable;
     }
 
-    internal void RecordFailure()
+    internal void RecordFailure(bool responseFault, bool exceptionFault)
     {
         lock (_gate)
         {
-            _failureObserved = true;
+            _failureObserved |= responseFault || exceptionFault;
+            _responseFaultObserved |= responseFault;
+            _exceptionFaultObserved |= exceptionFault;
         }
     }
 
@@ -166,7 +169,7 @@ internal sealed class ScenarioTelemetry
                 return;
             }
 
-            if (!_assertionEvaluated)
+            if (_scenarioCompleted && !_assertionEvaluated)
             {
                 _assertionEvaluated = true;
                 _assertionPassed = passed;
@@ -208,8 +211,8 @@ internal sealed class ScenarioTelemetry
         return new ScenarioTelemetrySignal(
             typeof(ScenarioTelemetry).Assembly.GetName().Version?.ToString() ?? "unknown",
             SupportedTargetFramework,
-            _script.ContainsResponseFault,
-            _script.ContainsExceptionFault,
+            _responseFaultObserved,
+            _exceptionFaultObserved,
             _timingAssertionsAvailable,
             Bucket(attemptCount == 0 ? _assertionAttemptCount : attemptCount),
             _assertionPassed ? AssertionOutcome.Passed : AssertionOutcome.Failed,

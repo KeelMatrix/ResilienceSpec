@@ -9,6 +9,8 @@ var failures = 0;
 
 // Every operation starts through ResilienceScenario.SendAsync. Direct sends through the configured client or
 // terminal handler bypass the logical-call lease and fail closed before consuming a script step or report state.
+// The assertions below run after SendAsync settles; optional activation telemetry uses only executed published
+// failures and assertions evaluated at or after that settlement boundary.
 
 await RunAsync("GET 503 -> 200 with the standard resilience handler", async () =>
 {

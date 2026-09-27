@@ -213,8 +213,14 @@ public sealed class ResilienceScenarioClock
     internal static long GetTimerCallbackVersion(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).TimerCallbackVersion;
 
+    internal static long GetTimerScheduleVersion(TimeProvider provider) =>
+        ((TrackingTimeProvider)provider).TimerScheduleVersion;
+
     internal static TimeSpan? GetNextTimerDue(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).NextTimerDue;
+
+    internal Task WaitForTimerScheduleAsync(long observedVersion) =>
+        _provider.WaitForTimerScheduleAsync(observedVersion);
 
     internal static bool HasExactTimingEvidence(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).HasExactTimingEvidence;
@@ -398,6 +404,8 @@ public sealed class ResilienceScenarioClock
         private readonly List<TrackedTimer> _timers = new();
         private long _timerCallbackVersion;
         private TaskCompletionSource<bool> _timerCallbackCompletion = NewTimerCallbackCompletion();
+        private long _timerScheduleVersion;
+        private TaskCompletionSource<bool> _timerScheduleCompletion = NewTimerScheduleCompletion();
 
         internal TrackingTimeProvider(TimeProvider inner, ProviderController controller)
         {
@@ -420,12 +428,43 @@ public sealed class ResilienceScenarioClock
             }
         }
 
+        internal long TimerScheduleVersion => Interlocked.Read(ref _timerScheduleVersion);
+
+        internal Task WaitForTimerScheduleAsync(long observedVersion)
+        {
+            lock (_gate)
+            {
+                if (_timerScheduleVersion != observedVersion)
+                {
+                    return Task.CompletedTask;
+                }
+
+                return _timerScheduleCompletion.Task;
+            }
+        }
+
         internal bool HasExactTimingEvidence => _controller.HasExactTimingEvidence;
 
         internal void BeginLogicalCall() => _controller.BeginLogicalCall();
 
         private static TaskCompletionSource<bool> NewTimerCallbackCompletion() =>
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private static TaskCompletionSource<bool> NewTimerScheduleCompletion() =>
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private void SignalTimerSchedule()
+        {
+            TaskCompletionSource<bool> previous;
+            lock (_gate)
+            {
+                previous = _timerScheduleCompletion;
+                _timerScheduleCompletion = NewTimerScheduleCompletion();
+                _timerScheduleVersion++;
+            }
+
+            previous.TrySetResult(true);
+        }
 
         internal TimeSpan? NextTimerDue
         {
@@ -467,6 +506,8 @@ public sealed class ResilienceScenarioClock
                     timer.SetScheduleAfterCallback(TimestampAfter(_controller.ObserveTimestamp(), timer.Period));
                 }
             }
+
+            SignalTimerSchedule();
         }
 
         internal void CompleteTimerCallback()
@@ -492,21 +533,32 @@ public sealed class ResilienceScenarioClock
 
         internal long PublishSchedule(TrackedTimer timer, TimeSpan dueTime, TimeSpan period)
         {
+            long version;
             lock (_gate)
             {
                 timer.SetSchedule(dueTime, period);
-                return timer.ScheduleVersion;
+                version = timer.ScheduleVersion;
             }
+
+            SignalTimerSchedule();
+            return version;
         }
 
         internal void RestoreSchedule(TrackedTimer timer, TimerSchedule previous, long publishedVersion)
         {
+            var restored = false;
             lock (_gate)
             {
                 if (timer.ScheduleVersion == publishedVersion && _timers.Contains(timer))
                 {
                     timer.RestoreSchedule(previous);
+                    restored = true;
                 }
+            }
+
+            if (restored)
+            {
+                SignalTimerSchedule();
             }
         }
 
@@ -552,6 +604,8 @@ public sealed class ResilienceScenarioClock
                 _timers.Add(timer);
             }
 
+            SignalTimerSchedule();
+
             try
             {
                 timer.InnerTimer = _inner.CreateTimer(timer.Invoke, null, dueTime, period);
@@ -571,10 +625,16 @@ public sealed class ResilienceScenarioClock
 
         internal void RemoveTimer(TrackedTimer timer)
         {
+            var removed = false;
             lock (_gate)
             {
                 timer.MarkDisposed();
-                _timers.Remove(timer);
+                removed = _timers.Remove(timer);
+            }
+
+            if (removed)
+            {
+                SignalTimerSchedule();
             }
         }
 

@@ -403,8 +403,10 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Telemetry
 
 The package uses the shared `KeelMatrix.Telemetry` activation and weekly heartbeat contract. An activation is
-requested only after a scripted scenario settles, actually reaches at least one injected failure, and evaluates at least
-one resilience assertion. A delay canceled before its wrapped failure starts is not an observed failure; constructing a
+requested only after a scripted scenario settles, an executed attempt publishes at least one injected failure, and an
+assertion is evaluated at or after the settlement boundary. Response and exception categories describe only those
+published attempt outcomes; unused later script steps are not reported. A delay canceled before its wrapped failure
+starts and assertions against an interim live or observation-cleanup report do not activate telemetry. Constructing a
 script, handler, or scenario never activates telemetry. Telemetry is
 best-effort, never a reliability dependency, cannot break the host, and can be disabled by setting
 `KEELMATRIX_NO_TELEMETRY=1`. See [PRIVACY.md](PRIVACY.md) for the full contract.

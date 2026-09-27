@@ -22,6 +22,11 @@ namespace KeelMatrix.ResilienceSpec;
 /// a fresh unmarked request created inside flowed handler context is rejected before script/report mutation.
 /// Create one scenario per test case.
 /// </para>
+/// <para>
+/// Optional activation telemetry is considered only after this logical call genuinely settles. It reports failure
+/// categories from attempts that actually published their outcomes; assertions made while the report is live or
+/// during observation cleanup do not activate telemetry, and an assertion evaluated at or after settlement is required.
+/// </para>
 /// </remarks>
 public sealed class ResilienceScenario : IDisposable
 {
@@ -149,6 +154,31 @@ public sealed class ResilienceScenario : IDisposable
                         var timerVersion = GetTimerCallbackVersion();
                         var remainingBudget = Options.VirtualBudget - virtualElapsed;
                         var nextTimerDue = GetNextTimerDue();
+                        if (nextTimerDue is null)
+                        {
+                            // A completed downstream attempt can resume the resilience continuation on another
+                            // thread, which may register its retry timer just after the attempt publication. Observe
+                            // that registration boundary before taking a fallback sample; otherwise the same run can
+                            // be exact or sampled solely because of scheduler interleaving.
+                            var scheduleVersion = GetTimerScheduleVersion();
+                            nextTimerDue = GetNextTimerDue();
+                            if (nextTimerDue is null)
+                            {
+                                var timerSchedule = WaitForTimerScheduleAsync(scheduleVersion);
+                                var timerOrCompletion = Task.WhenAny(pending, timerSchedule);
+                                var observed = await CompleteWithinAsync(timerOrCompletion, Options.ObservationWindow)
+                                    .ConfigureAwait(false);
+                                if (observed)
+                                {
+                                    settled = pending.IsCompleted;
+                                    if (settled || timerSchedule.IsCompleted)
+                                    {
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+
                         if (nextTimerDue is { } due && due <= TimeSpan.Zero)
                         {
                             // FakeTimeProvider can queue a released timer callback after Advance returns. Wait for
@@ -329,6 +359,16 @@ public sealed class ResilienceScenario : IDisposable
         TimeProvider is { } provider && ResilienceScenarioClock.IsTrackingProvider(provider)
             ? ResilienceScenarioClock.GetTimerCallbackVersion(provider)
             : 0;
+
+    private long GetTimerScheduleVersion() =>
+        TimeProvider is { } provider && ResilienceScenarioClock.IsTrackingProvider(provider)
+            ? ResilienceScenarioClock.GetTimerScheduleVersion(provider)
+            : 0;
+
+    private Task WaitForTimerScheduleAsync(long version) =>
+        TimeProvider is { } provider && ResilienceScenarioClock.IsTrackingProvider(provider)
+            ? ((ResilienceScenarioClock)_clock!).WaitForTimerScheduleAsync(version)
+            : Task.CompletedTask;
 
     private bool HasTimerCallbackSince(long version) =>
         GetTimerCallbackVersion() != version;

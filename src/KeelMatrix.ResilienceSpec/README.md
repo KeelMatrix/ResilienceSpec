@@ -157,9 +157,11 @@ or Polly. The shipping package intentionally references `Microsoft.Extensions.Ht
 
 ## Telemetry
 
-An activation is requested only after a scripted scenario settles, reaches at least one injected failure that actually
-executed, and evaluates at least one resilience assertion. A delayed failure canceled before its wrapped fault starts
-does not activate telemetry. Telemetry is best-effort, cannot break the host, and can be disabled with
+An activation is requested only after a scripted scenario settles, an executed attempt publishes at least one injected
+failure, and an assertion is evaluated at or after the settlement boundary. Response and exception categories come
+from those published attempt outcomes, not unused later script steps. A delayed failure canceled before its wrapped
+fault starts and assertions against an interim live or observation-cleanup report do not activate telemetry. Telemetry
+is best-effort, cannot break the host, and can be disabled with
 `KEELMATRIX_NO_TELEMETRY=1`. The package never transmits request data, client names, URLs, headers, bodies, or
 exception messages.
 

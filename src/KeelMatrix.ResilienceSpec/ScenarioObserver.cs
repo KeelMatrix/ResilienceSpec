@@ -66,7 +66,8 @@ internal sealed class AttemptEntry
     private Completion? _completion;
     private TimeSpan? _duration;
     private bool _durationIsExact;
-    private int _failureObserved;
+    private int _responseFaultObserved;
+    private int _exceptionFaultObserved;
 
     internal AttemptEntry(
         int ordinal,
@@ -99,19 +100,23 @@ internal sealed class AttemptEntry
         // Publish all response metadata through one immutable reference. A live report can therefore observe either
         // the pre-completion Abandoned placeholder or the complete response record, never an outcome with missing
         // status or Retry-After metadata.
-        if (outcome == HttpAttemptOutcome.NetworkError ||
-            (outcome == HttpAttemptOutcome.Response && statusCode is { } status && (int)status >= 400))
+        if (outcome == HttpAttemptOutcome.NetworkError)
         {
-            Volatile.Write(ref _failureObserved, 1);
+            Volatile.Write(ref _exceptionFaultObserved, 1);
+        }
+        else if (outcome == HttpAttemptOutcome.Response && statusCode is { } status && (int)status >= 400)
+        {
+            Volatile.Write(ref _responseFaultObserved, 1);
         }
 
         Volatile.Write(ref _completion, new Completion(outcome, statusCode, retryAfter));
         _publicationSeam?.Observe(AttemptPublicationPoint.AfterCompletionPublication);
     }
 
-    internal void MarkFailureObserved() => Volatile.Write(ref _failureObserved, 1);
+    internal void MarkExceptionFaultObserved() => Volatile.Write(ref _exceptionFaultObserved, 1);
 
-    internal bool FailureObserved => Volatile.Read(ref _failureObserved) == 1;
+    internal (bool ResponseFault, bool ExceptionFault) FailureCategories =>
+        (Volatile.Read(ref _responseFaultObserved) == 1, Volatile.Read(ref _exceptionFaultObserved) == 1);
 
     internal void Finish(TimeSpan? duration, bool durationIsExact)
     {
@@ -171,7 +176,7 @@ internal sealed class AttemptScope : IDisposable
     internal void Complete(HttpAttemptOutcome outcome, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null) =>
         Entry.Complete(outcome, statusCode, retryAfter);
 
-    internal void MarkFailureObserved() => Entry.MarkFailureObserved();
+    internal void MarkExceptionFaultObserved() => Entry.MarkExceptionFaultObserved();
 
     public void Dispose()
     {
@@ -270,7 +275,7 @@ internal sealed class ScenarioObserver
         _clock = clock;
         _options = options;
         _startTimestamp = clock?.GetTimestamp() ?? 0;
-        Telemetry = new ScenarioTelemetry(options.TelemetrySink, script, clock is not null);
+        Telemetry = new ScenarioTelemetry(options.TelemetrySink, clock is not null);
     }
 
     internal ScenarioTelemetry Telemetry { get; }
@@ -367,7 +372,7 @@ internal sealed class ScenarioObserver
 
     internal void EndAttempt(AttemptEntry entry)
     {
-        bool failed;
+        (bool ResponseFault, bool ExceptionFault) failureCategories;
         lock (_gate)
         {
             var finished = Elapsed();
@@ -378,14 +383,14 @@ internal sealed class ScenarioObserver
                     : null,
                 !_observationCleanupActive && entry.StartedAfterIsExact && durationIsExact);
             _inFlight--;
-            failed = entry.FailureObserved;
+            failureCategories = entry.FailureCategories;
         }
 
         SignalProgress();
 
-        if (failed)
+        if (failureCategories.ResponseFault || failureCategories.ExceptionFault)
         {
-            Telemetry.RecordFailure();
+            Telemetry.RecordFailure(failureCategories.ResponseFault, failureCategories.ExceptionFault);
         }
     }
 

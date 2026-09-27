@@ -15,8 +15,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Timer schedule publication is reentrancy-aware, and initial sends/provider advances are bounded by observation
   watchdogs so immediate changes, one-shot timers, and synchronous callbacks cannot create phantom deadlines or hang
   observation. Each prepared scenario also starts elapsed-time and exact-evidence tracking at logical-call admission.
-- Activation telemetry now counts only settled scenarios with an actually executed injected failure and an evaluated
-  assertion; canceled delays and interim live-report assertions do not activate demand measurement.
+- Activation telemetry now counts only settled scenarios with a failure published by an executed attempt and an
+  assertion evaluated at or after settlement; canceled delays, unused later script steps, and interim live-report or
+  observation-cleanup assertions do not activate demand measurement. Reported response and exception categories come
+  from those published outcomes rather than the planned script.
 - `ShouldRespectRetryAfter` now fails closed when the evaluated interval used sampled or incomplete timing evidence,
   while retaining the minimum-wait rule for exact equal or longer waits.
 - Virtual-time observation now follows legitimate timer-to-timer continuations and correctly retires zero-period,

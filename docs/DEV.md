@@ -156,7 +156,10 @@ is not reported as request settlement. Cancellation cleanup is separately bounde
 `ResilienceScenarioOptions.CleanupTimeout`; late cleanup releases retained resources, but a scenario remains consumed
 and cannot be reused after cleanup. The initial client invocation and each injected-clock advance execute behind the
 bounded observation watchdog, so a synchronous timer callback cannot block the observer indefinitely; late work remains
-observed until the logical-call lease can be released.
+observed until the logical-call lease can be released. Optional activation telemetry uses the same lifecycle boundary:
+only published failure outcomes from executed attempts and an assertion evaluated at or after genuine settlement count.
+Interim live-report and observation-cleanup assertions are not activation evidence, and unused planned fault steps do
+not set telemetry categories.
 
 Scripted `HttpFault.Delay` durations and `Retry-After` deltas accept whole milliseconds only and are capped at
 `TimeSpan.FromMilliseconds(int.MaxValue)`, so construction rejects precision or range that the controlled timer cannot
