@@ -31,10 +31,11 @@ still explicit.
 ## Optional telemetry
 
 The optional `KeelMatrix.Telemetry` integration requests only the shared activation and weekly heartbeat contract. An
-activation is requested when a scripted scenario reached at least one injected failure **and** at least one resilience
-assertion was evaluated. Constructing a script, handler, or scenario, running a scenario that only succeeds, and
-failing to evaluate any assertion do not activate telemetry. Identifier, storage, retention, and delivery details belong
-to the maintained shared policy linked below.
+activation is requested after a scripted scenario has settled, actually reached at least one injected failure, and at
+least one resilience assertion was evaluated. Constructing a script, handler, or scenario, canceling a delay before its
+wrapped failure starts, running a scenario that only succeeds, and failing to evaluate any assertion do not activate
+telemetry. Assertions made against an interim live report are retained but cannot activate until settlement. Identifier,
+storage, retention, and delivery details belong to the maintained shared policy linked below.
 
 Telemetry is best-effort and opt-out. A telemetry failure cannot change a scenario result, fail a test, or affect the
 host application.

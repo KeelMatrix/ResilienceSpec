@@ -91,6 +91,32 @@ public sealed class ClientCompositionTests
     }
 
     [Fact]
+    public async Task PreparedScenariosUseIndependentLogicalCallTimingOrigins()
+    {
+        var clock = Chains.CreateClock();
+        using var delayed = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(1), HttpFault.Success())),
+            clock);
+        using var immediate = new ResilienceScenario(HttpFaultScript.Sequence(HttpFault.Success()), clock);
+        using var delayedClient = Chains.CreateClient(delayed.Handler);
+        using var immediateClient = Chains.CreateClient(immediate.Handler);
+
+        using (var request = Chains.Request(HttpMethod.Get, "/delayed"))
+        using (var result = await delayed.SendAsync(delayedClient, request))
+        {
+            result.ShouldHaveStatus(HttpStatusCode.OK);
+            delayed.Report.ShouldHaveSettledAtVirtualTime(TimeSpan.FromSeconds(1));
+        }
+
+        using (var request = Chains.Request(HttpMethod.Get, "/immediate"))
+        using (var result = await immediate.SendAsync(immediateClient, request))
+        {
+            result.ShouldHaveStatus(HttpStatusCode.OK);
+            immediate.Report.ShouldHaveAttempts(1).ShouldHaveSettledAtVirtualTime(TimeSpan.Zero);
+        }
+    }
+
+    [Fact]
     public async Task TypedClientsComposeThroughTheAdapter()
     {
         var clock = Chains.CreateClock();
@@ -199,6 +225,61 @@ public sealed class ClientCompositionTests
             () => invoker.SendAsync(directRequest, CancellationToken.None));
 
         scenario.Report.ShouldHaveAttempts(1);
+    }
+
+    [Fact]
+    public async Task AmbientUnmarkedNestedSendCannotJoinTheOwningLogicalCall()
+    {
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success(), HttpFault.Success()));
+        using var nested = new AmbientUnrelatedSendHandler(scenario.Handler);
+        using var client = Chains.CreateClient(scenario.Handler, nested);
+        using var request = Chains.Request(HttpMethod.Get, "/supported");
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        Assert.IsType<ScenarioConsumedException>(nested.NestedFailure);
+        scenario.Report.ShouldHaveAttempts(1).ShouldHaveMethodSequence(HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task AmbientUnmarkedNestedFactorySendCannotJoinTheOwningLogicalCall()
+    {
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success(), HttpFault.Success()));
+        using var nested = new AmbientUnrelatedSendHandler(scenario.Handler);
+        var services = new ServiceCollection();
+        services.AddHttpClient("orders")
+            .AddHttpMessageHandler(() => nested)
+            .UseResilienceSpecDownstream(scenario);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("orders");
+        using var request = Chains.Request(HttpMethod.Get, "/factory-supported");
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        Assert.IsType<ScenarioConsumedException>(nested.NestedFailure);
+        scenario.Report.ShouldHaveAttempts(1).ShouldHaveMethodSequence(HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task FlowedTaskAndTimerCallbacksCannotJoinTheOwningLogicalCall()
+    {
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success(), HttpFault.Success(), HttpFault.Success()));
+        using var nested = new AmbientCallbackUnrelatedSendHandler(scenario.Handler);
+        using var client = Chains.CreateClient(scenario.Handler, nested);
+        using var request = Chains.Request(HttpMethod.Get, "/callback-supported");
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        Assert.IsType<ScenarioConsumedException>(nested.TaskRunFailure);
+        Assert.IsType<ScenarioConsumedException>(nested.TimerFailure);
+        scenario.Report.ShouldHaveAttempts(1).ShouldHaveMethodSequence(HttpMethod.Get);
     }
 
     [Fact]
@@ -313,6 +394,100 @@ public sealed class ClientCompositionTests
     internal sealed class OrdersClient(HttpClient client)
     {
         internal HttpClient Client { get; } = client;
+    }
+}
+
+internal sealed class AmbientUnrelatedSendHandler : DelegatingHandler
+{
+    private readonly HttpMessageInvoker _invoker;
+
+    internal AmbientUnrelatedSendHandler(HttpMessageHandler terminal) =>
+        _invoker = new HttpMessageInvoker(terminal, disposeHandler: false);
+
+    internal Exception? NestedFailure { get; private set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using var unrelated = Chains.Request(HttpMethod.Post, "/unrelated");
+        try
+        {
+            using var response = await _invoker.SendAsync(unrelated, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            NestedFailure = exception;
+        }
+
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _invoker.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+}
+
+internal sealed class AmbientCallbackUnrelatedSendHandler : DelegatingHandler
+{
+    private readonly HttpMessageInvoker _invoker;
+    private readonly TaskCompletionSource _timerCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    internal AmbientCallbackUnrelatedSendHandler(HttpMessageHandler terminal) =>
+        _invoker = new HttpMessageInvoker(terminal, disposeHandler: false);
+
+    internal Exception? TaskRunFailure { get; private set; }
+
+    internal Exception? TimerFailure { get; private set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        TaskRunFailure = await SendUnrelatedAsync(cancellationToken).ConfigureAwait(false);
+        using var timer = new Timer(
+            static state => _ = ((AmbientCallbackUnrelatedSendHandler)state!).SendFromTimerAsync(),
+            this,
+            TimeSpan.FromMilliseconds(1),
+            Timeout.InfiniteTimeSpan);
+        await _timerCompleted.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SendFromTimerAsync()
+    {
+        TimerFailure = await SendUnrelatedAsync(CancellationToken.None).ConfigureAwait(false);
+        _timerCompleted.TrySetResult();
+    }
+
+    private async Task<Exception?> SendUnrelatedAsync(CancellationToken cancellationToken)
+    {
+        using var unrelated = Chains.Request(HttpMethod.Post, "/unrelated-callback");
+        try
+        {
+            using var response = await _invoker.SendAsync(unrelated, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _invoker.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }
 

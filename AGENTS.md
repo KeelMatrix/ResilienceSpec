@@ -47,7 +47,14 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 - Parameterless scripts, attempt state, and timelines stay bounded, and each scenario keeps permanent single-logical-call
   semantics. Only `ResilienceScenario.SendAsync` starts the call. Direct handler, manual-client, factory-client, and
   invoker sends fail with `ScenarioConsumedException` before consuming a step or mutating the report; genuine retries
-  inherit the active call lease. Create one scenario per logical call.
+  inherit the active call lease, and deliberate request clones must preserve the source request options containing its
+  opaque lease marker. Fresh unmarked requests are rejected even when an ambient execution context flows. Create one
+  scenario per logical call.
+- Timing origin and exact-evidence state begin when the logical call is admitted, not when the scenario is constructed;
+  prepared scenarios sharing a clock therefore keep independent elapsed-time reports. Initial sends and provider clock
+  advances are observed behind bounded watchdogs, with late cleanup retaining the logical-call lease.
+- Telemetry activation requires a settled scenario, an actually executed injected failure, and an evaluated assertion;
+  planned failures canceled before execution do not count.
 - Public API changes are recorded in the analyzer baseline next to the package project; new API goes to
   `PublicAPI.Unshipped.txt` and is promoted to `PublicAPI.Shipped.txt` during release preparation.
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is

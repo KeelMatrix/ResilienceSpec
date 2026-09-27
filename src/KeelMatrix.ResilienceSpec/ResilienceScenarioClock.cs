@@ -219,6 +219,9 @@ public sealed class ResilienceScenarioClock
     internal static bool HasExactTimingEvidence(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).HasExactTimingEvidence;
 
+    internal static void BeginLogicalCall(TimeProvider provider) =>
+        ((TrackingTimeProvider)provider).BeginLogicalCall();
+
     private static TimeSpan GetAutoAdvanceAmount(TimeProvider provider)
     {
         if (AutoAdvanceAmountProperty?.PropertyType != typeof(TimeSpan) ||
@@ -275,6 +278,16 @@ public sealed class ResilienceScenarioClock
                 _advanceInProgress = true;
                 _hasExactTimingEvidence &= producesExactEvidence;
                 return _lastVerifiedTimestamp;
+            }
+        }
+
+        internal void BeginLogicalCall()
+        {
+            lock (_gate)
+            {
+                ValidateAutoAdvanceDisabled();
+                ValidateUnexpectedMovement();
+                _hasExactTimingEvidence = true;
             }
         }
 
@@ -409,6 +422,8 @@ public sealed class ResilienceScenarioClock
 
         internal bool HasExactTimingEvidence => _controller.HasExactTimingEvidence;
 
+        internal void BeginLogicalCall() => _controller.BeginLogicalCall();
+
         private static TaskCompletionSource<bool> NewTimerCallbackCompletion() =>
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -445,11 +460,11 @@ public sealed class ResilienceScenarioClock
             {
                 if (timer.Period == Timeout.InfiniteTimeSpan || timer.Period == TimeSpan.Zero)
                 {
-                    timer.DueTimestamp = null;
+                    timer.ClearScheduleAfterCallback();
                 }
                 else
                 {
-                    timer.DueTimestamp = TimestampAfter(_controller.ObserveTimestamp(), timer.Period);
+                    timer.SetScheduleAfterCallback(TimestampAfter(_controller.ObserveTimestamp(), timer.Period));
                 }
             }
         }
@@ -465,6 +480,34 @@ public sealed class ResilienceScenarioClock
             }
 
             previous.TrySetResult(true);
+        }
+
+        internal TimerSchedule CaptureSchedule(TrackedTimer timer)
+        {
+            lock (_gate)
+            {
+                return timer.CaptureSchedule();
+            }
+        }
+
+        internal long PublishSchedule(TrackedTimer timer, TimeSpan dueTime, TimeSpan period)
+        {
+            lock (_gate)
+            {
+                timer.SetSchedule(dueTime, period);
+                return timer.ScheduleVersion;
+            }
+        }
+
+        internal void RestoreSchedule(TrackedTimer timer, TimerSchedule previous, long publishedVersion)
+        {
+            lock (_gate)
+            {
+                if (timer.ScheduleVersion == publishedVersion && _timers.Contains(timer))
+                {
+                    timer.RestoreSchedule(previous);
+                }
+            }
         }
 
         public override DateTimeOffset GetUtcNow()
@@ -526,18 +569,11 @@ public sealed class ResilienceScenarioClock
             return timer;
         }
 
-        internal void ChangeTimer(TrackedTimer timer, TimeSpan dueTime, TimeSpan period)
-        {
-            lock (_gate)
-            {
-                timer.SetSchedule(dueTime, period);
-            }
-        }
-
         internal void RemoveTimer(TrackedTimer timer)
         {
             lock (_gate)
             {
+                timer.MarkDisposed();
                 _timers.Remove(timer);
             }
         }
@@ -585,13 +621,23 @@ public sealed class ResilienceScenarioClock
 
         public bool Change(TimeSpan dueTime, TimeSpan period)
         {
-            var changed = InnerTimer?.Change(dueTime, period) ?? false;
-            if (changed)
+            var previous = _owner.CaptureSchedule(this);
+            var publishedVersion = _owner.PublishSchedule(this, dueTime, period);
+            try
             {
-                _owner.ChangeTimer(this, dueTime, period);
-            }
+                var changed = InnerTimer?.Change(dueTime, period) ?? false;
+                if (!changed)
+                {
+                    _owner.RestoreSchedule(this, previous, publishedVersion);
+                }
 
-            return changed;
+                return changed;
+            }
+            catch
+            {
+                _owner.RestoreSchedule(this, previous, publishedVersion);
+                throw;
+            }
         }
 
         public void Dispose()
@@ -626,8 +672,36 @@ public sealed class ResilienceScenarioClock
         {
             Period = period;
             DueTimestamp = _owner.TimestampAfterForTimer(dueTime);
+            ScheduleVersion++;
         }
+
+        internal long ScheduleVersion { get; private set; }
+
+        internal TimerSchedule CaptureSchedule() => new(DueTimestamp, Period, ScheduleVersion);
+
+        internal void RestoreSchedule(TimerSchedule previous)
+        {
+            DueTimestamp = previous.DueTimestamp;
+            Period = previous.Period;
+            ScheduleVersion++;
+        }
+
+        internal void ClearScheduleAfterCallback()
+        {
+            DueTimestamp = null;
+            ScheduleVersion++;
+        }
+
+        internal void SetScheduleAfterCallback(long? dueTimestamp)
+        {
+            DueTimestamp = dueTimestamp;
+            ScheduleVersion++;
+        }
+
+        internal void MarkDisposed() => ScheduleVersion++;
     }
+
+    internal readonly record struct TimerSchedule(long? DueTimestamp, TimeSpan Period, long Version);
 }
 
 internal sealed class TimingConfigurationException : InvalidOperationException

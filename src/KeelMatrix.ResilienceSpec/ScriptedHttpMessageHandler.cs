@@ -22,6 +22,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// call-sensitive assertions are used. The handler is owned by <see cref="ResilienceScenario"/> and can only be reached
 /// by a request that started through <see cref="ResilienceScenario.SendAsync"/>. Direct <c>HttpClient.SendAsync</c>
 /// or <see cref="HttpMessageInvoker.SendAsync"/> calls through this handler fail before consuming a script step.
+/// Genuine retry requests may reuse the original request or preserve its request options, including the opaque
+/// logical-call marker, when deliberately cloned by a handler; a fresh unmarked request is not admitted merely
+/// because execution context flowed from the owning call.
 /// </para>
 /// </remarks>
 public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
@@ -113,6 +116,7 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
                     throw new HttpRequestException(NetworkErrorMessage);
 
                 default:
+                    attempt.MarkFailureObserved();
                     await WaitForCancellationAsync(cancellationToken).ConfigureAwait(false);
                     throw new OperationCanceledException(cancellationToken);
             }

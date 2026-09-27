@@ -19,7 +19,7 @@ internal static class LogicalCallOwnership
             return false;
         }
 
-        return !request.Options.TryGetValue(RequestOption, out var requestToken) ||
+        return request.Options.TryGetValue(RequestOption, out var requestToken) &&
             ReferenceEquals(requestToken, currentToken);
     }
 }
@@ -65,6 +65,7 @@ internal sealed class AttemptEntry
     private Completion? _completion;
     private TimeSpan? _duration;
     private bool _durationIsExact;
+    private int _failureObserved;
 
     internal AttemptEntry(
         int ordinal,
@@ -97,9 +98,19 @@ internal sealed class AttemptEntry
         // Publish all response metadata through one immutable reference. A live report can therefore observe either
         // the pre-completion Abandoned placeholder or the complete response record, never an outcome with missing
         // status or Retry-After metadata.
+        if (outcome == HttpAttemptOutcome.NetworkError ||
+            (outcome == HttpAttemptOutcome.Response && statusCode is { } status && (int)status >= 400))
+        {
+            Volatile.Write(ref _failureObserved, 1);
+        }
+
         Volatile.Write(ref _completion, new Completion(outcome, statusCode, retryAfter));
         _publicationSeam?.Observe(AttemptPublicationPoint.AfterCompletionPublication);
     }
+
+    internal void MarkFailureObserved() => Volatile.Write(ref _failureObserved, 1);
+
+    internal bool FailureObserved => Volatile.Read(ref _failureObserved) == 1;
 
     internal void Finish(TimeSpan? duration, bool durationIsExact)
     {
@@ -158,6 +169,8 @@ internal sealed class AttemptScope : IDisposable
 
     internal void Complete(HttpAttemptOutcome outcome, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null) =>
         Entry.Complete(outcome, statusCode, retryAfter);
+
+    internal void MarkFailureObserved() => Entry.MarkFailureObserved();
 
     public void Dispose()
     {
@@ -236,7 +249,7 @@ internal sealed class ScenarioObserver
     private readonly HttpFaultScript _script;
     private readonly TimeProvider? _clock;
     private readonly ResilienceScenarioOptions _options;
-    private readonly long _startTimestamp;
+    private long _startTimestamp;
     private int _inFlight;
     private int _ordinal;
     private bool _overflowed;
@@ -245,6 +258,7 @@ internal sealed class ScenarioObserver
     private bool _observationCutoff;
     private long _progressVersion;
     private TaskCompletionSource<bool> _progress = NewProgressSource();
+    private readonly TaskCompletionSource<bool> _firstAttemptStarted = NewProgressSource();
     private bool _settled;
     private TimeSpan? _settledVirtualElapsed;
     private bool _settledVirtualElapsedIsExact;
@@ -269,6 +283,12 @@ internal sealed class ScenarioObserver
                 throw new ScenarioConsumedException(
                     "This ResilienceScenario has already served one logical request and cannot be reused. " +
                     "Create one scenario per logical call.");
+            }
+
+            if (_clock is not null)
+            {
+                ResilienceScenarioClock.BeginLogicalCall(_clock);
+                _startTimestamp = _clock.GetTimestamp();
             }
 
             _logicalCallConsumed = true;
@@ -338,6 +358,7 @@ internal sealed class ScenarioObserver
             }
         }
 
+        _firstAttemptStarted.TrySetResult(true);
         SignalProgress();
 
         return new AttemptScope(this, entry);
@@ -356,7 +377,7 @@ internal sealed class ScenarioObserver
                     : null,
                 !_observationCleanupActive && entry.StartedAfterIsExact && durationIsExact);
             _inFlight--;
-            failed = entry.Fault?.IsFailure == true;
+            failed = entry.FailureObserved;
         }
 
         SignalProgress();
@@ -388,6 +409,7 @@ internal sealed class ScenarioObserver
         }
 
         SignalProgress();
+        Telemetry.MarkScenarioCompleted(AttemptCount);
         return virtualElapsed;
     }
 
@@ -414,6 +436,8 @@ internal sealed class ScenarioObserver
             }
         }
     }
+
+    internal Task WaitForFirstAttemptAsync() => _firstAttemptStarted.Task;
 
     internal async Task<bool> WaitForProgressAsync(
         long observedVersion,

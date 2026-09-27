@@ -16,8 +16,10 @@ namespace KeelMatrix.ResilienceSpec;
 /// A scenario owns exactly one logical call. Start it only with <see cref="SendAsync"/>; direct sends through
 /// <see cref="Handler"/>, a manually constructed client, or a factory client fail with
 /// <see cref="ScenarioConsumedException"/> before consuming a script step or changing <see cref="Report"/>.
-/// Genuine retries and timeouts produced inside the configured handler chain inherit that logical-call lease. Create
-/// one scenario per test case.
+/// Genuine retries and timeouts produced inside the configured handler chain inherit that logical-call lease. A
+/// handler that deliberately clones a request must preserve the source request options, including the opaque
+/// logical-call marker; a fresh unmarked request created inside flowed handler context is rejected before
+/// script/report mutation. Create one scenario per test case.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenario : IDisposable
@@ -82,7 +84,9 @@ public sealed class ResilienceScenario : IDisposable
     /// The outcome of the run, including the final response or exception and the attempt report. If observation or
     /// bounded cancellation cleanup expires first, the outcome is <see cref="ResilienceResultKind.Pending"/> and the
     /// report marks <see cref="HttpAttemptReport.IsObservationCutoff"/> rather than claiming request settlement. An
-    /// attempt ended by that cleanup has no duration because cleanup is not timeout evidence.
+    /// attempt ended by that cleanup has no duration because cleanup is not timeout evidence. The initial handler
+    /// invocation and each injected-clock advance are observed behind the same bounded watchdog, so synchronous user
+    /// callbacks cannot prevent the observer from returning a cutoff; late work remains owned until cleanup completes.
     /// </returns>
     /// <exception cref="ScenarioConsumedException">The scenario has already been used for another logical call.</exception>
     public async Task<ResilienceResult> SendAsync(
@@ -100,11 +104,27 @@ public sealed class ResilienceScenario : IDisposable
         var cleanupOwnsLease = false;
         var virtualElapsed = TimeSpan.Zero;
         Task<HttpResponseMessage> pending = null!;
+        Task? pendingAdvance = null;
         try
         {
             try
             {
-                pending = client.SendAsync(request, linked.Token);
+                // Run the initial handler invocation outside the observer so a synchronous user callback cannot
+                // prevent the observation watchdog from starting. The logical-call token flows into the task and is
+                // retired only after bounded cleanup has observed late completion.
+                var invocationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                pending = Task.Factory.StartNew(
+                        () =>
+                        {
+                            invocationStarted.TrySetResult();
+                            return client.SendAsync(request, linked.Token);
+                        },
+                        CancellationToken.None,
+                        TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
+                        TaskScheduler.Default)
+                    .Unwrap();
+                _ = invocationStarted.Task.Wait(Options.ObservationWindow, CancellationToken.None);
+                _ = Handler.Observer.WaitForFirstAttemptAsync().Wait(Options.ObservationWindow, CancellationToken.None);
             }
             catch (TimingConfigurationException)
             {
@@ -159,7 +179,22 @@ public sealed class ResilienceScenario : IDisposable
                             ? timer
                             : remainingBudget < Options.AdvanceStep ? remainingBudget : Options.AdvanceStep;
                         var targetsTimerDeadline = nextTimerDue is { } target && target == advance;
-                        _clock.Advance(advance);
+                        pendingAdvance = Task.Factory.StartNew(
+                            () => _clock.Advance(advance),
+                            CancellationToken.None,
+                            TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
+                            TaskScheduler.Default);
+                        var advanceCompleted = await CompleteWithinAsync(
+                                pendingAdvance,
+                                Options.ObservationWindow)
+                            .ConfigureAwait(false);
+                        if (!advanceCompleted)
+                        {
+                            break;
+                        }
+
+                        await pendingAdvance.ConfigureAwait(false);
+                        pendingAdvance = null;
                         virtualElapsed += advance;
 
                         if (targetsTimerDeadline)
@@ -210,7 +245,7 @@ public sealed class ResilienceScenario : IDisposable
             if (!settled)
             {
                 Handler.Observer.MarkObservationCleanupStarted();
-                var cleanup = BeginCleanup(linked, pending);
+                var cleanup = BeginCleanup(linked, pending, pendingAdvance);
                 var cleanupCompleted = await CompleteWithinAsync(cleanup, Options.CleanupTimeout).ConfigureAwait(false);
                 Handler.Observer.MarkObservationCutoff();
                 if (cleanupCompleted)
@@ -248,7 +283,7 @@ public sealed class ResilienceScenario : IDisposable
         catch
         {
             Handler.Observer.MarkObservationCleanupStarted();
-            cleanupOwnsLease = await CleanupPendingAsync(logicalCall, linked, pending).ConfigureAwait(false);
+            cleanupOwnsLease = await CleanupPendingAsync(logicalCall, linked, pending, pendingAdvance).ConfigureAwait(false);
             Handler.Observer.MarkObservationCutoff();
             throw;
         }
@@ -305,9 +340,10 @@ public sealed class ResilienceScenario : IDisposable
     private async Task<bool> CleanupPendingAsync(
         LogicalCallScope logicalCall,
         CancellationTokenSource linked,
-        Task<HttpResponseMessage> pending)
+        Task<HttpResponseMessage> pending,
+        Task? pendingAdvance)
     {
-        var cleanup = BeginCleanup(linked, pending);
+        var cleanup = BeginCleanup(linked, pending, pendingAdvance);
         var cleanupCompleted = await CompleteWithinAsync(cleanup, Options.CleanupTimeout).ConfigureAwait(false);
         if (!cleanupCompleted)
         {
@@ -321,11 +357,26 @@ public sealed class ResilienceScenario : IDisposable
 
     private static Task BeginCleanup(
         CancellationTokenSource cancellation,
-        Task<HttpResponseMessage> pending)
+        Task<HttpResponseMessage> pending,
+        Task? pendingAdvance)
     {
         var cancel = ObserveCancellationAsync(cancellation);
         var request = ObserveResponseAsync(pending);
-        return Task.WhenAll(cancel, request);
+        var advance = pendingAdvance is null ? Task.CompletedTask : ObserveTaskAsync(pendingAdvance);
+        return Task.WhenAll(cancel, request, advance);
+    }
+
+    private static async Task ObserveTaskAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Late advance faults are observed so a bounded Pending result remains stable.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+        }
     }
 
     private static async Task ReleaseLeaseAfterCleanupAsync(

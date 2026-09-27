@@ -127,6 +127,10 @@ internal sealed class ScenarioTelemetry
     private readonly object _gate = new();
     private bool _failureObserved;
     private bool _activationRequested;
+    private bool _scenarioCompleted;
+    private bool _assertionEvaluated;
+    private bool _assertionPassed;
+    private int _assertionAttemptCount;
     private IntegrationPath _integration = IntegrationPath.ScriptedDownstream;
 
     internal ScenarioTelemetry(ITelemetrySink sink, HttpFaultScript script, bool timingAssertionsAvailable)
@@ -157,24 +161,59 @@ internal sealed class ScenarioTelemetry
         ScenarioTelemetrySignal? signal = null;
         lock (_gate)
         {
-            if (!_failureObserved || _activationRequested)
+            if (_activationRequested)
             {
                 return;
             }
 
-            _activationRequested = true;
-            signal = new ScenarioTelemetrySignal(
-                typeof(ScenarioTelemetry).Assembly.GetName().Version?.ToString() ?? "unknown",
-                SupportedTargetFramework,
-                _script.ContainsResponseFault,
-                _script.ContainsExceptionFault,
-                _timingAssertionsAvailable,
-                Bucket(attemptCount),
-                passed ? AssertionOutcome.Passed : AssertionOutcome.Failed,
-                _integration);
+            if (!_assertionEvaluated)
+            {
+                _assertionEvaluated = true;
+                _assertionPassed = passed;
+                _assertionAttemptCount = attemptCount;
+            }
+
+            signal = TryBuildActivationLocked(attemptCount);
         }
 
-        _sink.TrackActivation(signal);
+        if (signal is not null)
+        {
+            _sink.TrackActivation(signal);
+        }
+    }
+
+    internal void MarkScenarioCompleted(int attemptCount)
+    {
+        ScenarioTelemetrySignal? signal;
+        lock (_gate)
+        {
+            _scenarioCompleted = true;
+            signal = TryBuildActivationLocked(attemptCount);
+        }
+
+        if (signal is not null)
+        {
+            _sink.TrackActivation(signal);
+        }
+    }
+
+    private ScenarioTelemetrySignal? TryBuildActivationLocked(int attemptCount)
+    {
+        if (!_scenarioCompleted || !_failureObserved || !_assertionEvaluated || _activationRequested)
+        {
+            return null;
+        }
+
+        _activationRequested = true;
+        return new ScenarioTelemetrySignal(
+            typeof(ScenarioTelemetry).Assembly.GetName().Version?.ToString() ?? "unknown",
+            SupportedTargetFramework,
+            _script.ContainsResponseFault,
+            _script.ContainsExceptionFault,
+            _timingAssertionsAvailable,
+            Bucket(attemptCount == 0 ? _assertionAttemptCount : attemptCount),
+            _assertionPassed ? AssertionOutcome.Passed : AssertionOutcome.Failed,
+            _integration);
     }
 
     private static AttemptCountBucket Bucket(int attemptCount) => attemptCount switch

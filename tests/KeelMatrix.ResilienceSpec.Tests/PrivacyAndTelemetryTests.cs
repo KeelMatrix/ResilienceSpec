@@ -158,6 +158,31 @@ public sealed class TelemetryTests
     }
 
     [Fact]
+    public async Task CancelingBeforeADelayedFailureDoesNotActivateTelemetry()
+    {
+        var clock = Chains.CreateClock();
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(2), HttpFault.NetworkError())),
+            clock,
+            new ResilienceScenarioOptions
+            {
+                AdvanceClock = false,
+                PendingObservation = TimeSpan.FromMilliseconds(20),
+                CleanupTimeout = TimeSpan.FromMilliseconds(40),
+                TelemetrySink = sink,
+            });
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        Assert.Equal(HttpAttemptOutcome.Abandoned, scenario.Report.Attempts[0].Outcome);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
     public async Task AnInjectedFailureWithAnEvaluatedAssertionActivatesExactlyOnce()
     {
         var clock = Chains.CreateClock();
@@ -186,6 +211,71 @@ public sealed class TelemetryTests
         Assert.Equal(IntegrationPath.ScriptedDownstream, signal.Integration);
         Assert.Equal(ScenarioTelemetry.SupportedTargetFramework, signal.TargetFramework);
         Assert.Equal(typeof(TelemetryHost).Assembly.GetName().Version!.ToString(), signal.PackageVersion);
+    }
+
+    [Fact]
+    public async Task ARealTimeoutFaultActivatesAfterSettlementAndAssertion()
+    {
+        var clock = Chains.CreateClock();
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            clock,
+            Options(sink));
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        scenario.Report.ShouldHaveAttempts(1);
+
+        var signal = Assert.Single(sink.Signals);
+        Assert.False(signal.ResponseFault);
+        Assert.True(signal.ExceptionFault);
+    }
+
+    [Fact]
+    public async Task AnInterimAssertionDoesNotActivateBeforeTheScenarioSettles()
+    {
+        var clock = Chains.CreateClock();
+        var retryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+                HttpFault.Success()),
+            clock,
+            new ResilienceScenarioOptions
+            {
+                AdvanceClock = false,
+                PendingObservation = TimeSpan.FromMilliseconds(40),
+                CleanupTimeout = TimeSpan.FromMilliseconds(40),
+                TelemetrySink = sink,
+            });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries: 1,
+                delay: TimeSpan.FromSeconds(1),
+                timeProvider: clock.TimeProvider,
+                shouldRetryResponse: Chains.IsRetryableStatus,
+                retryStarted: retryStarted,
+                retryRelease: retryRelease));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var run = scenario.SendAsync(client, request);
+        await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        scenario.Report.ShouldHaveAttempts(1);
+        Assert.Empty(sink.Signals);
+
+        retryRelease.TrySetResult();
+        using var result = await run;
+        result.ShouldBePending();
+        Assert.Empty(sink.Signals);
     }
 
     [Fact]

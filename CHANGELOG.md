@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ### Fixed
 
+- Logical-call ownership now requires a positive opaque request association; fresh requests created by flowed handlers
+  cannot consume another script step, while deliberate request clones remain supported when they preserve source options.
+- Timer schedule publication is reentrancy-aware, and initial sends/provider advances are bounded by observation
+  watchdogs so immediate changes, one-shot timers, and synchronous callbacks cannot create phantom deadlines or hang
+  observation. Each prepared scenario also starts elapsed-time and exact-evidence tracking at logical-call admission.
+- Activation telemetry now counts only settled scenarios with an actually executed injected failure and an evaluated
+  assertion; canceled delays and interim live-report assertions do not activate demand measurement.
 - `ShouldRespectRetryAfter` now fails closed when the evaluated interval used sampled or incomplete timing evidence,
   while retaining the minimum-wait rule for exact equal or longer waits.
 - Virtual-time observation now follows legitimate timer-to-timer continuations and correctly retires zero-period,

@@ -34,8 +34,10 @@ manually constructed `HttpClient`, or through `UseResilienceSpecDownstream`, but
 through `scenario.SendAsync`. A direct `HttpClient.SendAsync`, `HttpClient.GetAsync`, factory-client call, or
 `HttpMessageInvoker` call that bypasses the runner fails with `ScenarioConsumedException` before consuming a script
 step or mutating the report. Genuine retries and timeouts produced inside the configured handler chain inherit the
-active logical-call lease. After settlement, cancellation, timeout, or an observation cutoff, the scenario remains
-permanently consumed and cannot be reused.
+active logical-call lease. A deliberate request clone must preserve its request options, including the opaque lease
+marker; a fresh unmarked request created inside the ambient handler context is rejected before script/report mutation.
+After settlement, cancellation, timeout, or an observation cutoff, the scenario remains permanently consumed and
+cannot be reused.
 
 ## Quick Start
 
@@ -297,7 +299,9 @@ Earlier attempts that genuinely completed remain independently assertable. Cance
 user code that ignores cancellation cannot be forcibly terminated. If cleanup outlives that bound, the scenario retains
 its single-consumer lease until the late request and cancellation callbacks finish. Cleanup releases retained
 resources, but the scenario remains consumed permanently; every second logical call fails with
-`ScenarioConsumedException`.
+`ScenarioConsumedException`. Initial client invocation and provider-clock advances run behind the bounded observation
+watchdog, so synchronous user callbacks cannot prevent a cutoff; late work remains observed until cleanup releases the
+lease.
 
 ### Timing Limitations
 
@@ -398,8 +402,9 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Telemetry
 
 The package uses the shared `KeelMatrix.Telemetry` activation and weekly heartbeat contract. An activation is
-requested only when a scripted scenario actually reached at least one injected failure **and** at least one resilience
-assertion was evaluated; constructing a script, handler, or scenario never activates telemetry. Telemetry is
+requested only after a scripted scenario settles, actually reaches at least one injected failure, and evaluates at least
+one resilience assertion. A delay canceled before its wrapped failure starts is not an observed failure; constructing a
+script, handler, or scenario never activates telemetry. Telemetry is
 best-effort, never a reliability dependency, cannot break the host, and can be disabled by setting
 `KEELMATRIX_NO_TELEMETRY=1`. See [PRIVACY.md](PRIVACY.md) for the full contract.
 

@@ -30,7 +30,9 @@ root entry point. `scenario.Handler` can be installed in a manual `HttpClient` o
 `UseResilienceSpecDownstream`, but every operation must still be started through `scenario.SendAsync`. Direct
 `HttpClient`/factory-client/`HttpMessageInvoker` sends fail with `ScenarioConsumedException` before consuming a script
 step or mutating the report. Retries and timeouts generated inside the configured handler chain inherit the active
-lease. Settlement, cancellation, timeout, and observation cutoff all leave the scenario permanently consumed.
+lease. Deliberate request clones must preserve the source request options, including the opaque logical-call marker;
+fresh unmarked requests created inside flowed handler context are rejected before script/report mutation. Settlement,
+cancellation, timeout, and observation cutoff all leave the scenario permanently consumed.
 
 ## Validation path
 
@@ -151,7 +153,9 @@ tracked deadline remain within `ObservationWindow`, the scenario returns `Pendin
 observation window is a watchdog, not a timing measurement. A virtual-budget or no-advance cutoff returns `Pending` and
 is not reported as request settlement. Cancellation cleanup is separately bounded by
 `ResilienceScenarioOptions.CleanupTimeout`; late cleanup releases retained resources, but a scenario remains consumed
-and cannot be reused after cleanup.
+and cannot be reused after cleanup. The initial client invocation and each injected-clock advance execute behind the
+bounded observation watchdog, so a synchronous timer callback cannot block the observer indefinitely; late work remains
+observed until the logical-call lease can be released.
 
 Scripted `HttpFault.Delay` durations and `Retry-After` deltas accept whole milliseconds only and are capped at
 `TimeSpan.FromMilliseconds(int.MaxValue)`, so construction rejects precision or range that the controlled timer cannot

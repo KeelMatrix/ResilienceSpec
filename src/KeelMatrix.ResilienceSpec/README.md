@@ -31,8 +31,10 @@ manually constructed `HttpClient`, or through `UseResilienceSpecDownstream`, but
 through `scenario.SendAsync`. A direct `HttpClient.SendAsync`, `HttpClient.GetAsync`, factory-client call, or
 `HttpMessageInvoker` call that bypasses the runner fails with `ScenarioConsumedException` before consuming a script
 step or mutating the report. Genuine retries and timeouts produced inside the configured handler chain inherit the
-active logical-call lease. After settlement, cancellation, timeout, or an observation cutoff, the scenario remains
-permanently consumed and cannot be reused.
+active logical-call lease. A deliberate request clone must preserve its request options, including the opaque lease
+marker; a fresh unmarked request created inside the ambient handler context is rejected before script/report mutation.
+After settlement, cancellation, timeout, or an observation cutoff, the scenario remains permanently consumed and
+cannot be reused.
 
 ## Quick Example
 
@@ -109,6 +111,8 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   deadline. If a fired timer's continuation neither progresses nor leaves a real tracked deadline within
   `ObservationWindow`, the scenario returns `Pending` at the current virtual time instead of allowing another advance.
   Intermediate virtual delays stay wall-clock cheap because they do not require a watchdog wait before a timer fires.
+  The initial client invocation and provider advances run behind the bounded watchdog, so a synchronous callback cannot
+  block observation forever; late work remains observed and the logical-call lease stays held through cleanup.
   `ShouldHaveRetryDelay`, `ShouldHaveAttemptDuration`, and `ShouldHaveSettledAtVirtualTime` require exact equality and
   reject an observation affected by fallback sampling; `AdvanceStep` is a sampling interval, not a tolerance.
   `ShouldRespectRetryAfter` is still a minimum assertion, so a longer exact wait is valid, but sampled or incomplete
@@ -152,8 +156,9 @@ or Polly. The shipping package intentionally references `Microsoft.Extensions.Ht
 
 ## Telemetry
 
-An activation is requested only after a scripted scenario reached at least one injected failure and evaluated at
-least one resilience assertion. Telemetry is best-effort, cannot break the host, and can be disabled with
+An activation is requested only after a scripted scenario settles, reaches at least one injected failure that actually
+executed, and evaluates at least one resilience assertion. A delayed failure canceled before its wrapped fault starts
+does not activate telemetry. Telemetry is best-effort, cannot break the host, and can be disabled with
 `KEELMATRIX_NO_TELEMETRY=1`. The package never transmits request data, client names, URLs, headers, bodies, or
 exception messages.
 

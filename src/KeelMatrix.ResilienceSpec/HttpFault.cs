@@ -48,14 +48,6 @@ public sealed class HttpFault
 
     internal HttpFault? InnerFault { get; }
 
-    /// <summary>Gets a value indicating whether this step models a failure rather than a successful response.</summary>
-    internal bool IsFailure => Kind switch
-    {
-        HttpFaultKind.NetworkError or HttpFaultKind.Timeout => true,
-        HttpFaultKind.Response => (int)StatusCode >= 400,
-        _ => InnerFault!.IsFailure,
-    };
-
     internal bool ContainsResponseFault => Kind switch
     {
         HttpFaultKind.Response => (int)StatusCode >= 400,
@@ -65,7 +57,7 @@ public sealed class HttpFault
 
     internal bool ContainsExceptionFault => Kind switch
     {
-        HttpFaultKind.NetworkError => true,
+        HttpFaultKind.NetworkError or HttpFaultKind.Timeout => true,
         HttpFaultKind.Delay => InnerFault!.ContainsExceptionFault,
         _ => false,
     };

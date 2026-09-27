@@ -523,6 +523,42 @@ internal sealed class StalledTimerCallbackHandler : DelegatingHandler
     }
 }
 
+internal sealed class SynchronousStalledTimerCallbackHandler : DelegatingHandler
+{
+    private readonly TimeProvider _timeProvider;
+    private readonly TaskCompletionSource _callbackStarted;
+    private readonly TaskCompletionSource _releaseCallback;
+
+    internal SynchronousStalledTimerCallbackHandler(
+        TimeProvider timeProvider,
+        TaskCompletionSource callbackStarted,
+        TaskCompletionSource releaseCallback)
+    {
+        _timeProvider = timeProvider;
+        _callbackStarted = callbackStarted;
+        _releaseCallback = releaseCallback;
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using var timer = _timeProvider.CreateTimer(
+            static state =>
+            {
+                var handler = (SynchronousStalledTimerCallbackHandler)state!;
+                handler._callbackStarted.TrySetResult();
+                handler._releaseCallback.Task.GetAwaiter().GetResult();
+            },
+            this,
+            TimeSpan.FromSeconds(1),
+            Timeout.InfiniteTimeSpan);
+
+        await Task.Delay(TimeSpan.FromSeconds(2), _timeProvider, cancellationToken).ConfigureAwait(false);
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+}
+
 internal static class Chains
 {
     internal static readonly DateTimeOffset ClockStart = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
