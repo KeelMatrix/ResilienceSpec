@@ -11,16 +11,17 @@ internal static class LogicalCallOwnership
 
     internal static bool IsOwnedBy(ScenarioObserver observer, HttpRequestMessage request)
     {
-        var currentToken = Current.Value;
-        if (currentToken is null ||
-            !ReferenceEquals(currentToken.Owner, observer) ||
-            !currentToken.IsActive)
+        if (!request.Options.TryGetValue(RequestOption, out var requestToken) ||
+            !ReferenceEquals(requestToken.Owner, observer) ||
+            !requestToken.IsActive)
         {
             return false;
         }
 
-        return request.Options.TryGetValue(RequestOption, out var requestToken) &&
-            ReferenceEquals(requestToken, currentToken);
+        // The request marker is the durable lineage proof. Ambient execution context is only an additional
+        // consistency check when it is present; deliberately suppressed flow must not invalidate a supported clone.
+        var currentToken = Current.Value;
+        return currentToken is null || ReferenceEquals(currentToken, requestToken);
     }
 }
 

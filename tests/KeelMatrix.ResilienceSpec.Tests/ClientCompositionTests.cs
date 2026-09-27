@@ -244,6 +244,21 @@ public sealed class ClientCompositionTests
     }
 
     [Fact]
+    public async Task SupportedRequestCloneSurvivesSuppressedExecutionContext()
+    {
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success(), HttpFault.Success()));
+        using var cloneHandler = new SuppressedContextRequestCloneHandler();
+        using var client = Chains.CreateClient(scenario.Handler, cloneHandler);
+        using var request = Chains.Request(HttpMethod.Get, "/supported-clone");
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        scenario.Report.ShouldHaveAttempts(2).ShouldHaveMethodSequence(HttpMethod.Get, HttpMethod.Get);
+    }
+
+    [Fact]
     public async Task AmbientUnmarkedNestedFactorySendCannotJoinTheOwningLogicalCall()
     {
         using var scenario = new ResilienceScenario(
@@ -431,6 +446,34 @@ internal sealed class AmbientUnrelatedSendHandler : DelegatingHandler
         }
 
         base.Dispose(disposing);
+    }
+}
+
+internal sealed class SuppressedContextRequestCloneHandler : DelegatingHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using (var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false))
+        {
+        }
+
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri);
+        foreach (var option in request.Options)
+        {
+            clone.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
+        }
+
+        Task<HttpResponseMessage> cloneSend;
+        using (ExecutionContext.SuppressFlow())
+        {
+            cloneSend = Task.Run(
+                () => base.SendAsync(clone, cancellationToken),
+                cancellationToken);
+        }
+
+        return await cloneSend.ConfigureAwait(false);
     }
 }
 

@@ -18,8 +18,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// <see cref="ScenarioConsumedException"/> before consuming a script step or changing <see cref="Report"/>.
 /// Genuine retries and timeouts produced inside the configured handler chain inherit that logical-call lease. A
 /// handler that deliberately clones a request must preserve the source request options, including the opaque
-/// logical-call marker; a fresh unmarked request created inside flowed handler context is rejected before
-/// script/report mutation. Create one scenario per test case.
+/// logical-call marker. The marker remains sufficient when execution-context flow is deliberately suppressed;
+/// a fresh unmarked request created inside flowed handler context is rejected before script/report mutation.
+/// Create one scenario per test case.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenario : IDisposable

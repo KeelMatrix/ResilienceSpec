@@ -23,8 +23,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// by a request that started through <see cref="ResilienceScenario.SendAsync"/>. Direct <c>HttpClient.SendAsync</c>
 /// or <see cref="HttpMessageInvoker.SendAsync"/> calls through this handler fail before consuming a script step.
 /// Genuine retry requests may reuse the original request or preserve its request options, including the opaque
-/// logical-call marker, when deliberately cloned by a handler; a fresh unmarked request is not admitted merely
-/// because execution context flowed from the owning call.
+/// logical-call marker, when deliberately cloned by a handler. The marker remains sufficient when execution-context
+/// flow is deliberately suppressed; a fresh unmarked request is not admitted merely because execution context
+/// flowed from the owning call.
 /// </para>
 /// </remarks>
 public sealed class ScriptedHttpMessageHandler : HttpMessageHandler

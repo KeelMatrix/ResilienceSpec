@@ -48,8 +48,8 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   semantics. Only `ResilienceScenario.SendAsync` starts the call. Direct handler, manual-client, factory-client, and
   invoker sends fail with `ScenarioConsumedException` before consuming a step or mutating the report; genuine retries
   inherit the active call lease, and deliberate request clones must preserve the source request options containing its
-  opaque lease marker. Fresh unmarked requests are rejected even when an ambient execution context flows. Create one
-  scenario per logical call.
+  opaque lease marker. The marker remains sufficient when execution-context flow is deliberately suppressed. Fresh
+  unmarked requests are rejected even when an ambient execution context flows. Create one scenario per logical call.
 - Timing origin and exact-evidence state begin when the logical call is admitted, not when the scenario is constructed;
   prepared scenarios sharing a clock therefore keep independent elapsed-time reports. Initial sends and provider clock
   advances are observed behind bounded watchdogs, with late cleanup retaining the logical-call lease.

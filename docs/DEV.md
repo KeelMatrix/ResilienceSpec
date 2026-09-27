@@ -31,7 +31,8 @@ root entry point. `scenario.Handler` can be installed in a manual `HttpClient` o
 `HttpClient`/factory-client/`HttpMessageInvoker` sends fail with `ScenarioConsumedException` before consuming a script
 step or mutating the report. Retries and timeouts generated inside the configured handler chain inherit the active
 lease. Deliberate request clones must preserve the source request options, including the opaque logical-call marker;
-fresh unmarked requests created inside flowed handler context are rejected before script/report mutation. Settlement,
+that marker remains sufficient even when execution-context flow is deliberately suppressed. Fresh unmarked requests
+created inside flowed handler context are rejected before script/report mutation. Settlement,
 cancellation, timeout, and observation cutoff all leave the scenario permanently consumed.
 
 ## Validation path

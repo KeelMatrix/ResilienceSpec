@@ -35,7 +35,8 @@ through `scenario.SendAsync`. A direct `HttpClient.SendAsync`, `HttpClient.GetAs
 `HttpMessageInvoker` call that bypasses the runner fails with `ScenarioConsumedException` before consuming a script
 step or mutating the report. Genuine retries and timeouts produced inside the configured handler chain inherit the
 active logical-call lease. A deliberate request clone must preserve its request options, including the opaque lease
-marker; a fresh unmarked request created inside the ambient handler context is rejected before script/report mutation.
+marker; that marker remains sufficient even when execution-context flow is deliberately suppressed. A fresh
+unmarked request created inside the ambient handler context is rejected before script/report mutation.
 After settlement, cancellation, timeout, or an observation cutoff, the scenario remains permanently consumed and
 cannot be reused.
 
