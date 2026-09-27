@@ -181,6 +181,27 @@ public sealed class ResilienceScenario : IDisposable
 
                         if (nextTimerDue is { } due && due <= TimeSpan.Zero)
                         {
+                            // A continuation can publish a zero-due timer after the preceding advance returns. Release
+                            // that due timer through the scenario-controlled clock before waiting for callback
+                            // dispatch; otherwise the fallback sample can wait on a callback that was never queued.
+                            timerVersion = GetTimerCallbackVersion();
+                            pendingAdvance = Task.Factory.StartNew(
+                                () => _clock.Advance(TimeSpan.Zero),
+                                CancellationToken.None,
+                                TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
+                                TaskScheduler.Default);
+                            var zeroAdvanceCompleted = await CompleteWithinAsync(
+                                    pendingAdvance,
+                                    Options.ObservationWindow)
+                                .ConfigureAwait(false);
+                            if (!zeroAdvanceCompleted)
+                            {
+                                break;
+                            }
+
+                            await pendingAdvance.ConfigureAwait(false);
+                            pendingAdvance = null;
+
                             // FakeTimeProvider can queue a released timer callback after Advance returns. Wait for
                             // callback dispatch before sampling observer progress; otherwise a slow host can report
                             // Pending while the due timer is already in flight.
@@ -246,17 +267,35 @@ public sealed class ResilienceScenario : IDisposable
                         var timerFired = HasTimerCallbackSince(timerVersion);
                         if (timerFired)
                         {
-                            var progressed = await Handler.Observer.WaitForProgressAsync(
+                            var progress = Handler.Observer.WaitForProgressAsync(
                                     progressVersion,
                                     Options.ObservationWindow,
-                                    () => GetNextTimerDue() is not null)
-                                .ConfigureAwait(false);
+                                    () => GetNextTimerDue() is not null);
+                            var scheduleVersion = GetTimerScheduleVersion();
+                            var timerSchedule = WaitForTimerScheduleAsync(scheduleVersion);
+                            var progressOrSchedule = Task.WhenAny(progress, timerSchedule, pending);
+                            var observedProgress = await progressOrSchedule.ConfigureAwait(false);
+
                             // A terminal strategy timeout can settle the client task without another scripted attempt.
                             // Observe that completion before applying the no-progress cutoff; only an unsettled request
-                            // whose fired timer produced no downstream progress is unsafe to advance again.
+                            // whose fired timer produced no downstream progress or timer publication is unsafe to
+                            // advance again.
                             settled = await CompleteWithinAsync(pending, Options.ObservationWindow).ConfigureAwait(false);
-                            if (settled || !progressed)
+                            if (settled)
                             {
+                                break;
+                            }
+
+                            if (ReferenceEquals(observedProgress, progress))
+                            {
+                                if (!await progress.ConfigureAwait(false))
+                                {
+                                    break;
+                                }
+                            }
+                            else if (ReferenceEquals(observedProgress, pending))
+                            {
+                                settled = true;
                                 break;
                             }
                         }
