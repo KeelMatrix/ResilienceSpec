@@ -9,6 +9,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../build/Invoke-NestedPwsh.ps1')
+$pwshExecutable = 'pwsh'
 
 function Invoke-Checked {
     param(
@@ -23,7 +25,12 @@ function Invoke-Checked {
     }
 
     try {
-        & $File @Arguments
+        if ($File -match '^(?i:pwsh|powershell)(?:\.exe)?$') {
+            Invoke-NestedPwsh -ArgumentList $Arguments
+        }
+        else {
+            & $File @Arguments
+        }
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -200,7 +207,7 @@ try {
 
     foreach ($packDirectory in @($firstPack, $secondPack)) {
         foreach ($archiveName in @($nupkgName, $snupkgName)) {
-            Invoke-Checked 'pwsh' @('-NoProfile', '-File', $normalizationScript, '-PackagePath', (Join-Path $packDirectory $archiveName))
+    Invoke-Checked $pwshExecutable @('-NoProfile', '-File', $normalizationScript, '-PackagePath', (Join-Path $packDirectory $archiveName))
         }
     }
 
@@ -243,7 +250,7 @@ try {
         # -WindowStyle on Unix-like hosts.
         $inspectionArguments = @('-NoProfile', '-WindowStyle', 'Hidden', '-File', $inspectionScript, '-PackagePath', $nupkg, '-SymbolsPath', $snupkg, '-ExpectedVersion', $PackageVersion, '-ExpectedRepositoryCommit', $expectedCommit)
     }
-    & pwsh @inspectionArguments
+    Invoke-NestedPwsh -ArgumentList $inspectionArguments
     Assert-Contract ($LASTEXITCODE -eq 0) 'Package inspection failed.'
 
     $escapedFeed = [Security.SecurityElement]::Escape($packageFeed)

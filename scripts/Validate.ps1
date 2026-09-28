@@ -10,6 +10,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../build/Invoke-NestedPwsh.ps1')
+$pwshExecutable = 'pwsh'
 
 function Invoke-Step {
     param(
@@ -20,7 +22,12 @@ function Invoke-Step {
 
     Write-Host "== $Name"
     $start = Get-Date
-    & $File @Arguments
+    if ($File -match '^(?i:pwsh|powershell)(?:\.exe)?$') {
+        Invoke-NestedPwsh -ArgumentList $Arguments
+    }
+    else {
+        & $File @Arguments
+    }
     $exitCode = $LASTEXITCODE
     $elapsed = (Get-Date) - $start
     Write-Host ("   exit {0} in {1:n1}s" -f $exitCode, $elapsed.TotalSeconds)
@@ -32,6 +39,11 @@ function Invoke-Step {
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
+$launchGuard = Join-Path $repo 'build/Test-NestedPwshLaunch.ps1'
+& $launchGuard -SelfTest
+if ($LASTEXITCODE -ne 0) { throw 'Nested PowerShell launch guard self-test failed.' }
+& $launchGuard
+if ($LASTEXITCODE -ne 0) { throw 'Nested PowerShell launch guard failed.' }
 $solution = Join-Path $repo 'KeelMatrix.ResilienceSpec.slnx'
 $nugetConfig = Join-Path $repo 'NuGet.config'
 $smokeScript = Join-Path $PSScriptRoot 'Invoke-PackageSmoke.ps1'
@@ -53,7 +65,7 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($ResilienceVersion)) {
         $compatibilityArguments += @('-ResilienceVersion', $ResilienceVersion)
     }
-    Invoke-Step -Name 'Validate compatibility contract' -File 'pwsh' -Arguments $compatibilityArguments
+    Invoke-Step -Name 'Validate compatibility contract' -File $pwshExecutable -Arguments $compatibilityArguments
     $durations['compatibility'] = $script:stepDuration
 
     $common = @("-p:NuGetAudit=false")
@@ -61,7 +73,7 @@ try {
         $common += "-p:ResilienceVersion=$ResilienceVersion"
     }
 
-    Invoke-Step -Name 'Validate reachable commit history' -File 'pwsh' -Arguments @(
+    Invoke-Step -Name 'Validate reachable commit history' -File $pwshExecutable -Arguments @(
         '-NoProfile', '-File', $historyScript, '-Revision', 'HEAD', '-RepositoryPath', $repo)
     $durations['history'] = $script:stepDuration
 
@@ -88,15 +100,15 @@ try {
     }
 
     if (-not $SkipPackage) {
-        Invoke-Step -Name 'Reproducible package build, inspection, and clean consumer smoke' -File 'pwsh' -Arguments @('-NoProfile', '-File', $smokeScript)
+        Invoke-Step -Name 'Reproducible package build, inspection, and clean consumer smoke' -File $pwshExecutable -Arguments @('-NoProfile', '-File', $smokeScript)
         $durations['smoke'] = $script:stepDuration
 
-        Invoke-Step -Name 'Run sample against the packed package' -File 'pwsh' -Arguments @('-NoProfile', '-File', $sampleScript)
+        Invoke-Step -Name 'Run sample against the packed package' -File $pwshExecutable -Arguments @('-NoProfile', '-File', $sampleScript)
         $durations['sample'] = $script:stepDuration
     }
 
     if ($Mode -eq 'Full') {
-        Invoke-Step -Name 'Dependency vulnerability audit' -File 'pwsh' -Arguments @('-NoProfile', '-File', $auditScript, '-Mode', 'Required')
+        Invoke-Step -Name 'Dependency vulnerability audit' -File $pwshExecutable -Arguments @('-NoProfile', '-File', $auditScript, '-Mode', 'Required')
         $durations['audit'] = $script:stepDuration
     }
 

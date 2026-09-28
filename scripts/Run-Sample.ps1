@@ -7,6 +7,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../build/Invoke-NestedPwsh.ps1')
+$pwshExecutable = 'pwsh'
 
 function Invoke-Checked {
     param(
@@ -21,7 +23,12 @@ function Invoke-Checked {
     }
 
     try {
-        & $File @Arguments
+        if ($File -match '^(?i:pwsh|powershell)(?:\.exe)?$') {
+            Invoke-NestedPwsh -ArgumentList $Arguments
+        }
+        else {
+            & $File @Arguments
+        }
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -126,8 +133,8 @@ try {
     $snupkg = Join-Path $packageFeed $snupkgName
     Assert-Contract (Test-Path -LiteralPath $nupkg -PathType Leaf) "Packed package was not found: $nupkg"
     Assert-Contract (Test-Path -LiteralPath $snupkg -PathType Leaf) "Packed symbol package was not found: $snupkg"
-    Invoke-Checked 'pwsh' @('-NoProfile', '-File', $normalizationScript, '-PackagePath', $nupkg)
-    Invoke-Checked 'pwsh' @('-NoProfile', '-File', $normalizationScript, '-PackagePath', $snupkg)
+    Invoke-Checked $pwshExecutable @('-NoProfile', '-File', $normalizationScript, '-PackagePath', $nupkg)
+    Invoke-Checked $pwshExecutable @('-NoProfile', '-File', $normalizationScript, '-PackagePath', $snupkg)
     Write-Output ("Packed artifact: {0} ({1:n0} bytes)" -f $nupkg, (Get-Item -LiteralPath $nupkg).Length)
 
     $escapedFeed = [Security.SecurityElement]::Escape($packageFeed)
