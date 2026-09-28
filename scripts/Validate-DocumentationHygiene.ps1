@@ -6,11 +6,6 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$includedExtensions = @(
-    '', '.config', '.cs', '.csproj', '.editorconfig', '.gitattributes', '.gitignore', '.json', '.md', '.props',
-    '.ps1', '.sh', '.slnx', '.targets', '.txt', '.yml', '.yaml'
-)
-
 function Convert-CodePoints {
     param([Parameter(Mandatory = $true)][int[]]$Codes)
 
@@ -27,6 +22,58 @@ function Get-AuthoredFiles {
         Get-ChildItem -LiteralPath $RepositoryPath -File -Recurse |
             ForEach-Object { [IO.Path]::GetRelativePath($RepositoryPath, $_.FullName).Replace('\', '/') }
     )
+}
+
+function Read-AuthoredText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    try {
+        $bytes = [IO.File]::ReadAllBytes($Path)
+    }
+    catch {
+        throw "Documentation hygiene could not read tracked file '$RelativePath'; refusing to skip it."
+    }
+
+    if ($bytes.Length -eq 0) {
+        return [pscustomobject]@{ IsBinary = $false; Text = '' }
+    }
+
+    $encoding = $null
+    $offset = 0
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $encoding = [Text.UTF8Encoding]::new($false, $true)
+        $offset = 3
+    }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+        $encoding = [Text.UnicodeEncoding]::new($false, $false, $true)
+        $offset = 2
+    }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
+        $encoding = [Text.UnicodeEncoding]::new($true, $false, $true)
+        $offset = 2
+    }
+    elseif ($bytes -contains [byte]0) {
+        return [pscustomobject]@{ IsBinary = $true; Text = $null }
+    }
+    else {
+        $encoding = [Text.UTF8Encoding]::new($false, $true)
+    }
+
+    try {
+        $text = $encoding.GetString($bytes, $offset, $bytes.Length - $offset)
+    }
+    catch {
+        throw "Documentation hygiene could not classify tracked file '$RelativePath' as text or binary; refusing to skip it."
+    }
+
+    if ($text.IndexOf([char]0) -ge 0) {
+        return [pscustomobject]@{ IsBinary = $true; Text = $null }
+    }
+
+    return [pscustomobject]@{ IsBinary = $false; Text = $text }
 }
 
 $processName = Convert-CodePoints @(112, 97, 112, 101, 114, 99, 108, 105, 112)
@@ -72,18 +119,27 @@ $forbiddenPatterns = @(
 try {
     $violations = [Collections.Generic.List[string]]::new()
     foreach ($relative in Get-AuthoredFiles) {
-        if ([string]::IsNullOrWhiteSpace($relative) -or
-            $relative.StartsWith('.git/', [StringComparison]::OrdinalIgnoreCase) -or
-            $includedExtensions -notcontains ([IO.Path]::GetExtension($relative).ToLowerInvariant())) {
+        if ([string]::IsNullOrWhiteSpace($relative) -or $relative.StartsWith('.git/', [StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
 
         $path = Join-Path $RepositoryPath $relative.Replace('/', [IO.Path]::DirectorySeparatorChar)
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Documentation hygiene could not resolve tracked file '$relative'; refusing to skip it."
+        }
+
+        foreach ($forbidden in $forbiddenPatterns) {
+            if ($relative -match $forbidden.Pattern) {
+                $violations.Add("${relative}:1: path or file name: $($forbidden.Label)")
+            }
+        }
+
+        $classified = Read-AuthoredText -Path $path -RelativePath $relative
+        if ($classified.IsBinary) {
             continue
         }
 
-        $lines = @(Get-Content -LiteralPath $path)
+        $lines = [regex]::Split($classified.Text, "\r\n|\n|\r")
         for ($lineNumber = 0; $lineNumber -lt $lines.Count; $lineNumber++) {
             foreach ($forbidden in $forbiddenPatterns) {
                 if ($lines[$lineNumber] -match $forbidden.Pattern) {

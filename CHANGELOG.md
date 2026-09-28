@@ -13,8 +13,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Linux validation now runs the same formatting, Release build, package-consumer, and required direct/transitive
   dependency gates as the other supported runners; the tag workflow also checks exact remote-main provenance and both
   verified integration endpoints before publication.
-- The documentation hygiene guard now scans every tracked authored text/source file, including its own scripts and
-  tests, with generated detection patterns and no exemption list.
+- The documentation hygiene guard now scans every tracked authored text/source file, including unsupported text
+  extensions, relative paths/file names, generated/fixture/workflow files, representative encodings, and its own
+  script/tests; binary exclusion is content-based and undecidable content fails closed.
 - Logical-call ownership now requires a positive opaque request association; fresh requests created by flowed handlers
   cannot consume another script step, while deliberate request clones remain supported when they preserve source options,
   including across deliberately suppressed execution-context flow.

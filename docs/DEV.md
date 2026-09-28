@@ -50,6 +50,10 @@ The gate performs, in order: reachable-history hygiene, restore from `NuGet.conf
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
 restores the shipping package from its own temporary local feed.
 
+The documentation hygiene step scans every tracked relative path and file name, then classifies each file by content. It
+checks authored text regardless of extension or location, excludes only content-recognized binary data, and fails closed
+when a tracked file cannot be read or classified.
+
 ## Linux validation
 
 The repository-controlled Linux check requires the .NET SDK selected by `global.json`, PowerShell 7 (`pwsh`) for the
