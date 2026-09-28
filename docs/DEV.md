@@ -55,20 +55,28 @@ strict decoding and content validation rather than guessing from an extension, a
 attempts UTF-8 (including a UTF-8 BOM), ASCII, BOM-aware UTF 16 LE/BE and UTF 32 LE/BE, and bounded BOM-less UTF 16/UTF 32
 candidates. Every successful text decode is scanned, including NUL-rich text and every supported encoding that succeeds.
 
-Undecidable content is never silently excluded. The only binary exception is a tracked path listed in
-`scripts/DocumentationBinaryManifest.json`; the listed format must have a full structural validator. The current manifest
-declares only the repository-root `icon.png` as PNG. PNG validation checks the signature, chunk bounds and types, CRCs,
-`IHDR` values, palette rules, contiguous image data, terminal `IEND`, and a valid compressed image-data stream.
+The bounded guarantee is: all text-decodable tracked files are scanned, and every declared PNG is structurally validated and
+has all supported PNG textual metadata scanned for prohibited patterns. This metadata includes `tEXt`, `zTXt`, and `iTXt`
+keywords and text, including iTXt language tags, translated keywords, and compressed or uncompressed text. A manifest
+declaration is authoritative: a declared PNG is validated as PNG before any text decoder can classify it, so clean text under
+a PNG declaration is rejected. PNG ancillary chunks whose text semantics are not supported are rejected as undecidable.
+
+The residual boundary is explicit rather than absolute: content encoded inside opaque or compressed binary payloads that is
+not text and is not PNG textual metadata is outside this scan surface. Undecidable content is never silently excluded. The
+only declared binary format is `png`, and the current manifest declares only the repository-root `icon.png`. Adding another
+binary format requires extending the guard and its positive, negative, malformed, and fail-closed controls before it may be
+declared.
 
 | Content state | Guard decision |
 | --- | --- |
-| One or more supported strict decoders succeed | Scan every successful decoded text; any prohibited term fails the guard. |
+| One or more supported strict decoders succeed and the path is not declared | Scan every successful decoded text; any prohibited term fails the guard. |
+| The path is declared | Validate the declared format first; for PNG, scan supported textual metadata and skip only after complete validation succeeds. |
 | No decoder succeeds and the tracked path is not in the manifest | Fail closed; the file is not skipped. |
-| No decoder succeeds and the path is declared | Run the format validator; skip only after complete validation succeeds. |
 | A declared asset is malformed, truncated, has invalid structure, or has invalid content checks | Fail closed. |
 
-The manifest is the only binary allowlist. Adding another binary format requires a repository-owned entry and a complete
-validator before the guard may exclude it.
+The manifest is the only binary allowlist, and `png` is the only permitted format. Adding another binary format requires a
+repository-owned guard extension and complete positive, negative, malformed, and fail-closed controls before the manifest may
+declare it.
 
 ## Linux validation
 
@@ -203,4 +211,5 @@ commit to equal the refreshed `origin/main` revision through `scripts/Validate-R
 formatting, Release build/tests, both verified integration endpoints, package smoke, and the required dependency audit
 before either publication step. A finalized changelog must retain exactly one `## [Unreleased]` heading with no
 non-whitespace content beneath it; release notes belong under the dated target version. The release-facing hygiene
-guard scans every tracked authored text/source file, including the guard scripts and their tests, without an exemption list.
+guard scans every tracked authored text/source file, including the guard scripts and their tests, without filename or
+extension exemptions; the sole declared PNG follows the bounded binary path above.

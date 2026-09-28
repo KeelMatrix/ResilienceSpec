@@ -148,6 +148,216 @@ function Get-PngCrc32 {
     return [uint32](($crc -bxor [uint64]4294967295) -band [uint64]4294967295)
 }
 
+function Get-PngNullIndex {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Start
+    )
+
+    for ($index = $Start; $index -lt $Bytes.Length; $index++) {
+        if ($Bytes[$index] -eq 0) {
+            return $index
+        }
+    }
+
+    return -1
+}
+
+function Assert-PngKeyword {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Start,
+        [Parameter(Mandatory = $true)][int]$Length,
+        [Parameter(Mandatory = $true)][string]$ChunkType
+    )
+
+    if ($Length -lt 1 -or $Length -gt 79 -or ($Start -lt 0) -or ($Start + $Length -gt $Bytes.Length)) {
+        throw "PNG $ChunkType keyword is invalid."
+    }
+
+    for ($index = $Start; $index -lt ($Start + $Length); $index++) {
+        $value = $Bytes[$index]
+        if (($value -lt 32 -or $value -gt 126) -and ($value -lt 161 -or $value -gt 255)) {
+            throw "PNG $ChunkType keyword is invalid."
+        }
+    }
+}
+
+function Get-PngLatin1Text {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Start,
+        [Parameter(Mandatory = $true)][int]$Length,
+        [Parameter(Mandatory = $true)][string]$ChunkType,
+        [Parameter(Mandatory = $true)][string]$FieldName
+    )
+
+    if ($Start -lt 0 -or $Length -lt 0 -or $Start + $Length -gt $Bytes.Length) {
+        throw "PNG $ChunkType $FieldName is truncated."
+    }
+
+    for ($index = $Start; $index -lt ($Start + $Length); $index++) {
+        if ($Bytes[$index] -eq 0) {
+            throw "PNG $ChunkType $FieldName contains an undecidable NUL."
+        }
+    }
+
+    return [Text.Encoding]::Latin1.GetString($Bytes, $Start, $Length)
+}
+
+function Get-PngUtf8Text {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Start,
+        [Parameter(Mandatory = $true)][int]$Length,
+        [Parameter(Mandatory = $true)][string]$ChunkType,
+        [Parameter(Mandatory = $true)][string]$FieldName
+    )
+
+    if ($Start -lt 0 -or $Length -lt 0 -or $Start + $Length -gt $Bytes.Length) {
+        throw "PNG $ChunkType $FieldName is truncated."
+    }
+
+    try {
+        return ([Text.UTF8Encoding]::new($false, $true)).GetString($Bytes, $Start, $Length)
+    }
+    catch {
+        throw "PNG $ChunkType $FieldName is not valid UTF-8."
+    }
+}
+
+function Expand-PngCompressedText {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Start,
+        [Parameter(Mandatory = $true)][string]$ChunkType
+    )
+
+    if ($Start -lt 0 -or $Start -ge $Bytes.Length) {
+        throw "PNG $ChunkType compressed text is truncated."
+    }
+
+    $compressed = $null
+    $decompressed = $null
+    $zlib = $null
+    try {
+        $compressed = [IO.MemoryStream]::new()
+        $compressed.Write($Bytes, $Start, $Bytes.Length - $Start)
+        $compressed.Position = 0
+        $decompressed = [IO.MemoryStream]::new()
+        $zlib = [IO.Compression.ZLibStream]::new($compressed, [IO.Compression.CompressionMode]::Decompress)
+        $buffer = New-Object byte[] 4096
+        [int]$total = 0
+        while (($read = $zlib.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $total += $read
+            if ($total -gt 1048576) {
+                throw "PNG $ChunkType compressed text exceeds the bounded metadata size."
+            }
+
+            $decompressed.Write($buffer, 0, $read)
+        }
+
+        if ($compressed.Position -ne $compressed.Length) {
+            throw "PNG $ChunkType compressed text has trailing undecidable data."
+        }
+
+        return $decompressed.ToArray()
+    }
+    catch {
+        throw "PNG $ChunkType compressed text is invalid: $($_.Exception.Message)"
+    }
+    finally {
+        if ($null -ne $zlib) { $zlib.Dispose() }
+        if ($null -ne $decompressed) { $decompressed.Dispose() }
+        if ($null -ne $compressed) { $compressed.Dispose() }
+    }
+}
+
+function Assert-PngForbiddenText {
+    param(
+        [Parameter(Mandatory = $true)][string]$ChunkType,
+        [Parameter(Mandatory = $true)][string[]]$Texts
+    )
+
+    foreach ($text in $Texts) {
+        foreach ($forbidden in $forbiddenPatterns) {
+            if ($text -match $forbidden.Pattern) {
+                throw "PNG $ChunkType metadata contains $($forbidden.Label)."
+            }
+        }
+    }
+}
+
+function Assert-PngTextChunk {
+    param(
+        [Parameter(Mandatory = $true)][string]$ChunkType,
+        [Parameter(Mandatory = $true)][byte[]]$Bytes
+    )
+
+    $keywordEnd = Get-PngNullIndex -Bytes $Bytes -Start 0
+    if ($keywordEnd -lt 0) {
+        throw "PNG $ChunkType keyword is truncated."
+    }
+
+    Assert-PngKeyword -Bytes $Bytes -Start 0 -Length $keywordEnd -ChunkType $ChunkType
+    $keyword = [Text.Encoding]::Latin1.GetString($Bytes, 0, $keywordEnd)
+
+    switch ($ChunkType) {
+        'tEXt' {
+            $text = Get-PngLatin1Text -Bytes $Bytes -Start ($keywordEnd + 1) -Length ($Bytes.Length - $keywordEnd - 1) -ChunkType $ChunkType -FieldName 'text'
+            Assert-PngForbiddenText -ChunkType $ChunkType -Texts @($keyword, $text)
+        }
+        'zTXt' {
+            if ($Bytes.Length -lt ($keywordEnd + 3) -or $Bytes[$keywordEnd + 1] -ne 0) {
+                throw "PNG $ChunkType compression header is invalid."
+            }
+
+            $textBytes = Expand-PngCompressedText -Bytes $Bytes -Start ($keywordEnd + 2) -ChunkType $ChunkType
+            $text = Get-PngLatin1Text -Bytes $textBytes -Start 0 -Length $textBytes.Length -ChunkType $ChunkType -FieldName 'text'
+            Assert-PngForbiddenText -ChunkType $ChunkType -Texts @($keyword, $text)
+        }
+        'iTXt' {
+            if ($Bytes.Length -lt ($keywordEnd + 3)) {
+                throw "PNG $ChunkType compression header is truncated."
+            }
+
+            $compressionFlag = $Bytes[$keywordEnd + 1]
+            $compressionMethod = $Bytes[$keywordEnd + 2]
+            if ($compressionFlag -notin @(0, 1) -or $compressionMethod -ne 0) {
+                throw "PNG $ChunkType compression header is invalid."
+            }
+
+            $languageStart = $keywordEnd + 3
+            $languageEnd = Get-PngNullIndex -Bytes $Bytes -Start $languageStart
+            if ($languageEnd -lt 0) {
+                throw "PNG $ChunkType language tag is truncated."
+            }
+
+            $translatedStart = $languageEnd + 1
+            $translatedEnd = Get-PngNullIndex -Bytes $Bytes -Start $translatedStart
+            if ($translatedEnd -lt 0) {
+                throw "PNG $ChunkType translated keyword is truncated."
+            }
+
+            $language = Get-PngUtf8Text -Bytes $Bytes -Start $languageStart -Length ($languageEnd - $languageStart) -ChunkType $ChunkType -FieldName 'language tag'
+            $translated = Get-PngUtf8Text -Bytes $Bytes -Start $translatedStart -Length ($translatedEnd - $translatedStart) -ChunkType $ChunkType -FieldName 'translated keyword'
+            $textStart = $translatedEnd + 1
+            if ($compressionFlag -eq 0) {
+                $text = Get-PngUtf8Text -Bytes $Bytes -Start $textStart -Length ($Bytes.Length - $textStart) -ChunkType $ChunkType -FieldName 'text'
+            }
+            else {
+                $textBytes = Expand-PngCompressedText -Bytes $Bytes -Start $textStart -ChunkType $ChunkType
+                $text = Get-PngUtf8Text -Bytes $textBytes -Start 0 -Length $textBytes.Length -ChunkType $ChunkType -FieldName 'text'
+            }
+
+            Assert-PngForbiddenText -ChunkType $ChunkType -Texts @($keyword, $language, $translated, $text)
+        }
+        default {
+            throw "PNG $ChunkType is not a supported textual chunk."
+        }
+    }
+}
+
 function Assert-PngStructure {
     param(
         [Parameter(Mandatory = $true)][byte[]]$Bytes,
@@ -208,6 +418,13 @@ function Assert-PngStructure {
         }
 
         $type = [Text.Encoding]::ASCII.GetString($typeBytes)
+        [byte[]]$chunkData = if ($chunkLength -eq 0) {
+            New-Object byte[] 0
+        }
+        else {
+            $Bytes[$dataOffset..($dataOffset + [int]$chunkLength - 1)]
+        }
+
         switch ($type) {
             'IHDR' {
                 if ($seenHeader -or $offset -ne $signature.Length -or $chunkLength -ne 13) {
@@ -270,9 +487,24 @@ function Assert-PngStructure {
 
                 break
             }
+            'tEXt' { Assert-PngTextChunk -ChunkType $type -Bytes $chunkData }
+            'zTXt' { Assert-PngTextChunk -ChunkType $type -Bytes $chunkData }
+            'iTXt' { Assert-PngTextChunk -ChunkType $type -Bytes $chunkData }
             default {
                 if ($typeBytes[0] -ge 0x41 -and $typeBytes[0] -le 0x5A) {
                     throw "PNG contains an unknown critical chunk."
+                }
+
+                $knownNonTextAncillaryChunks = @(
+                    'acTL', 'bKGD', 'cHRM', 'cICP', 'dSIG', 'fdAT', 'fcTL', 'gAMA', 'hIST', 'mDCv', 'oFFs',
+                    'pHYs', 'sBIT', 'sRGB', 'sTER', 'tIME', 'tRNS'
+                )
+                $undecidableTextAncillaryChunks = @('eXIf', 'iCCP', 'pCAL', 'sCAL', 'sPLT')
+                if ($undecidableTextAncillaryChunks -contains $type) {
+                    throw "PNG ancillary chunk '$type' has undecidable text semantics."
+                }
+                if ($knownNonTextAncillaryChunks -notcontains $type) {
+                    throw "PNG contains an unknown ancillary chunk '$type'; refusing undecidable text semantics."
                 }
 
                 if ($seenEnd) {
@@ -374,6 +606,20 @@ function Read-AuthoredText {
         throw "Documentation hygiene could not read tracked file '$RelativePath'; refusing to skip it."
     }
 
+    if ($BinaryManifest.ContainsKey($RelativePath)) {
+        try {
+            switch ($BinaryManifest[$RelativePath]) {
+                'png' { Assert-PngStructure -Bytes $bytes -RelativePath $RelativePath }
+                default { throw "No validator exists for the declared format." }
+            }
+        }
+        catch {
+            throw "Documentation hygiene rejected declared binary asset '$RelativePath': $($_.Exception.Message)"
+        }
+
+        return [pscustomobject]@{ IsBinary = $true; Texts = @() }
+    }
+
     if ($bytes.Length -eq 0) {
         return [pscustomobject]@{ IsBinary = $false; Texts = @('') }
     }
@@ -436,20 +682,6 @@ function Read-AuthoredText {
 
     if ($candidates.Count -gt 0) {
         return [pscustomobject]@{ IsBinary = $false; Texts = $candidates.ToArray() }
-    }
-
-    if ($BinaryManifest.ContainsKey($RelativePath)) {
-        try {
-            switch ($BinaryManifest[$RelativePath]) {
-                'png' { Assert-PngStructure -Bytes $bytes -RelativePath $RelativePath }
-                default { throw "No validator exists for the declared format." }
-            }
-        }
-        catch {
-            throw "Documentation hygiene rejected declared binary asset '$RelativePath': $($_.Exception.Message)"
-        }
-
-        return [pscustomobject]@{ IsBinary = $true; Texts = @() }
     }
 
     throw "Documentation hygiene could not decode tracked file '$RelativePath' as supported text or validate it as a declared binary asset; refusing to skip it."
@@ -540,7 +772,7 @@ try {
         throw "Documentation hygiene failed with $($violations.Count) violation(s)."
     }
 
-    Write-Output 'Documentation hygiene passed: the authored tree contains no non-product process language.'
+    Write-Output "Documentation hygiene passed: the authored tree contains no non-product process language; validated $($binaryManifest.Count) declared PNG asset(s)."
     exit 0
 }
 catch {

@@ -15,8 +15,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   verified integration endpoints before publication.
 - The documentation hygiene guard scans every tracked authored text/source file with strict UTF-8, ASCII, BOM-aware and
   bounded BOM-less UTF 16/UTF 32 decoding, including NUL-rich text and unsupported paths/extensions. Binary exclusion is
-  limited to the tracked paths in an explicit manifest and a complete format validator; unlisted, malformed, or undecidable
-  content fails closed.
+  limited to declared PNG paths with authoritative PNG validation, including `tEXt`, `zTXt`, and compressed and uncompressed
+  `iTXt` metadata scanning. Unlisted, malformed, undecidable, unsupported-format, and clean-text PNG impostors fail closed;
+  opaque or compressed binary payloads that are not text or PNG textual metadata remain outside this bounded scan guarantee.
 - Logical-call ownership now requires a positive opaque request association; fresh requests created by flowed handlers
   cannot consume another script step, while deliberate request clones remain supported when they preserve source options,
   including across deliberately suppressed execution-context flow.

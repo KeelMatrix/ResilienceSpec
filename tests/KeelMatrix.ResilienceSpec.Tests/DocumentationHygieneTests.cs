@@ -16,6 +16,7 @@ public sealed class DocumentationHygieneTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Documentation hygiene passed", result.Output, StringComparison.Ordinal);
+        Assert.Contains("validated 1 declared PNG asset(s)", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -157,7 +158,7 @@ public sealed class DocumentationHygieneTests
     }
 
     [Fact]
-    public void DeclaredBinaryPathStillScansSuccessfulTextDecodes()
+    public void ManifestDeclarationTakesPrecedenceOverSuccessfulTextDecode()
     {
         using var repository = CreateRepository();
         var runtimeTerm = FromCodePoints(97, 103, 101, 110, 116);
@@ -169,7 +170,188 @@ public sealed class DocumentationHygieneTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("fixtures/declared.data", result.Output, StringComparison.Ordinal);
+        Assert.Contains("rejected declared binary asset", result.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PNG", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [MemberData(nameof(SupportedTextEncodings))]
+    public void DeclaredBinaryPathRejectsCleanTextAcrossEverySupportedDecoder(string decoder, byte[] bytes)
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, $"fixtures/declared-{decoder}.data", bytes);
+        WriteBinaryManifest(repository.Path, $"fixtures/declared-{decoder}.data");
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains($"fixtures/declared-{decoder}.data", result.Output, StringComparison.Ordinal);
+        Assert.Contains("PNG signature", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static IEnumerable<object[]> SupportedTextEncodings()
+    {
+        const string safe = "Product fixture content.\n";
+        yield return new object[] { "utf8", new UTF8Encoding(false).GetBytes(safe) };
+        yield return new object[] { "utf8-bom", new UTF8Encoding(true).GetBytes(safe) };
+        yield return new object[] { "ascii", new ASCIIEncoding().GetBytes(safe) };
+        yield return new object[] { "utf16-le-bom", new UnicodeEncoding(false, true).GetBytes(safe) };
+        yield return new object[] { "utf16-be-bom", new UnicodeEncoding(true, true).GetBytes(safe) };
+        yield return new object[] { "utf32-le-bom", new UTF32Encoding(false, true).GetBytes(safe) };
+        yield return new object[] { "utf32-be-bom", new UTF32Encoding(true, true).GetBytes(safe) };
+        yield return new object[] { "utf16-le", new UnicodeEncoding(false, false).GetBytes(safe) };
+        yield return new object[] { "utf16-be", new UnicodeEncoding(true, false).GetBytes(safe) };
+        yield return new object[] { "utf32-le", new UTF32Encoding(false, false).GetBytes(safe) };
+        yield return new object[] { "utf32-be", new UTF32Encoding(true, false).GetBytes(safe) };
+    }
+
+    [Fact]
+    public void ValidUnlistedPngFailsClosed()
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, "fixtures/unlisted.png", CreateValidPng());
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("fixtures/unlisted.png", result.Output, StringComparison.Ordinal);
+        Assert.Contains("could not decode", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UnsupportedDeclaredBinaryFormatFailsClosed()
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, "fixtures/declared.data", CreateValidPng());
+        WriteManifest(repository.Path, [("fixtures/declared.data", "gif")]);
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("unsupported format", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProhibitedPngTextChunks))]
+    public void ProhibitedPngTextMetadataFailsClosed(string chunkType, byte[] chunkData)
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, "fixtures/metadata.data", CreatePngWithAncillaryChunk(chunkType, chunkData));
+        WriteBinaryManifest(repository.Path, "fixtures/metadata.data");
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("fixtures/metadata.data", result.Output, StringComparison.Ordinal);
         Assert.Contains("runtime vocabulary", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static IEnumerable<object[]> ProhibitedPngTextChunks()
+    {
+        var runtimeTerm = FromCodePoints(97, 103, 101, 110, 116);
+        yield return new object[] { "tEXt", CreateTextChunk(runtimeTerm, runtimeTerm) };
+        yield return new object[] { "iTXt", CreateInternationalTextChunk(runtimeTerm, "en-" + runtimeTerm, runtimeTerm, runtimeTerm, compressed: false) };
+        yield return new object[] { "iTXt", CreateInternationalTextChunk(runtimeTerm, "en-" + runtimeTerm, runtimeTerm, runtimeTerm, compressed: true) };
+        yield return new object[] { "zTXt", CreateCompressedTextChunk(runtimeTerm, runtimeTerm) };
+    }
+
+    [Theory]
+    [MemberData(nameof(CleanPngTextChunks))]
+    public void CleanPngTextMetadataPasses(string chunkType, byte[] chunkData)
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, "fixtures/metadata.data", CreatePngWithAncillaryChunk(chunkType, chunkData));
+        WriteBinaryManifest(repository.Path, "fixtures/metadata.data");
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("validated 1 declared PNG asset(s)", result.Output, StringComparison.Ordinal);
+    }
+
+    public static IEnumerable<object[]> CleanPngTextChunks()
+    {
+        yield return new object[] { "tEXt", CreateTextChunk("Comment", "Product fixture content.") };
+        yield return new object[] { "iTXt", CreateInternationalTextChunk("Comment", "en", "Comment", "Product fixture content.", compressed: false) };
+        yield return new object[] { "iTXt", CreateInternationalTextChunk("Comment", "en", "Comment", "Product fixture content.", compressed: true) };
+        yield return new object[] { "zTXt", CreateCompressedTextChunk("Comment", "Product fixture content.") };
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedPngTextChunks))]
+    public void MalformedOrCorruptPngTextMetadataFailsClosed(string chunkType, byte[] chunkData, bool corruptCrc)
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, "fixtures/metadata.data", CreatePngWithAncillaryChunk(chunkType, chunkData, corruptCrc));
+        WriteBinaryManifest(repository.Path, "fixtures/metadata.data");
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("fixtures/metadata.data", result.Output, StringComparison.Ordinal);
+        Assert.Contains("rejected declared binary asset", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static IEnumerable<object[]> MalformedPngTextChunks()
+    {
+        yield return new object[] { "tEXt", Array.Empty<byte>(), false };
+        yield return new object[] { "tEXt", Encoding.ASCII.GetBytes("Comment"), false };
+        yield return new object[] { "iTXt", Combine(Encoding.ASCII.GetBytes("Comment"), [0, 0]), false };
+        yield return new object[] { "zTXt", Combine(Encoding.ASCII.GetBytes("Comment"), [0, 0, 1]), false };
+        yield return new object[] { "tEXt", CreateTextChunk("Comment", "Product fixture content."), true };
+    }
+
+    [Fact]
+    public void UnknownAncillaryPngChunkFailsClosed()
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, "fixtures/unknown.data", CreatePngWithAncillaryChunk("uNKN", Encoding.ASCII.GetBytes("Product fixture content.")));
+        WriteBinaryManifest(repository.Path, "fixtures/unknown.data");
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("unknown ancillary", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("eXIf")]
+    [InlineData("iCCP")]
+    [InlineData("pCAL")]
+    [InlineData("sCAL")]
+    [InlineData("sPLT")]
+    public void KnownAncillaryChunksWithUndecidableTextSemanticsFailClosed(string chunkType)
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, "fixtures/undecidable.data", CreatePngWithAncillaryChunk(chunkType, [1]));
+        WriteBinaryManifest(repository.Path, "fixtures/undecidable.data");
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("undecidable text semantics", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidDeclaredIconPngPasses()
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, "icon.png", CreateValidPng());
+        WriteBinaryManifest(repository.Path, "icon.png");
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("validated 1 declared PNG asset(s)", result.Output, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -305,15 +487,25 @@ public sealed class DocumentationHygieneTests
 
     private static void WriteBinaryManifest(string repositoryPath, params string[] paths)
     {
-        var assets = string.Join(",\n", paths.Select(path => $"    {{\"path\": \"{path}\", \"format\": \"png\"}}"));
-        WriteText(repositoryPath, "scripts/DocumentationBinaryManifest.json", $"{{\n  \"version\": 1,\n  \"assets\": [\n{assets}\n  ]\n}}\n", new UTF8Encoding(false));
+        WriteManifest(repositoryPath, paths.Select(path => (path, "png")).ToArray());
     }
 
-    private static byte[] CreateValidPng()
+    private static void WriteManifest(string repositoryPath, params (string Path, string Format)[] assets)
+    {
+        var entries = string.Join(",\n", assets.Select(asset => $"    {{\"path\": \"{asset.Path}\", \"format\": \"{asset.Format}\"}}"));
+        WriteText(repositoryPath, "scripts/DocumentationBinaryManifest.json", $"{{\n  \"version\": 1,\n  \"assets\": [\n{entries}\n  ]\n}}\n", new UTF8Encoding(false));
+    }
+
+    private static byte[] CreateValidPng(params (string Type, byte[] Data)[] ancillaryChunks)
     {
         using var output = new MemoryStream();
         output.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
         WritePngChunk(output, "IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
+
+        foreach (var (type, data) in ancillaryChunks)
+        {
+            WritePngChunk(output, type, data);
+        }
 
         using var compressed = new MemoryStream();
         using (var zlib = new ZLibStream(compressed, CompressionMode.Compress, leaveOpen: true))
@@ -326,7 +518,61 @@ public sealed class DocumentationHygieneTests
         return output.ToArray();
     }
 
-    private static void WritePngChunk(Stream output, string type, byte[] data)
+    private static byte[] CreatePngWithAncillaryChunk(string type, byte[] data, bool corruptCrc = false) =>
+        CreatePngWithAncillaryChunks((type, data, corruptCrc));
+
+    private static byte[] CreatePngWithAncillaryChunks(params (string Type, byte[] Data, bool CorruptCrc)[] ancillaryChunks)
+    {
+        using var output = new MemoryStream();
+        output.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        WritePngChunk(output, "IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
+        foreach (var (type, data, corruptCrc) in ancillaryChunks)
+        {
+            WritePngChunk(output, type, data, corruptCrc);
+        }
+
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionMode.Compress, leaveOpen: true))
+        {
+            zlib.Write([0, 0, 0, 0, 0]);
+        }
+
+        WritePngChunk(output, "IDAT", compressed.ToArray());
+        WritePngChunk(output, "IEND", []);
+        return output.ToArray();
+    }
+
+    private static byte[] CreateTextChunk(string keyword, string text) =>
+        Combine(Encoding.Latin1.GetBytes(keyword), [0], Encoding.Latin1.GetBytes(text));
+
+    private static byte[] CreateCompressedTextChunk(string keyword, string text) =>
+        Combine(Encoding.Latin1.GetBytes(keyword), [0, 0], Compress(Encoding.Latin1.GetBytes(text)));
+
+    private static byte[] CreateInternationalTextChunk(string keyword, string language, string translatedKeyword, string text, bool compressed)
+    {
+        var payload = Encoding.UTF8.GetBytes(text);
+        return Combine(
+            Encoding.Latin1.GetBytes(keyword),
+            [0, (byte)(compressed ? 1 : 0), 0],
+            Encoding.ASCII.GetBytes(language),
+            [0],
+            Encoding.UTF8.GetBytes(translatedKeyword),
+            [0],
+            compressed ? Compress(payload) : payload);
+    }
+
+    private static byte[] Compress(byte[] bytes)
+    {
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionMode.Compress, leaveOpen: true))
+        {
+            zlib.Write(bytes);
+        }
+
+        return compressed.ToArray();
+    }
+
+    private static void WritePngChunk(Stream output, string type, byte[] data, bool corruptCrc = false)
     {
         var typeBytes = Encoding.ASCII.GetBytes(type);
         var length = new byte[4];
@@ -337,6 +583,10 @@ public sealed class DocumentationHygieneTests
 
         var crcInput = Combine(typeBytes, data);
         var crc = ComputeCrc32(crcInput);
+        if (corruptCrc)
+        {
+            crc ^= 1;
+        }
         var crcBytes = new byte[4];
         BinaryPrimitives.WriteUInt32BigEndian(crcBytes, crc);
         output.Write(crcBytes);
