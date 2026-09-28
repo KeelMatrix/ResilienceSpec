@@ -17,6 +17,8 @@ if ! command -v pwsh >/dev/null 2>&1; then
     exit 1
 fi
 
+pwsh -NoProfile -File scripts/Validate-History.ps1 -Revision HEAD -RepositoryPath "$repository_root"
+
 dotnet restore KeelMatrix.ResilienceSpec.slnx --configfile NuGet.config
 dotnet test tests/KeelMatrix.ResilienceSpec.Tests -c Release --no-restore
 

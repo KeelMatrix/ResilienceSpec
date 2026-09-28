@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   succeeds.
 - Release validation now parses exact invariant ISO calendar dates and shares the canonical stable-tag grammar with the
   release workflow.
+- Release validation now fails closed when a finalized tag leaves substantive content under `[Unreleased]`, and the
+  repository validation path checks reachable commit history for internal metadata and non-conforming authorship.
 - Exact retry-delay, attempt-duration, and settlement assertions now require equality on exact injected-clock evidence;
   fallback sampling is reported as unavailable exact evidence instead of acting as an implicit tolerance.
 - `ResilienceScenarioClock` now rejects testing-provider versions other than `10.10.0`, non-zero automatic advancement,

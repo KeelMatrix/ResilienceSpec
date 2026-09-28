@@ -60,7 +60,7 @@ public sealed class ReleaseContractTests
         var result = RunContractWithChangelog(
             "v0.1.0",
             "0.1.0",
-            "# Changelog\n\n## [Unreleased]\n\n### Added\n- Provides the initial package contract.");
+            "# Changelog\n\n## [Unreleased]\n\n## [0.1.1] - 2026-09-16\n\n### Added\n- Provides another package contract.");
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("exactly one", result.Output, StringComparison.OrdinalIgnoreCase);
@@ -121,7 +121,7 @@ public sealed class ReleaseContractTests
     }
 
     [Fact]
-    public void FinalizedChangelogAllowsPendingOutcomeLanguage()
+    public void FinalizedChangelogWithSubstantiveUnreleasedContentFailsClosed()
     {
         var changelog = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "CHANGELOG.md"));
         changelog = changelog.Replace(
@@ -131,8 +131,55 @@ public sealed class ReleaseContractTests
 
         var result = RunContractWithChangelog("v0.1.0", "0.1.0", changelog);
 
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Unreleased", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FinalizedChangelogWithWhitespaceOnlyUnreleasedSectionPasses()
+    {
+        var result = RunContractWithUnreleasedContent(" \t\r\n\t ");
+
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Release contract passed", result.Output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("### Added\n- Provides an item.")]
+    [InlineData("### Fixed\n- Corrects an item.")]
+    [InlineData("### Changed\n- Changes an item.")]
+    [InlineData("- An uncategorized item.")]
+    public void SubstantiveUnreleasedContentFailsClosed(string content)
+    {
+        var result = RunContractWithUnreleasedContent(content);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Unreleased", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("### added\n- Case variant.")]
+    [InlineData("###Added\n- Heading format variant.")]
+    [InlineData("  - Indented bullet.")]
+    [InlineData("pending notes without a category")]
+    public void UnreleasedWhitespaceCasingAndHeadingVariantsFailClosed(string content)
+    {
+        var result = RunContractWithUnreleasedContent(content);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Unreleased", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DuplicateUnreleasedHeadingsFailClosed()
+    {
+        var result = RunContractWithChangelog(
+            "v0.1.0",
+            "0.1.0",
+            "# Changelog\n\n## [Unreleased]\n\n## [unreleased]\n\n## [0.1.0] - 2026-09-16\n\n### Added\n- First entry.");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("exactly one", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -786,6 +833,22 @@ public sealed class ReleaseContractTests
             "## [Unreleased]",
             "",
             $"## [0.1.0] - {date}",
+            "",
+            "### Added",
+            "- Provides the initial package contract.");
+        return RunContractWithChangelog("v0.1.0", "0.1.0", changelog);
+    }
+
+    private static ContractResult RunContractWithUnreleasedContent(string content)
+    {
+        var changelog = string.Join(
+            Environment.NewLine,
+            "# Changelog",
+            "",
+            "## [Unreleased]",
+            content,
+            "",
+            "## [0.1.0] - 2026-09-16",
             "",
             "### Added",
             "- Provides the initial package contract.");

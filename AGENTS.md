@@ -13,7 +13,7 @@
   deliberately outside the solution.
 - `samples/KeelMatrix.ResilienceSpec.Sample` is a runnable walkthrough of the documented quick start.
 - `scripts` contains the repository gates: `Validate.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`,
-  `Invoke-DependencyAudit.ps1`, and `Validate-ReleaseContract.ps1`.
+  `Invoke-DependencyAudit.ps1`, `Validate-History.ps1`, and `Validate-ReleaseContract.ps1`.
 - `docs/DEV.md` explains the local validation path; `README.md` and `src/KeelMatrix.ResilienceSpec/README.md` are the
   user-facing documentation.
 
@@ -61,10 +61,14 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is
   allowed on the validation path.
 - Set `KEELMATRIX_NO_TELEMETRY=1` for local validation. Repository validation must never emit production telemetry.
+- Release-tag validation requires `[Unreleased]` to contain only its heading and blank lines. Reachable commit history
+  is also checked for internal identifiers, orchestration/model metadata, prohibited trailers, and non-conforming
+  authorship; the GitHub web-flow `KeelMatrix` author / `GitHub` committer exception remains valid.
 
 ## Validation
 
-Run the focused test project while developing, then `scripts/Validate.ps1` before handing work on. The script restores,
+Run the focused test project while developing, then `scripts/Validate.ps1` before handing work on. The script checks
+reachable history, restores,
 verifies formatting, builds Release, runs both test projects, packs and inspects the package, and runs the clean
 consumer smoke from an isolated local feed. `-Mode Full` adds the dependency vulnerability audit. Package and
 validation output goes to the ignored `artifacts/` directory.

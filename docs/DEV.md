@@ -44,7 +44,7 @@ $env:KEELMATRIX_NO_TELEMETRY = '1'
 pwsh -NoProfile -File .\scripts\Validate.ps1
 ```
 
-The gate performs, in order: restore from `NuGet.config`, a formatting/analyzer check, a Release build of
+The gate performs, in order: reachable-history hygiene, restore from `NuGet.config`, a formatting/analyzer check, a Release build of
 `KeelMatrix.ResilienceSpec.slnx`, sequential Release test runs of the core and integration projects, and the package gate
 (`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
@@ -60,8 +60,8 @@ run:
 bash ./scripts/validate-linux.sh
 ```
 
-The script restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core and integration Release tests,
-then runs `scripts/Invoke-PackageSmoke.ps1` and `scripts/Run-Sample.ps1`. The package smoke includes pack, package
+The script checks reachable history, restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core and
+integration Release tests, then runs `scripts/Invoke-PackageSmoke.ps1` and `scripts/Run-Sample.ps1`. The package smoke includes pack, package
 inspection, and an isolated clean-consumer restore. Linux does not run the formatting gate or the dependency audit.
 Windows and macOS use `scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0`, which includes formatting, the same
 package smoke and sample stages, and the required dependency audit.
@@ -182,3 +182,8 @@ Treat a non-zero result as a release blocker. No release action is authorized by
 Before a release: promote accepted `PublicAPI.Unshipped.txt` entries into `PublicAPI.Shipped.txt`, finalize the
 `CHANGELOG.md` entry for the target version, and re-run the full gate on the resulting commit. Tagging, publishing,
 and repository visibility changes are separate, explicitly approved steps.
+
+The tag-time release backstop is `scripts/Validate-ReleaseContract.ps1`. A finalized changelog must retain exactly one
+`## [Unreleased]` heading with no non-whitespace content beneath it; release notes belong under the dated target
+version. `scripts/Validate-History.ps1` scans every commit reachable from the release revision and rejects internal
+task identifiers, orchestration/model metadata, prohibited attribution trailers, and non-conforming authorship.

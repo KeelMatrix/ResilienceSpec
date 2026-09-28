@@ -37,6 +37,7 @@ $nugetConfig = Join-Path $repo 'NuGet.config'
 $smokeScript = Join-Path $PSScriptRoot 'Invoke-PackageSmoke.ps1'
 $sampleScript = Join-Path $PSScriptRoot 'Run-Sample.ps1'
 $auditScript = Join-Path $PSScriptRoot 'Invoke-DependencyAudit.ps1'
+$historyScript = Join-Path $PSScriptRoot 'Validate-History.ps1'
 $durations = [ordered]@{}
 
 $saved = [Environment]::GetEnvironmentVariable('KEELMATRIX_NO_TELEMETRY', 'Process')
@@ -51,6 +52,10 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($ResilienceVersion)) {
         $common += "-p:ResilienceVersion=$ResilienceVersion"
     }
+
+    Invoke-Step -Name 'Validate reachable commit history' -File 'pwsh' -Arguments @(
+        '-NoProfile', '-File', $historyScript, '-Revision', 'HEAD', '-RepositoryPath', $repo)
+    $durations['history'] = $script:stepDuration
 
     Invoke-Step -Name 'Restore' -File 'dotnet' -Arguments (@('restore', $solution, '--configfile', $nugetConfig) + $common)
     $durations['restore'] = $script:stepDuration

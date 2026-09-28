@@ -83,6 +83,19 @@ try {
         Fail-Contract 'CHANGELOG.md must contain exactly one ## [Unreleased] section.'
     }
 
+    $unreleasedNextHeading = @($headings | Where-Object { $_.Index -gt $unreleased[0].Index } | Sort-Object Index | Select-Object -First 1)
+    $unreleasedEndIndex = if ($unreleasedNextHeading.Count -eq 0) { $lines.Count } else { $unreleasedNextHeading[0].Index }
+    $unreleasedLines = if ($unreleasedEndIndex -gt ($unreleased[0].Index + 1)) {
+        $lines[($unreleased[0].Index + 1)..($unreleasedEndIndex - 1)]
+    }
+    else {
+        @()
+    }
+    $substantiveUnreleasedLines = @($unreleasedLines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($substantiveUnreleasedLines.Count -gt 0) {
+        Fail-Contract 'The [Unreleased] section must contain only its heading and blank lines when validating a release tag.'
+    }
+
     $targetHeadings = @($headings | Where-Object { $_.Version -ceq $tagVersion })
     if ($targetHeadings.Count -ne 1) {
         Fail-Contract "CHANGELOG.md must contain exactly one ## [$tagVersion] section."
