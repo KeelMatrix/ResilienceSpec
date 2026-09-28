@@ -9,6 +9,7 @@ namespace KeelMatrix.ResilienceSpec.IntegrationTests;
 /// Proves that the scripted downstream composes with the real Microsoft.Extensions.Http.Resilience handler chain
 /// without the resilience layer being bypassed or replaced.
 /// </summary>
+[Collection("Deterministic timing")]
 public sealed class StandardResilienceTests
 {
     private static readonly TimeSpan Backoff = TimeSpan.FromSeconds(2);

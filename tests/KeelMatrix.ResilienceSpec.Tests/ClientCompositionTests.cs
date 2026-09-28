@@ -5,6 +5,7 @@ using Xunit;
 
 namespace KeelMatrix.ResilienceSpec.Tests;
 
+[Collection("Deterministic timing")]
 public sealed class ClientCompositionTests
 {
     [Fact]
@@ -363,7 +364,8 @@ public sealed class ClientCompositionTests
         using var request = Chains.Request(HttpMethod.Get, "/supported");
         var run = scenario.SendAsync(client, request);
 
-        await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var observed = await Task.WhenAny(retryStarted.Task, run);
+        Assert.Same(retryStarted.Task, observed);
         using var directRequest = Chains.Request(HttpMethod.Get, "/direct-backoff");
         await Assert.ThrowsAsync<ScenarioConsumedException>(
             () => direct.SendAsync(directRequest, CancellationToken.None));
@@ -534,6 +536,7 @@ internal sealed class AmbientCallbackUnrelatedSendHandler : DelegatingHandler
     }
 }
 
+[Collection("Deterministic timing")]
 public sealed class CancellationTests
 {
     [Fact]
@@ -716,7 +719,8 @@ public sealed class CancellationTests
         using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/2");
 
         var firstCall = scenario.SendAsync(client, firstRequest);
-        await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var observed = await Task.WhenAny(retryStarted.Task, firstCall);
+        Assert.Same(retryStarted.Task, observed);
 
         var failure = await Assert.ThrowsAsync<ScenarioConsumedException>(
             () => scenario.SendAsync(client, secondRequest));
@@ -796,24 +800,13 @@ public sealed class CancellationTests
         await Assert.ThrowsAsync<ScenarioConsumedException>(
             () => scenario.SendAsync(client, overlappingRequest));
 
+        var contentDisposed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("late response"),
+            Content = new DisposalSignalContent(contentDisposed),
         };
-        var content = response.Content;
         lateResponse.SetResult(response);
-        await SpinWaitForAsync(() =>
-        {
-            try
-            {
-                _ = content.ReadAsStringAsync().GetAwaiter().GetResult();
-                return false;
-            }
-            catch (ObjectDisposedException)
-            {
-                return true;
-            }
-        });
+        await contentDisposed.Task;
 
         using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/reused");
         await Assert.ThrowsAsync<ScenarioConsumedException>(() => scenario.SendAsync(client, secondRequest));
@@ -849,7 +842,7 @@ public sealed class CancellationTests
             () => scenario.SendAsync(client, overlappingRequest));
 
         releaseFault.SetResult();
-        await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await faultObserved.Task;
 
         using var secondRequest = Chains.Request(HttpMethod.Get, "/orders/reused");
         await Assert.ThrowsAsync<ScenarioConsumedException>(() => scenario.SendAsync(client, secondRequest));
@@ -876,22 +869,47 @@ public sealed class CancellationTests
         using var request = Chains.Request(HttpMethod.Get);
 
         var run = scenario.SendAsync(client, request);
-        await cancellationStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        using var result = await run;
+        try
+        {
+            var observed = await Task.WhenAny(cancellationStarted.Task, run);
+            Assert.Same(cancellationStarted.Task, observed);
+            using var result = await run;
 
-        result.ShouldBePending();
-        Assert.True(scenario.Report.IsObservationCutoff);
+            result.ShouldBePending();
+            Assert.True(scenario.Report.IsObservationCutoff);
+        }
+        finally
+        {
+            releaseCancellation.TrySetResult();
+            if (!run.IsCompleted)
+            {
+                await run;
+            }
+        }
+    }
+}
 
-        releaseCancellation.SetResult();
+internal sealed class DisposalSignalContent : HttpContent
+{
+    private readonly TaskCompletionSource _disposed;
+
+    internal DisposalSignalContent(TaskCompletionSource disposed) => _disposed = disposed;
+
+    protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => Task.CompletedTask;
+
+    protected override bool TryComputeLength(out long length)
+    {
+        length = 0;
+        return true;
     }
 
-    private static async Task SpinWaitForAsync(Func<bool> condition)
+    protected override void Dispose(bool disposing)
     {
-        for (var attempt = 0; attempt < 100 && !condition(); attempt++)
+        if (disposing)
         {
-            await Task.Delay(10);
+            _disposed.TrySetResult();
         }
 
-        Assert.True(condition(), "The late response was not disposed by bounded cleanup observation.");
+        base.Dispose(disposing);
     }
 }

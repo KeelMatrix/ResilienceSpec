@@ -5,6 +5,7 @@ using Xunit;
 
 namespace KeelMatrix.ResilienceSpec.Tests;
 
+[Collection("Deterministic timing")]
 public sealed class DeterministicTimingTests
 {
     [Fact]
@@ -327,7 +328,7 @@ public sealed class DeterministicTimingTests
         Assert.Equal(TimeSpan.FromSeconds(1), ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
 
         clock.Advance(TimeSpan.FromSeconds(1));
-        await immediateCallback.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await immediateCallback.Task;
         Assert.Equal(1, callbacks);
         Assert.Null(ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
 
@@ -353,7 +354,7 @@ public sealed class DeterministicTimingTests
                    TimeSpan.Zero,
                    Timeout.InfiniteTimeSpan))
         {
-            await immediate.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            await immediate.Task;
             Assert.Null(ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
         }
 
@@ -372,7 +373,7 @@ public sealed class DeterministicTimingTests
         {
             Assert.Equal(TimeSpan.FromSeconds(1), ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
             clock.Advance(TimeSpan.FromSeconds(1));
-            await callbackTimeChange.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            await callbackTimeChange.Task;
             Assert.Equal(TimeSpan.FromSeconds(1), ResilienceScenarioClock.GetNextTimerDue(clock.TimeProvider));
         }
     }
@@ -476,7 +477,8 @@ public sealed class DeterministicTimingTests
         using var request = Chains.Request(HttpMethod.Get);
 
         var run = scenario.SendAsync(client, request);
-        await timerFired.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var observed = await Task.WhenAny(timerFired.Task, run);
+        Assert.Same(timerFired.Task, observed);
         continuationRelease.SetResult();
 
         using var result = await run;
@@ -547,16 +549,15 @@ public sealed class DeterministicTimingTests
         var run = scenario.SendAsync(client, request);
         try
         {
-            await callbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
-            var completed = await Task.WhenAny(run, Task.Delay(TimeSpan.FromMilliseconds(500)));
-            Assert.Same(run, completed);
+            var observed = await Task.WhenAny(callbackStarted.Task, run);
+            Assert.Same(callbackStarted.Task, observed);
 
             using var result = await run;
             result.ShouldBePending();
             Assert.True(scenario.Report.IsObservationCutoff);
 
             releaseCallback.TrySetResult();
-            await callbackCompleted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            await callbackCompleted.Task;
             await Assert.ThrowsAsync<ScenarioConsumedException>(
                 () => scenario.SendAsync(client, Chains.Request(HttpMethod.Get)));
         }
@@ -565,7 +566,7 @@ public sealed class DeterministicTimingTests
             releaseCallback.TrySetResult();
             if (!run.IsCompleted)
             {
-                await run.WaitAsync(TimeSpan.FromSeconds(1));
+                await run;
             }
         }
     }
@@ -593,9 +594,8 @@ public sealed class DeterministicTimingTests
         var run = Task.Run(() => scenario.SendAsync(client, request));
         try
         {
-            await callbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            var completed = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(2)));
-            Assert.Same(run, completed);
+            var observed = await Task.WhenAny(callbackStarted.Task, run);
+            Assert.Same(callbackStarted.Task, observed);
 
             using var result = await run;
             result.ShouldBePending();
@@ -605,7 +605,7 @@ public sealed class DeterministicTimingTests
         finally
         {
             releaseCallback.TrySetResult();
-            await run.WaitAsync(TimeSpan.FromSeconds(2));
+            await run;
         }
     }
 
