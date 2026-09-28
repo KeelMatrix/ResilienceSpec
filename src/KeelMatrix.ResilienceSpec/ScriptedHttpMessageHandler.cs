@@ -1,5 +1,3 @@
-using System.Net.Http.Headers;
-
 namespace KeelMatrix.ResilienceSpec;
 
 /// <summary>
@@ -132,9 +130,9 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
     private static HttpResponseMessage CreateResponse(HttpFault fault, HttpRequestMessage request)
     {
         var response = new HttpResponseMessage(fault.StatusCode) { RequestMessage = request };
-        if (fault.RetryAfter is { } delta)
+        if (fault.RetryAfterValue is { } delta)
         {
-            response.Headers.RetryAfter = new RetryConditionHeaderValue(delta);
+            response.Headers.RetryAfter = delta.ToHeaderValue();
         }
 
         return response;

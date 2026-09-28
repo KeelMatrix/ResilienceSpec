@@ -20,4 +20,8 @@ internal static class TimeFormat
 
         return string.Create(CultureInfo.InvariantCulture, $"{value.TotalSeconds:0.###} s");
     }
+
+    /// <summary>Renders the canonical integer delta-seconds form used by Retry-After metadata.</summary>
+    internal static string DescribeRetryAfter(TimeSpan value) =>
+        string.Create(CultureInfo.InvariantCulture, $"{value.TotalSeconds:0} s");
 }

@@ -15,6 +15,17 @@
     <PathMap Condition="('$(SourceRevisionId)' != '' or '$(RepositoryCommit)' != '') and '$(_RepositorySourceRootAlias)' != ''">$(_RepositorySourceRoot)=/_/,$(_RepositorySourceRootAlias)=/_/</PathMap>
   </PropertyGroup>
 
+  <Target Name="ValidateResilienceVersion"
+          BeforeTargets="PrepareForBuild;Pack"
+          Condition="'$(ResilienceVersion)' != ''">
+    <ItemGroup>
+      <_MatchingResilienceVersion Include="@(ResilienceVerifiedVersion)"
+                                  Condition="'%(Identity)' == '$(ResilienceVersion)'" />
+    </ItemGroup>
+    <Error Condition="'@(_MatchingResilienceVersion)' == ''"
+           Text="ResilienceVersion '$(ResilienceVersion)' is not verified. Select one of: @(ResilienceVerifiedVersion, ', ')." />
+  </Target>
+
   <Target Name="NormalizeGeneratedSourceLineEndings"
           BeforeTargets="CoreCompile">
     <ItemGroup>

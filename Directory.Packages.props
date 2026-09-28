@@ -1,13 +1,11 @@
 <Project>
+  <Import Project="build/ResilienceCompatibility.props" />
+
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
-    <!--
-      The lowest and the highest Microsoft.Extensions.Http.Resilience release covered by the integration
-      tests. Pass ResilienceVersion on the command line to run the integration suite against another
-      supported release, for example: dotnet test -p:ResilienceVersion=9.8.0
-    -->
-    <ResilienceVersion Condition="'$(ResilienceVersion)' == ''">10.10.0</ResilienceVersion>
+    <!-- Pass ResilienceVersion on the command line to select one item from ResilienceVerifiedVersion. -->
+    <ResilienceVersion Condition="'$(ResilienceVersion)' == ''">$(ResilienceDefaultVersion)</ResilienceVersion>
   </PropertyGroup>
 
   <ItemGroup>

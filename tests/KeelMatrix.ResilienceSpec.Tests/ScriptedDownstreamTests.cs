@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using Xunit;
 
@@ -31,18 +32,30 @@ public sealed class ScriptedDownstreamTests
         Assert.Equal(HttpAttemptOutcome.Response, scenario.Report.LastAttempt!.Outcome);
     }
 
-    [Fact]
-    public async Task ScriptedRetryAfterIsAttachedToTheResponseHeader()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(int.MaxValue)]
+    public async Task ScriptedRetryAfterUsesTheIntegerWireFormAndRoundTrips(int seconds)
     {
         var script = HttpFaultScript.Sequence(
-            HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)));
+            HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(seconds)));
         using var scenario = new ResilienceScenario(script);
         using var client = Chains.CreateClient(scenario.Handler);
         using var request = Chains.Request(HttpMethod.Get);
         using var result = await scenario.SendAsync(client, request);
 
-        Assert.Equal(TimeSpan.FromSeconds(2), result.Response!.Headers.RetryAfter!.Delta);
-        Assert.Equal(TimeSpan.FromSeconds(2), scenario.Report.LastAttempt!.RetryAfter);
+        var expected = TimeSpan.FromSeconds(seconds);
+        var retryAfter = result.Response!.Headers.RetryAfter!;
+        Assert.Equal(expected, retryAfter.Delta);
+        Assert.Equal(seconds.ToString(CultureInfo.InvariantCulture), retryAfter.ToString());
+
+        using var parsed = new HttpResponseMessage();
+        Assert.True(parsed.Headers.TryAddWithoutValidation(
+            "Retry-After",
+            retryAfter.ToString()));
+        Assert.Equal(expected, parsed.Headers.RetryAfter!.Delta);
+        Assert.Equal(expected, scenario.Report.LastAttempt!.RetryAfter);
     }
 
     [Fact]

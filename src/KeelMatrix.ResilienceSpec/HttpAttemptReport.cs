@@ -174,7 +174,7 @@ public sealed class HttpAttemptReport
     private static string Describe(HttpAttempt attempt) => attempt.Outcome switch
     {
         HttpAttemptOutcome.Response when attempt.RetryAfter is { } delta =>
-            $"response {(int)attempt.StatusCode!.Value} (retry-after {TimeFormat.Describe(delta)})",
+            $"response {(int)attempt.StatusCode!.Value} (retry-after {TimeFormat.DescribeRetryAfter(delta)})",
         HttpAttemptOutcome.Response => $"response {(int)attempt.StatusCode!.Value}",
         HttpAttemptOutcome.NetworkError => "network error",
         HttpAttemptOutcome.ScriptExhausted => "script exhausted",

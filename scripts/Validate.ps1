@@ -38,6 +38,7 @@ $smokeScript = Join-Path $PSScriptRoot 'Invoke-PackageSmoke.ps1'
 $sampleScript = Join-Path $PSScriptRoot 'Run-Sample.ps1'
 $auditScript = Join-Path $PSScriptRoot 'Invoke-DependencyAudit.ps1'
 $historyScript = Join-Path $PSScriptRoot 'Validate-History.ps1'
+$compatibilityScript = Join-Path $PSScriptRoot 'Validate-CompatibilityContract.ps1'
 $durations = [ordered]@{}
 
 $saved = [Environment]::GetEnvironmentVariable('KEELMATRIX_NO_TELEMETRY', 'Process')
@@ -47,6 +48,13 @@ try {
     [Environment]::SetEnvironmentVariable('DOTNET_NOLOGO', '1', 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_SKIP_FIRST_TIME_EXPERIENCE', '1', 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_CLI_UI_LANGUAGE', 'en', 'Process')
+
+    $compatibilityArguments = @('-NoProfile', '-File', $compatibilityScript, '-RepositoryPath', $repo)
+    if (-not [string]::IsNullOrWhiteSpace($ResilienceVersion)) {
+        $compatibilityArguments += @('-ResilienceVersion', $ResilienceVersion)
+    }
+    Invoke-Step -Name 'Validate compatibility contract' -File 'pwsh' -Arguments $compatibilityArguments
+    $durations['compatibility'] = $script:stepDuration
 
     $common = @("-p:NuGetAudit=false")
     if (-not [string]::IsNullOrWhiteSpace($ResilienceVersion)) {

@@ -217,6 +217,7 @@ public sealed class DeterministicTimingTests
     {
         var release = new TaskCompletionSource();
         var step = TimeSpan.FromMilliseconds(100);
+        var advertised = TimeSpan.FromSeconds(1);
         var provider = new FakeTimeProvider(Chains.ClockStart);
         var clock = new ResilienceScenarioClock(provider, amount =>
         {
@@ -225,7 +226,7 @@ public sealed class DeterministicTimingTests
         });
         using var scenario = new ResilienceScenario(
             HttpFaultScript.Sequence(
-                HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: step),
+                HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: advertised),
                 HttpFault.Success()),
             clock,
             new ResilienceScenarioOptions { AdvanceStep = step });

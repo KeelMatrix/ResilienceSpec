@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Runtime.Loader;
@@ -118,6 +119,60 @@ await RunAsync("A consumer-authored derived provider cannot be wrapped as a dete
     }
 
     throw new InvalidOperationException("A consumer-authored derived provider was accepted as a deterministic scenario clock.");
+});
+
+await RunAsync("Retry-After wire values round-trip in the package consumer", async () =>
+{
+    foreach (var seconds in new[] { 0, 1, int.MaxValue })
+    {
+        var (underlyingClock, advance) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var clock = new ResilienceScenarioClock(underlyingClock, advance);
+        var expected = TimeSpan.FromSeconds(seconds);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Response(HttpStatusCode.TooManyRequests, retryAfter: expected)),
+            clock);
+        using var provider = BuildProvider(
+            "retry-after-boundary",
+            scenario,
+            options =>
+            {
+                options.Retry.MaxRetryAttempts = 1;
+                options.Retry.DisableForUnsafeHttpMethods();
+            });
+        var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("retry-after-boundary");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://retry-after-boundary.invalid")
+        {
+            Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json"),
+        };
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.TooManyRequests);
+        var retryAfter = result.Response!.Headers.RetryAfter!;
+        if (retryAfter.Delta != expected || retryAfter.ToString() != seconds.ToString(CultureInfo.InvariantCulture))
+        {
+            throw new InvalidOperationException($"Retry-After wire value {seconds} did not round-trip faithfully.");
+        }
+
+        using var parsed = new HttpResponseMessage();
+        if (!parsed.Headers.TryAddWithoutValidation("Retry-After", retryAfter.ToString()) ||
+            parsed.Headers.RetryAfter!.Delta != expected)
+        {
+            throw new InvalidOperationException($"Retry-After wire value {seconds} did not parse back to the same delta.");
+        }
+
+        inMemoryAttempts += scenario.Report.AttemptCount;
+    }
+
+    try
+    {
+        _ = HttpFault.Response(HttpStatusCode.TooManyRequests, TimeSpan.FromMilliseconds(1_500));
+    }
+    catch (ArgumentException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException("A fractional Retry-After value was accepted by the package consumer.");
 });
 
 await RunAsync("GET 503 -> 200 through the standard resilience handler", async () =>
@@ -245,9 +300,9 @@ if (observer.TotalEvents != 0)
     failures.Add($"the smoke run observed {observer.TotalEvents} runtime transport event(s)");
 }
 
-if (inMemoryAttempts != 3)
+if (inMemoryAttempts != 6)
 {
-    failures.Add($"expected 3 attempts answered in memory, observed {inMemoryAttempts}");
+    failures.Add($"expected 6 attempts answered in memory, observed {inMemoryAttempts}");
 }
 
 if (Environment.GetEnvironmentVariable("KEELMATRIX_NO_TELEMETRY") != "1")

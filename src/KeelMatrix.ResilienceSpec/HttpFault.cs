@@ -28,19 +28,21 @@ internal enum HttpFaultKind
 /// </remarks>
 public sealed class HttpFault
 {
-    private HttpFault(HttpFaultKind kind, HttpStatusCode statusCode, TimeSpan? retryAfter, TimeSpan? delay, HttpFault? innerFault)
+    private HttpFault(HttpFaultKind kind, HttpStatusCode statusCode, RetryAfterDelta? retryAfter, TimeSpan? delay, HttpFault? innerFault)
     {
         Kind = kind;
         StatusCode = statusCode;
-        RetryAfter = retryAfter;
+        RetryAfterValue = retryAfter;
         DelayDuration = delay;
         InnerFault = innerFault;
     }
 
-    /// <summary>Gets the delay this response advertises through the <c>Retry-After</c> header, when one was configured.</summary>
-    public TimeSpan? RetryAfter { get; }
+    /// <summary>Gets the canonical integer delta-seconds value this response advertises through <c>Retry-After</c>.</summary>
+    public TimeSpan? RetryAfter => RetryAfterValue?.Duration;
 
     internal HttpFaultKind Kind { get; }
+
+    internal RetryAfterDelta? RetryAfterValue { get; }
 
     internal HttpStatusCode StatusCode { get; }
 
@@ -52,8 +54,10 @@ public sealed class HttpFault
     /// <param name="statusCode">The status code the scripted downstream returns; it must be between 0 and 999.</param>
     /// <param name="retryAfter">
     /// An optional <c>Retry-After</c> delay. The delta-seconds form is deterministic on an injected clock; the
-    /// HTTP-date form is deliberately not supported. A value uses whole-millisecond precision and cannot exceed
-    /// <see cref="int.MaxValue"/> milliseconds.
+    /// HTTP-date form is deliberately not supported. The value must be a non-negative whole number of seconds and
+    /// cannot exceed <see cref="int.MaxValue"/> seconds, the HTTP delta-seconds wire limit. This wire limit is
+    /// separate from the controlled timer's <c>int.MaxValue</c>-millisecond limit;
+    /// a wire-valid value above the timer limit can be inspected without being used as a virtual-time wait.
     /// </param>
     /// <returns>The script step.</returns>
     public static HttpFault Response(HttpStatusCode statusCode, TimeSpan? retryAfter = null)
@@ -68,14 +72,11 @@ public sealed class HttpFault
 
         if (retryAfter is { } delta)
         {
-            DurationContract.ValidateScriptDuration(
-                nameof(retryAfter),
-                delta,
-                allowZero: true,
-                "A Retry-After delta");
+            var retryAfterValue = RetryAfterDelta.FromDuration(nameof(retryAfter), delta);
+            return new HttpFault(HttpFaultKind.Response, statusCode, retryAfterValue, null, null);
         }
 
-        return new HttpFault(HttpFaultKind.Response, statusCode, retryAfter, null, null);
+        return new HttpFault(HttpFaultKind.Response, statusCode, null, null, null);
     }
 
     /// <summary>Creates a step that answers the attempt with <see cref="HttpStatusCode.OK"/>.</summary>
@@ -119,8 +120,8 @@ public sealed class HttpFault
 
     internal string Describe() => Kind switch
     {
-        HttpFaultKind.Response when RetryAfter is { } delta =>
-            $"response {(int)StatusCode} (retry-after {TimeFormat.Describe(delta)})",
+        HttpFaultKind.Response when RetryAfterValue is { } delta =>
+            $"response {(int)StatusCode} (retry-after {delta.Seconds} s)",
         HttpFaultKind.Response => $"response {(int)StatusCode}",
         HttpFaultKind.NetworkError => "network error",
         HttpFaultKind.Timeout => "no response",

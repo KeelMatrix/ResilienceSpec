@@ -18,8 +18,9 @@ paths, query strings, headers, cookies, authorization values, request or respons
 or service names, scripted scenario contents, repository names, or local paths.
 
 Attempt records and failure messages contain only the attempt ordinal, the HTTP method, the broad outcome, the
-scripted status or `Retry-After` value, and injected-clock timing. Scripted responses carry an empty body and no
-headers other than the scripted `Retry-After` value. Scripts are bounded to `HttpFaultScript.MaximumSteps` steps and
+scripted status or canonical integer delta-seconds `Retry-After` value, and injected-clock timing. Scripted responses
+carry an empty body and no headers other than the scripted `Retry-After` value. Scripts are bounded to
+`HttpFaultScript.MaximumSteps` steps and
 the recorded attempt timeline keeps at most `HttpAttemptReport.MaximumRecordedAttempts` attempts, so a client that
 makes more attempts than that cannot grow attempt state inside the test process: the run reports
 `HttpAttemptReport.IsOverflowed` and attempt-state assertions fail with `AttemptStateOverflowException` instead of

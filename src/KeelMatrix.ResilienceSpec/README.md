@@ -20,8 +20,9 @@ dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 The `Microsoft.Extensions.Http.Resilience` package is an optional integration/example dependency and is not a runtime
 dependency of the ResilienceSpec package. `Microsoft.Extensions.TimeProvider.Testing` is not transitively brought in by
 ResilienceSpec, but timing scenarios require the explicitly referenced supported `10.10.0` package at test runtime.
-`Microsoft.Extensions.Http.Resilience` may vary from `9.8.0` up to, but not including, `11.0.0`; other testing-package
-versions are unverified and are not admitted for timing evidence.
+The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+Other testing-package versions are unverified and are not admitted for timing evidence. See the
+[repository compatibility contract](https://github.com/KeelMatrix/ResilienceSpec/blob/main/docs/Compatibility.md).
 
 ## Logical Call Contract
 
@@ -102,9 +103,11 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   does not attest a consumer-replaced file at that exact dependency path.
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
-- Scripted delays and `Retry-After` deltas accept whole-millisecond precision only and are capped at
-  `TimeSpan.FromMilliseconds(int.MaxValue)`, matching the controlled timer contract. Fractional-millisecond and
-  out-of-range values fail during script construction instead of being rounded, dropped, or reported differently.
+- Scripted delays use whole-millisecond precision and are capped at `TimeSpan.FromMilliseconds(int.MaxValue)`, matching
+  the controlled timer contract. `Retry-After` uses the integer whole-second HTTP wire form, rejects fractional and
+  sub-second values, and is bounded by the HTTP delta-seconds limit. Those limits are separate, so a wire-valid value
+  above the controlled timer limit can be inspected without being used as a virtual-time wait. Invalid values fail
+  during script construction instead of being rounded, dropped, or reported differently.
 - Timing observations use `ResilienceScenarioOptions.AdvanceStep` only as a fallback when no provider timer deadline
   is available. When the supported tracking clock exposes a timer deadline, the scenario advances directly to that
   deadline; `ResilienceScenarioClock` records provider timers that fire. A continuation that schedules another
@@ -148,12 +151,13 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 
 ## Supported Integration Range
 
-The integration tests cover `Microsoft.Extensions.Http.Resilience` **9.8.0 and newer, below 11.0**, and are run
-against the lowest tested release and the current release. Both endpoints use
-`Microsoft.Extensions.TimeProvider.Testing` `10.10.0`; other testing-package versions are unverified. The
-implementation-neutral script, report, and assertion core does not reference `Microsoft.Extensions.Http.Resilience`
-or Polly. The shipping package intentionally references `Microsoft.Extensions.Http` for its factory adapter and
-`KeelMatrix.Telemetry`; Polly and `Microsoft.Extensions.Http.Resilience` remain outside its runtime dependency graph.
+The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+Both endpoints use `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`; other testing-package versions are
+unverified. The implementation-neutral script, report, and assertion core does not reference
+`Microsoft.Extensions.Http.Resilience` or Polly. The shipping package intentionally references
+`Microsoft.Extensions.Http` for its factory adapter and `KeelMatrix.Telemetry`; Polly and
+`Microsoft.Extensions.Http.Resilience` remain outside its runtime dependency graph. See the
+[repository compatibility contract](https://github.com/KeelMatrix/ResilienceSpec/blob/main/docs/Compatibility.md).
 
 ## Telemetry
 

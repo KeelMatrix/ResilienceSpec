@@ -125,8 +125,7 @@ other dependencies from NuGet.org into an isolated cache, verifies the restored 
 
 ## Integration range
 
-`Directory.Packages.props` pins `Microsoft.Extensions.Http.Resilience` through the `ResilienceVersion` property. Run
-the integration suite once per supported end of the range; hosted validation runs both endpoints explicitly:
+`build/ResilienceCompatibility.props` is the canonical source for the first-party integration versions. The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified. `Directory.Packages.props` imports that source through the `ResilienceVersion` property. Run the integration suite once per verified endpoint; hosted validation runs both explicitly:
 
 ```powershell
 dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
@@ -161,9 +160,10 @@ only published failure outcomes from executed attempts and an assertion evaluate
 Interim live-report and observation-cleanup assertions are not activation evidence, and unused planned fault steps do
 not set telemetry categories.
 
-Scripted `HttpFault.Delay` durations and `Retry-After` deltas accept whole milliseconds only and are capped at
-`TimeSpan.FromMilliseconds(int.MaxValue)`, so construction rejects precision or range that the controlled timer cannot
-execute faithfully. `AdvanceStep` and `VirtualBudget` describe injected virtual time; `ObservationWindow`,
+Scripted `HttpFault.Delay` durations accept whole milliseconds only and are capped at
+`TimeSpan.FromMilliseconds(int.MaxValue)`. `Retry-After` deltas use integer whole-second wire values and are bounded
+by the HTTP delta-seconds limit; this header limit is separate from the controlled timer limit. Construction rejects
+fractional or otherwise unrepresentable header values instead of rounding them. `AdvanceStep` and `VirtualBudget` describe injected virtual time; `ObservationWindow`,
 `PendingObservation`, and `CleanupTimeout` are millisecond-precision wall-clock watchdogs.
 
 `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while

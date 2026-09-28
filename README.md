@@ -24,7 +24,7 @@ The second command installs the optional `Microsoft.Extensions.Http.Resilience` 
 not a runtime dependency of the ResilienceSpec package. The third package is not transitively brought in by
 ResilienceSpec, but timing scenarios require the explicitly referenced supported `Microsoft.Extensions.TimeProvider.Testing`
 `10.10.0` package at test runtime. Other testing-package versions are unverified and are not admitted for timing
-evidence. The supported resilience integration range is `9.8.0` up to, but not including, `11.0.0`.
+evidence. The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
 
 ## Logical Call Contract
 
@@ -176,9 +176,9 @@ scenario.Report.ShouldRespectRetryAfter().ShouldHaveRetryDelay(TimeSpan.FromSeco
 ```
 
 The delta form is deterministic because the wait runs on the injected clock. The HTTP-date form is deliberately not
-supported; see [Timing Limitations](#timing-limitations).
-Scripted `Retry-After` values use whole-millisecond precision and must not exceed the maximum duration supported by the
-controlled timer (`TimeSpan.FromMilliseconds(int.MaxValue)`).
+supported; see [Timing Limitations](#timing-limitations). Scripted `Retry-After` values use the integer whole-second
+wire form, reject fractional and sub-second values, and are bounded by the HTTP delta-seconds limit. That wire limit is
+separate from the controlled timer's `TimeSpan.FromMilliseconds(int.MaxValue)` limit.
 
 ## Exceptions And Cancellation
 
@@ -371,13 +371,14 @@ services.AddHttpClient("orders")
     .AddStandardResilienceHandler();
 ```
 
-Supported and tested range: `Microsoft.Extensions.Http.Resilience` **9.8.0 and newer, below 11.0**. The repository's
-integration suite runs against the lowest tested release (9.8.0) and the current release (10.10.0) with
-`-p:ResilienceVersion=`. Both endpoints use `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`; other versions of
-that testing package are unverified and rejected by timing-provider admission. The implementation-neutral script,
-report, and assertion core does not reference `Microsoft.Extensions.Http.Resilience` or Polly. The shipping package
-intentionally references `Microsoft.Extensions.Http` for its factory adapter and `KeelMatrix.Telemetry`; Polly and
-`Microsoft.Extensions.Http.Resilience` remain outside its runtime dependency graph.
+The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+The repository's integration suite runs against both endpoints with `-p:ResilienceVersion=`. Both endpoints use
+`Microsoft.Extensions.TimeProvider.Testing` `10.10.0`; other versions of that testing package are unverified and
+rejected by timing-provider admission. The implementation-neutral script, report, and assertion core does not
+reference `Microsoft.Extensions.Http.Resilience` or Polly. The shipping package intentionally references
+`Microsoft.Extensions.Http` for its factory adapter and `KeelMatrix.Telemetry`; Polly and
+`Microsoft.Extensions.Http.Resilience` remain outside its runtime dependency graph. See
+[`docs/Compatibility.md`](docs/Compatibility.md) for the maintained contract.
 
 ## Configuration Inspection Versus Observable Behaviour
 

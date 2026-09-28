@@ -20,16 +20,31 @@ public sealed class HttpFaultTests
     }
 
     [Fact]
-    public void ResponseRejectsFractionalOrOutOfRangeRetryAfter()
+    public void ResponseRejectsFractionalSubSecondAndOutOfWireRangeRetryAfter()
     {
         Assert.Throws<ArgumentException>(() =>
             HttpFault.Response(HttpStatusCode.ServiceUnavailable, TimeSpan.FromTicks(1)));
         Assert.Throws<ArgumentException>(() =>
-            HttpFault.Response(HttpStatusCode.ServiceUnavailable, TimeSpan.FromMilliseconds(1.5)));
+            HttpFault.Response(HttpStatusCode.ServiceUnavailable, TimeSpan.FromMilliseconds(1)));
+        Assert.Throws<ArgumentException>(() =>
+            HttpFault.Response(HttpStatusCode.ServiceUnavailable, TimeSpan.FromMilliseconds(1_500)));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             HttpFault.Response(
                 HttpStatusCode.ServiceUnavailable,
-                TimeSpan.FromTicks((long)int.MaxValue * TimeSpan.TicksPerMillisecond + TimeSpan.TicksPerMillisecond)));
+                TimeSpan.FromSeconds((long)int.MaxValue + 1)));
+
+        HttpFault.Response(HttpStatusCode.ServiceUnavailable, TimeSpan.Zero);
+        HttpFault.Response(HttpStatusCode.ServiceUnavailable, TimeSpan.FromSeconds(int.MaxValue));
+    }
+
+    [Fact]
+    public void RetryAfterWireLimitIsSeparateFromTheControlledTimerLimit()
+    {
+        var wireValidValueAboveTimerLimit = TimeSpan.FromSeconds(2_148);
+
+        var fault = HttpFault.Response(HttpStatusCode.ServiceUnavailable, wireValidValueAboveTimerLimit);
+
+        Assert.Equal(wireValidValueAboveTimerLimit, fault.RetryAfter);
     }
 
     [Fact]

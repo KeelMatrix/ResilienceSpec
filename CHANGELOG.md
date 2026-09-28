@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ### Fixed
 
+- The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
 - Logical-call ownership now requires a positive opaque request association; fresh requests created by flowed handlers
   cannot consume another script step, while deliberate request clones remain supported when they preserve source options,
   including across deliberately suppressed execution-context flow.

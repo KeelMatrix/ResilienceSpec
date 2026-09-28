@@ -30,7 +30,7 @@ public enum HttpAttemptOutcome
 /// <param name="Method">The HTTP method of the attempt.</param>
 /// <param name="Outcome">The broad outcome of the attempt.</param>
 /// <param name="StatusCode">The scripted status code, when the attempt received a response.</param>
-/// <param name="RetryAfter">The scripted <c>Retry-After</c> value, when the response carried one.</param>
+/// <param name="RetryAfter">The canonical whole-second scripted <c>Retry-After</c> value, when the response carried one.</param>
 /// <param name="StartedAfter">
 /// The injected-clock time between the start of the scenario and this attempt, or <see langword="null"/> when no
 /// controllable clock was supplied.

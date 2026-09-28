@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using Microsoft.Extensions.Http.Resilience;
 using Xunit;
@@ -179,6 +180,39 @@ public sealed class StandardResilienceTests
             .ShouldRespectRetryAfter()
             .ShouldHaveRetryDelay(advertised)
             .ShouldHaveSettledAtVirtualTime(advertised);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(int.MaxValue)]
+    public async Task RetryAfterWireValuesRoundTripThroughTheRealHandlerChain(int seconds)
+    {
+        var clock = StandardResilienceChains.CreateClock();
+        var expected = TimeSpan.FromSeconds(seconds);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Response(HttpStatusCode.TooManyRequests, retryAfter: expected)),
+            clock);
+        using var chain = StandardResilienceChains.Create(
+            "orders",
+            scenario,
+            options =>
+            {
+                options.Retry.MaxRetryAttempts = 1;
+                options.Retry.DisableForUnsafeHttpMethods();
+            });
+        using var request = StandardResilienceChains.Request(HttpMethod.Post);
+
+        using var result = await scenario.SendAsync(chain.Client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.TooManyRequests);
+        var retryAfter = result.Response!.Headers.RetryAfter!;
+        Assert.Equal(expected, retryAfter.Delta);
+        Assert.Equal(seconds.ToString(CultureInfo.InvariantCulture), retryAfter.ToString());
+        using var parsed = new HttpResponseMessage();
+        Assert.True(parsed.Headers.TryAddWithoutValidation("Retry-After", retryAfter.ToString()));
+        Assert.Equal(expected, parsed.Headers.RetryAfter!.Delta);
     }
 
     [Fact]

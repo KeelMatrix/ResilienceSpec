@@ -1,0 +1,14 @@
+<Project>
+  <!--
+    Canonical source for the first-party Microsoft.Extensions.Http.Resilience integration contract.
+    Validation and documentation checks consume this list; do not duplicate an independently maintained range.
+  -->
+  <PropertyGroup>
+    <ResilienceDefaultVersion>10.10.0</ResilienceDefaultVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ResilienceVerifiedVersion Include="9.8.0" />
+    <ResilienceVerifiedVersion Include="10.10.0" />
+  </ItemGroup>
+</Project>
