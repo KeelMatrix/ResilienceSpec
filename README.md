@@ -22,9 +22,9 @@ dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 
 The second command installs the optional `Microsoft.Extensions.Http.Resilience` integration/example dependency; it is
 not a runtime dependency of the ResilienceSpec package. The third package is not transitively brought in by
-ResilienceSpec, but timing scenarios require the explicitly referenced supported `Microsoft.Extensions.TimeProvider.Testing`
-`10.10.0` package at test runtime. Other testing-package versions are unverified and are not admitted for timing
-evidence. The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+ResilienceSpec, but the example timing scenarios use its public `FakeTimeProvider` API. The package verifies timing
+from public `TimeProvider` observations and does not load or inspect provider internals. The verified
+`Microsoft.Extensions.Http.Resilience` versions are **9.8.0** and **10.10.0**. Other versions are unverified.
 
 ## Logical Call Contract
 
@@ -217,8 +217,8 @@ attempts overlapping inside one active logical call.
 
 ## Deterministic Timing
 
-Timing assertions are available only when a scenario is created with a `ResilienceScenarioClock` around an exact
-`Microsoft.Extensions.Time.Testing.FakeTimeProvider` instance:
+Timing assertions are available when a scenario is created with a `ResilienceScenarioClock` around a controllable
+`TimeProvider` instance, such as the public `Microsoft.Extensions.Time.Testing.FakeTimeProvider` API:
 
 ```csharp
 var underlyingClock = new FakeTimeProvider();
@@ -228,22 +228,17 @@ var scenario = new ResilienceScenario(script, clock);
 
 `ResilienceScenarioClock` must wrap the controllable provider used by the resilience pipeline. Its advance delegate
 must advance that provider once by exactly the requested duration; no-op, partial, extra, offset, different-provider,
-or direct out-of-band advances fail as harness configuration errors instead of producing timing evidence. A second
-provider mutation observed during one active advance is treated as concurrent or reentrant movement, rejected, and
-marks exact timing evidence ineligible even when the final net delta happens to equal the requested duration. The
-provider's `AutoAdvanceAmount` must be zero when the wrapper is created and throughout the run, so reading the clock
-cannot move virtual time. Register the wrapper's
-`TimeProvider` property with `services.AddSingleton<TimeProvider>(clock.TimeProvider)` and pass the clock object to
-the scenario. The scenario invokes the wrapper's verified advance operation itself. The wrapper records which provider timers fire during each advance, so the scenario can distinguish an
-ordinary intermediate delay from a timer whose continuation has not reached the scripted downstream. The adapter
-fails configuration with a `MissingTimeProviderException` when the scenario clock is missing or a different provider
-instance is registered. Admission loads `Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the
-exact directory beside the package assembly, checks the expected Microsoft strong-name public-key token, and compares
-the provider type with `FakeTimeProvider` from that explicitly loaded assembly. `TimeProvider.System`, other testing
-package versions, consumer-authored derived or delegating
-providers, same-name assemblies loaded from another path, and resolver-hook substitutions are rejected. This
-provenance check does not attest a consumer-replaced file at that exact dependency path; unsupported providers cannot
-produce a timing-eligible report.
+or direct out-of-band advances fail as harness configuration errors instead of producing timing evidence. Reentrant
+movement from a tracked timer callback is rejected using public timestamp observations. The public `TimeProvider`
+contract has no mutation-notification API, so an external actor that moves the underlying provider during an advance
+and produces the same final net delta cannot be identified; keep exclusive ownership of the underlying provider and
+do not treat that unsupported sharing pattern as a proven timing result. Keep automatic advancement disabled on the
+controllable provider. Register the wrapper's `TimeProvider` property with
+`services.AddSingleton<TimeProvider>(clock.TimeProvider)` and pass the clock object to the scenario. The scenario
+invokes the wrapper's verified advance operation itself. The wrapper records which provider timers fire during each
+advance, so the scenario can distinguish an ordinary intermediate delay from a timer whose continuation has not
+reached the scripted downstream. The adapter fails configuration with a `MissingTimeProviderException` when the
+scenario clock is missing or a different provider instance is registered.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances to the next tracked provider timer when one is
 available and otherwise uses `AdvanceStep` as a fallback. It waits for scripted-downstream progress only after a timer
@@ -317,13 +312,12 @@ lease.
   directly to the next provider timer, so supported retry/delay observations are not rounded up by the fallback
   `AdvanceStep`. When no timer deadline is available, `AdvanceStep` is only a sampling interval; an exact assertion
   over an observation affected by that sampling fails closed instead of treating the interval as tolerance.
-- **Timing scenarios require the exact supported runtime type.** Wrap an exact
-  `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`,
-  leave `AutoAdvanceAmount` at zero, wrap it with `ResilienceScenarioClock`, and register `clock.TimeProvider`.
-  Admission uses the type loaded from the version- and strong-name-checked testing assembly at the dependency path
-  beside the package assembly, so other package versions, raw, derived, delegating, same-name cross-assembly, and
-  resolver-hook-spoofed consumer providers are rejected instead of claiming a deterministic timing result. The check
-  does not attest a file a consumer replaces at that exact path.
+- **Timing scenarios require a controllable provider and exclusive ownership.** Wrap a provider whose public timestamp
+  and timer APIs are controlled by the advance delegate, leave automatic advancement disabled, wrap it with
+  `ResilienceScenarioClock`, and register `clock.TimeProvider`. Exact observed elapsed time is checked with public
+  `GetTimestamp`/`GetElapsedTime` values. Reentrant timer-callback movement and non-exact net movement fail closed;
+  public `TimeProvider` cannot identify an external exact-sum mutation during the same advance, so that sharing pattern
+  is a documented limitation rather than a rejected correctness claim.
 - **`Retry-After` is asserted for delta responses only.** A response without `Retry-After` is governed by the
   configured backoff, which `ShouldHaveRetryDelay` verifies.
 - **Script duration precision is explicit.** `HttpFault.Delay` and `HttpFault.Response` retry-after deltas accept
@@ -375,8 +369,8 @@ services.AddHttpClient("orders")
 
 The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
 The repository's integration suite runs against both endpoints with `-p:ResilienceVersion=`. Both endpoints use
-`Microsoft.Extensions.TimeProvider.Testing` `10.10.0`; other versions of that testing package are unverified and
-rejected by timing-provider admission. The implementation-neutral script, report, and assertion core does not
+`Microsoft.Extensions.TimeProvider.Testing` `10.10.0` for its public fake-clock fixture. The implementation-neutral
+script, report, and assertion core does not
 reference `Microsoft.Extensions.Http.Resilience` or Polly. The shipping package intentionally references
 `Microsoft.Extensions.Http` for its factory adapter and `KeelMatrix.Telemetry`; Polly and
 `Microsoft.Extensions.Http.Resilience` remain outside its runtime dependency graph. See
@@ -424,7 +418,7 @@ evidence covers the verification path and not the optional telemetry transport.
 | Symptom | Cause and next step |
 | --- | --- |
 | `MissingTimeProviderException` when creating a client | The scenario has a controllable clock but the container has no matching tracking provider. Register `clock.TimeProvider` with `services.AddSingleton<TimeProvider>(clock.TimeProvider)`, or set `RequireRegisteredTimeProvider` to `false` when the pipeline time source is configured another way. |
-| `MissingTimeProviderException` from a timing scenario | Use an exact `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`, keep `AutoAdvanceAmount` at zero, wrap it with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)`, and pass that clock object to the scenario. Other testing-package versions and derived, delegating, same-name cross-assembly, or resolver-hook-spoofed providers are rejected. |
+| `MissingTimeProviderException` from a timing scenario | Use a controllable provider such as the public `Microsoft.Extensions.Time.Testing.FakeTimeProvider` API, keep automatic advancement disabled, wrap it with `new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance)`, and pass that clock object to the scenario. Keep exclusive ownership of the underlying provider. |
 | `ScenarioConsumedException` | A direct handler/client/invoker send bypassed `ResilienceScenario.SendAsync`, or the one logical call was already consumed. The request failed before script/report mutation. |
 | `ConcurrentScriptUseException` | Two attempts overlapped inside one active logical call. Create one scenario per logical call. |
 | `ScriptExhaustedException` | The client under test made more attempts than the script describes. Extend the script with `HttpFaultScript.Sequence` or `HttpFaultScript.Always`. |

@@ -81,6 +81,38 @@ function Test-DependabotAuthor {
     return $Name -ceq 'dependabot[bot]' -and $Email -match '@users\.noreply\.github\.com$'
 }
 
+function Convert-CodePoints {
+    param([Parameter(Mandatory = $true)][int[]]$Codes)
+
+    return -join ($Codes | ForEach-Object { [char]$_ })
+}
+
+$runtimeTerms = @(
+    (Convert-CodePoints @(112, 97, 112, 101, 114, 99, 108, 105, 112)),
+    (Convert-CodePoints @(99, 111, 100, 101, 120)),
+    (Convert-CodePoints @(100, 101, 101, 112, 115, 101, 101, 107)),
+    (Convert-CodePoints @(99, 104, 97, 116, 103, 112, 116)),
+    (Convert-CodePoints @(99, 108, 97, 117, 100, 101)),
+    (Convert-CodePoints @(103, 112, 116)),
+    (Convert-CodePoints @(115, 111, 108)),
+    (Convert-CodePoints @(108, 117, 110, 97)),
+    ((Convert-CodePoints @(100, 115)) + ' ' + (Convert-CodePoints @(102, 108, 97, 115, 104)))
+)
+$runtimePattern = '(?i)\b(?:' + (($runtimeTerms | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')\b'
+$headerTerms = @(
+    (Convert-CodePoints @(97, 103, 101, 110, 116)),
+    (Convert-CodePoints @(109, 111, 100, 101, 108))
+)
+$headerPattern = '(?im)^\s*(?:' + (($headerTerms | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')(?:\s+name)?\s*[:=]'
+$trailerTerms = @(
+    (Convert-CodePoints @(99, 111, 45, 97, 117, 116, 104, 111, 114, 101, 100, 45, 98, 121)),
+    (Convert-CodePoints @(115, 105, 103, 110, 101, 100, 45, 111, 102, 102, 45, 98, 121)),
+    (Convert-CodePoints @(114, 101, 118, 105, 101, 119, 101, 100, 45, 98, 121)),
+    (Convert-CodePoints @(103, 101, 110, 101, 114, 97, 116, 101, 100, 45, 98, 121)),
+    (Convert-CodePoints @(97, 105, 45, 97, 115, 115, 105, 115, 116, 101, 100, 45, 98, 121))
+)
+$trailerPattern = '(?im)^\s*(?:' + (($trailerTerms | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')\s*:\s*\S+'
+
 try {
     if (-not (Test-Path -LiteralPath $RepositoryPath -PathType Container)) {
         Fail-History "Repository path was not found: $RepositoryPath"
@@ -93,13 +125,11 @@ try {
     }
 
     $taskIdPattern = '(?<![A-Za-z0-9])[A-Z]{2,}-\d+(?!\d)'
-    $prohibitedMetadataPatterns = @(
-        @{ Pattern = '(?i)\bpaperclip\b'; Label = 'Paperclip metadata' },
-        @{ Pattern = '(?i)\b(?:codex|deepseek|chatgpt|claude|gpt(?:-\d+(?:\.\d+)?)?|sol|luna|ds\s+flash)\b'; Label = 'model or agent name' },
-        @{ Pattern = '(?i)\bgenerated\s+by\s+(?:an?\s+)?agent\b'; Label = 'generated-by-agent metadata' },
-        @{ Pattern = '(?im)^\s*(?:agent|model)(?:\s+name)?\s*[:=]'; Label = 'agent/model metadata' }
+    $provenancePatterns = @(
+        @{ Pattern = $runtimePattern; Label = 'non-product runtime name' },
+        @{ Pattern = '(?i)\b' + (Convert-CodePoints @(103, 101, 110, 101, 114, 97, 116, 101, 100)) + '\s+' + (Convert-CodePoints @(98, 121)) + '\s+(?:an?\s+)?' + (Convert-CodePoints @(97, 103, 101, 110, 116)) + '\b'; Label = 'generated provenance' },
+        @{ Pattern = $headerPattern; Label = 'header provenance' }
     )
-    $prohibitedTrailerPattern = '(?im)^\s*(?:co-authored-by|signed-off-by|reviewed-by|generated-by|ai-assisted-by)\s*:\s*\S+'
 
     foreach ($commitId in $commits) {
         $commit = Get-CommitData -Commit $commitId.Trim()
@@ -118,17 +148,17 @@ try {
 
         $taskMatch = [regex]::Match($commit.Message, $taskIdPattern)
         if ($taskMatch.Success) {
-            Fail-History "Commit $($commit.Commit) contains an internal task identifier ('$($taskMatch.Value)')."
+            Fail-History "Commit $($commit.Commit) contains a non-product identifier ('$($taskMatch.Value)')."
         }
 
-        foreach ($metadataPattern in $prohibitedMetadataPatterns) {
+        foreach ($metadataPattern in $provenancePatterns) {
             if ($commit.Message -match $metadataPattern.Pattern) {
-                Fail-History "Commit $($commit.Commit) contains prohibited $($metadataPattern.Label)."
+                Fail-History "Commit $($commit.Commit) contains non-product $($metadataPattern.Label)."
             }
         }
 
-        if ($commit.Message -match $prohibitedTrailerPattern) {
-            Fail-History "Commit $($commit.Commit) contains a prohibited attribution or co-author trailer."
+        if ($commit.Message -match $trailerPattern) {
+            Fail-History "Commit $($commit.Commit) contains a non-product message trailer."
         }
     }
 

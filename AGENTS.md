@@ -41,8 +41,10 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   `Retry-After` value, and injected-clock timing only. Never record or echo URIs, query strings, headers, cookies,
   authorization values, bodies, or exception messages.
 - Timing assertions run on an injected clock only. Never introduce a wall-clock sleep, an elapsed-time tolerance, or a
-  silent fallback that makes a timing claim true. During one active advance, a concurrent or reentrant provider
-  mutation rejects the advance and invalidates exact timing evidence even when the final net delta is exact.
+  silent fallback that makes a timing claim true. Public timestamp evidence rejects non-exact movement and reentrant
+  timer-callback mutation. The public `TimeProvider` contract cannot identify an external exact-sum mutation during an
+  advance, so callers must keep exclusive ownership of the underlying provider and that sharing pattern is not a
+  proven timing result.
 - Scripted delays use whole-millisecond precision and reject values above the controlled timer's `int.MaxValue`
   millisecond limit. `Retry-After` uses integer whole-second HTTP wire values, rejects fractional or sub-second
   values, and keeps its HTTP delta-seconds limit separate from the timer limit; observation, pending, and cleanup

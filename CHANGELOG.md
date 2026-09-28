@@ -13,8 +13,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Linux validation now runs the same formatting, Release build, package-consumer, and required direct/transitive
   dependency gates as the other supported runners; the tag workflow also checks exact remote-main provenance and both
   verified integration endpoints before publication.
-- Release-facing authored surfaces now have an objective hygiene guard that excludes only its guard implementation and
-  negative fixtures from the process-language scan.
+- The documentation hygiene guard now scans every tracked authored text/source file, including its own scripts and
+  tests, with generated detection patterns and no exemption list.
 - Logical-call ownership now requires a positive opaque request association; fresh requests created by flowed handlers
   cannot consume another script step, while deliberate request clones remain supported when they preserve source options,
   including across deliberately suppressed execution-context flow.
@@ -39,21 +39,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   non-conforming authorship.
 - Exact retry-delay, attempt-duration, and settlement assertions now require equality on exact injected-clock evidence;
   fallback sampling is reported as unavailable exact evidence instead of acting as an implicit tolerance.
-- `ResilienceScenarioClock` now rejects testing-provider versions other than `10.10.0`, non-zero automatic advancement,
-  concurrent or reentrant provider movement during an active advance, other unexpected movement, and advance delegates
-  that do not move the admitted provider by exactly the requested duration.
+- `ResilienceScenarioClock` now uses only public `TimeProvider` observations, rejects non-exact movement and reentrant
+  timer-callback mutation, and documents that public APIs cannot identify an external exact-sum mutation during one
+  advance.
 - Observation-cutoff cleanup no longer supplies a virtual duration that can satisfy a per-attempt timeout assertion;
   genuinely completed earlier attempts remain independently assertable.
 - Native `HttpClient.Timeout` cancellation is classified as `Timeout`, while caller and unrelated cancellations remain
   distinct.
 - Direct scripted-handler use now rejects untracked time providers instead of presenting wall-clock timing as
   deterministic.
-- Timing scenarios now accept the `ResilienceScenarioClock` object and invoke its verified advance operation, so an
-  independently supplied provider or advance delegate cannot create timing evidence.
-- `ResilienceScenarioClock` admits only the `FakeTimeProvider` type loaded from the strong-name-token-checked
-  `Microsoft.Extensions.TimeProvider.Testing.dll` at the dependency path beside the package assembly. `TimeProvider.System`,
-  consumer-authored derived/delegating providers, same-name assemblies from another path, and resolver-hook substitutions
-  are rejected; a consumer-replaced file at that exact path is outside this provenance check.
+- Timing scenarios accept the `ResilienceScenarioClock` object and invoke its verified advance operation, which compares
+  public timestamp values and records timer progress without provider-internal reflection. `TimeProvider.System` remains
+  unsupported; callers must retain exclusive ownership of the controllable provider.
 - Standard validation runs the core and integration test projects sequentially, avoiding cross-project scheduler
   contention while preserving the bounded fail-closed timing watchdog.
 - Package validation pins the complete `.NET SDK 10.0.401` toolchain, produces byte-identical `.nupkg` and `.snupkg`
@@ -74,11 +71,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   "this unsafe request was not retried", final response or exception, and cancellation outcomes, with failures that
   print the observed timeline; pending observation cutoffs remain distinct from genuine request settlement.
 - Deterministic timing assertions for retry delays, `Retry-After` deltas, per-attempt timeouts, and total-request
-  timeouts, driven by the `FakeTimeProvider` type from the strong-name-token-checked testing assembly at the dependency
-  path beside the package assembly. Timing assertions are unavailable, and fail with `MissingTimeProviderException`,
-  when no supported fake clock is supplied. Consumer-authored derived, delegating, same-name cross-assembly, and
-  resolver-hook-spoofed providers cannot obtain timing eligibility; a consumer-replaced file at that exact path is outside
-  this provenance check.
+  timeouts, driven by public `TimeProvider` timestamp and timer APIs. Timing assertions are unavailable, and fail with
+  `MissingTimeProviderException`, when no controllable tracking clock is supplied. Non-exact movement and reentrant
+  timer-callback mutation fail closed; public APIs cannot identify an external exact-sum mutation during one advance,
+  so callers must keep exclusive ownership of the underlying provider.
 - A fail-closed virtual-time progress contract based on `ResilienceScenarioClock`: when a provider timer fires but its
   continuation does not reach the scripted downstream within the observation window, the scenario returns an honest
   pending observation instead of advancing past work that has not progressed.

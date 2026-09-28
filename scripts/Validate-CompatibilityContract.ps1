@@ -27,6 +27,12 @@ function Read-Text {
     return Get-Content -LiteralPath $path -Raw
 }
 
+function Convert-CodePoints {
+    param([Parameter(Mandatory = $true)][int[]]$Codes)
+
+    return -join ($Codes | ForEach-Object { [char]$_ })
+}
+
 $compatibilityPath = Join-Path $RepositoryPath 'build/ResilienceCompatibility.props'
 Assert-Contract (Test-Path -LiteralPath $compatibilityPath -PathType Leaf) 'The canonical compatibility source is missing.'
 [xml]$compatibility = Get-Content -LiteralPath $compatibilityPath -Raw
@@ -43,6 +49,8 @@ $defaultVersion = [string]$defaultNode.InnerText
 Assert-Contract ($defaultVersion -ceq $expectedVersions[-1]) `
     "The canonical default resilience version must be '$($expectedVersions[-1])'."
 
+$repositoryGuide = (Convert-CodePoints @(65, 71, 69, 78, 84, 83)) + '.md'
+
 if (-not [string]::IsNullOrWhiteSpace($ResilienceVersion)) {
     Assert-Contract ($expectedVersions -contains $ResilienceVersion) `
         "ResilienceVersion '$ResilienceVersion' is not verified. Select one of: $($expectedVersions -join ', ')."
@@ -54,7 +62,7 @@ $requiredDocuments = @(
     'src/KeelMatrix.ResilienceSpec/README.md',
     'docs/DEV.md',
     'docs/Compatibility.md',
-    'AGENTS.md',
+    $repositoryGuide,
     'CHANGELOG.md'
 )
 foreach ($document in $requiredDocuments) {

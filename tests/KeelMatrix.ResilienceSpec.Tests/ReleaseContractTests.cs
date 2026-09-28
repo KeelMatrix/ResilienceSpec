@@ -758,9 +758,15 @@ public sealed class ReleaseContractTests
             .Output.TrimEnd('\r', '\n').Split('\0', StringSplitOptions.RemoveEmptyEntries);
         foreach (var relativePath in files)
         {
+            var sourcePath = Path.Combine(repositoryRoot, relativePath);
+            if (!File.Exists(sourcePath))
+            {
+                continue;
+            }
+
             var destinationPath = Path.Combine(destination, relativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-            File.Copy(Path.Combine(repositoryRoot, relativePath), destinationPath, overwrite: true);
+            File.Copy(sourcePath, destinationPath, overwrite: true);
         }
     }
 

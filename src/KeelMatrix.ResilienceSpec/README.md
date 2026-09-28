@@ -19,9 +19,9 @@ dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 
 The `Microsoft.Extensions.Http.Resilience` package is an optional integration/example dependency and is not a runtime
 dependency of the ResilienceSpec package. `Microsoft.Extensions.TimeProvider.Testing` is not transitively brought in by
-ResilienceSpec, but timing scenarios require the explicitly referenced supported `10.10.0` package at test runtime.
-The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
-Other testing-package versions are unverified and are not admitted for timing evidence. See the
+ResilienceSpec; the example uses its public `FakeTimeProvider` API. The clock wrapper uses only public `TimeProvider`
+observations and does not load or inspect provider internals. The verified Microsoft.Extensions.Http.Resilience
+versions are **9.8.0** and **10.10.0**. Other versions are unverified. See the
 [repository compatibility contract](https://github.com/KeelMatrix/ResilienceSpec/blob/main/docs/Compatibility.md).
 
 ## Logical Call Contract
@@ -89,20 +89,14 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 
 - The package verifies behaviour; it does not add resilience, recommend retry values, or inspect Polly pipeline
   descriptors.
-- Timing assertions require a `ResilienceScenarioClock` around an exact
-  `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`.
-  Keep `AutoAdvanceAmount` at zero, register the wrapper's `TimeProvider` property in the client pipeline, and pass
-  the clock object to the scenario. The scenario invokes the wrapper's verified advance operation. The wrapper verifies that each advance moves the admitted
-  provider once by exactly the requested duration. A second provider mutation during one active advance is treated as
-  concurrent or reentrant movement and rejected, even when the final net delta is exact; direct or different-provider
-  movement is rejected as well. Without the
-  wrapper, timing scenarios fail with
-  `MissingTimeProviderException` instead of falling back to sleeps. The wrapper explicitly loads
-  `Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the dependency path beside the package
-  assembly, checks the expected Microsoft strong-name public-key token, and requires the provider type from that
-  assembly. It rejects other testing-package versions, `TimeProvider.System`, consumer-authored derived or delegating
-  providers, same-name assemblies loaded from another path, and resolver-hook substitutions. This provenance check
-  does not attest a consumer-replaced file at that exact dependency path.
+- Timing assertions require a `ResilienceScenarioClock` around a controllable `TimeProvider`, such as the public
+  `Microsoft.Extensions.Time.Testing.FakeTimeProvider` API. Keep automatic advancement disabled, register the
+  wrapper's `TimeProvider` property in the client pipeline, and pass the clock object to the scenario. The scenario
+  invokes the wrapper's verified advance operation, which compares public `GetTimestamp`/`GetElapsedTime` values and
+  rejects non-exact net movement. Reentrant movement from a tracked timer callback also fails closed. The public
+  `TimeProvider` contract cannot identify an external exact-sum mutation during the same advance, so keep exclusive
+  ownership of the underlying provider and treat that sharing pattern as a documented limitation. Without the wrapper,
+  timing scenarios fail with `MissingTimeProviderException` instead of falling back to sleeps.
 - `Retry-After` is supported in the delta-seconds form only. The HTTP-date form resolves against the wall clock while
   the wait runs on the injected clock, so it cannot be asserted deterministically and is deliberately not exposed.
 - Scripted delays use whole-millisecond precision and are capped at `TimeSpan.FromMilliseconds(int.MaxValue)`, matching

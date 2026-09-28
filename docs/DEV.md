@@ -132,19 +132,14 @@ dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:Res
 
 ## Deterministic timing contract
 
-Timing assertions require a `ResilienceScenarioClock` around an exact
-`Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0` used
-by the client pipeline. Other testing-package versions are unverified and rejected by admission. Keep
-`AutoAdvanceAmount` at zero, register `clock.TimeProvider`, and pass the clock object to the scenario. The scenario
-invokes the wrapper's verified advance operation itself. The wrapper verifies that its delegate moves the admitted
-provider once by exactly the requested duration. A second provider mutation observed during one active advance is
-treated as concurrent or reentrant movement and rejects the advance, even when the final net delta is exact; direct
-or other unexpected movement is rejected as well. Admission explicitly loads
-`Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the dependency path beside the package
-assembly, checks the expected Microsoft strong-name public-key token, and compares the provider type with the type from
-that assembly; `TimeProvider.System`, consumer-authored derived or delegating providers, same-name assemblies from
-another path, and resolver-hook substitutions are rejected. The check does not attest a consumer-replaced file at that
-exact path. The scenario advances directly to the next tracked provider timer when available and uses `AdvanceStep`
+Timing assertions require a `ResilienceScenarioClock` around a controllable `TimeProvider`, such as the public
+`Microsoft.Extensions.Time.Testing.FakeTimeProvider` API used by the integration fixtures. Keep automatic advancement
+disabled, register `clock.TimeProvider`, and pass the clock object to the scenario. The scenario invokes the wrapper's
+verified advance operation itself. The wrapper compares public `GetTimestamp`/`GetElapsedTime` values and rejects
+non-exact net movement; movement from a tracked timer callback is also rejected. The public `TimeProvider` contract
+cannot identify an external exact-sum mutation during the same advance, so callers must keep exclusive ownership of
+the underlying provider and must not treat that sharing pattern as proven timing evidence. `TimeProvider.System`
+remains unsupported. The scenario advances directly to the next tracked provider timer when available and uses `AdvanceStep`
 only when no timer deadline is available. Exact assertions compare injected-clock values for equality and reject the
 specific observation if fallback sampling affected it; `AdvanceStep` is not a tolerance. It waits for
 scripted-downstream progress only after a timer fires. A continuation that schedules another legitimate timer may reach
@@ -188,4 +183,4 @@ commit to equal the refreshed `origin/main` revision through `scripts/Validate-R
 formatting, Release build/tests, both verified integration endpoints, package smoke, and the required dependency audit
 before either publication step. A finalized changelog must retain exactly one `## [Unreleased]` heading with no
 non-whitespace content beneath it; release notes belong under the dated target version. The release-facing hygiene
-guard scans authored surfaces while excluding only its own guard implementation and negative fixtures.
+guard scans every tracked authored text/source file, including the guard scripts and their tests, without an exemption list.

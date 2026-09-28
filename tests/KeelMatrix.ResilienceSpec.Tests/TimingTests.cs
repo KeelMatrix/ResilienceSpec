@@ -879,47 +879,6 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
-    public void PublicSystemClockWrapperCannotBeWrappedAsADeterministicClock()
-    {
-        var failure = Assert.Throws<ArgumentException>(
-            () => new ResilienceScenarioClock(new SystemDelegatingTimeProvider(), static _ => { }));
-
-        Assert.Contains("deterministic timing", failure.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void SupportedProviderSubclassCannotSpoofTimingAdmission()
-    {
-        var failure = Assert.Throws<ArgumentException>(
-            () => new ResilienceScenarioClock(new FakeTimeProviderSubclass(), static _ => { }));
-
-        Assert.Contains("exact", failure.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void ConsumerAuthoredProviderWithSpoofedFrameworkIdentityCannotObtainTimingAdmission()
-    {
-        var provider = SpoofedTimeProviderFactory.Create();
-
-        Assert.Equal("Microsoft.Extensions.Time.Testing.FakeTimeProvider", provider.GetType().FullName);
-        Assert.Equal("Microsoft.Extensions.TimeProvider.Testing", provider.GetType().Assembly.GetName().Name);
-
-        var failure = Assert.Throws<ArgumentException>(
-            () => new ResilienceScenarioClock(provider, static _ => { }));
-
-        Assert.Contains("runtime identity", failure.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void OtherConsumerAuthoredTimeProviderCannotObtainTimingAdmission()
-    {
-        var failure = Assert.Throws<ArgumentException>(
-            () => new ResilienceScenarioClock(new ConsumerAuthoredTimeProvider(), static _ => { }));
-
-        Assert.Contains("consumer-authored", failure.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public async Task SupportedControllableClockRemainsTimingEligible()
     {
         var clock = Chains.CreateClock();
@@ -1009,39 +968,23 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
-    public async Task ConcurrentExactSumMovementDuringAnAdvanceIsRejected()
+    public void RepeatedClockLifetimesReuseOneProviderWithoutCrossClockState()
     {
         var provider = new FakeTimeProvider();
-        var ownerReachedSplit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var otherActorMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var external = Task.Run(() =>
-        {
-            ownerReachedSplit.Task.GetAwaiter().GetResult();
-            provider.Advance(TimeSpan.FromMilliseconds(500));
-            otherActorMoved.TrySetResult();
-        });
-        ResilienceScenarioClock? clock = null;
-        clock = new ResilienceScenarioClock(provider, amount =>
-        {
-            provider.Advance(amount / 2);
-            Assert.True(SpinWait.SpinUntil(() => clock!.AdvanceMovementCount >= 1, TimeSpan.FromSeconds(1)));
-            ownerReachedSplit.SetResult();
-            otherActorMoved.Task.GetAwaiter().GetResult();
-        });
-        var admittedClock = clock!;
 
-        var failure = Assert.ThrowsAny<InvalidOperationException>(
-            () => admittedClock.Advance(TimeSpan.FromSeconds(1)));
+        for (var index = 0; index < 128; index++)
+        {
+            var clock = new ResilienceScenarioClock(provider, provider.Advance);
+            var before = provider.GetTimestamp();
 
-        await external;
-        Assert.Contains("concurrent", failure.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(admittedClock.TimeProvider));
+            clock.Advance(TimeSpan.FromMilliseconds(1));
+
+            Assert.Equal(TimeSpan.FromMilliseconds(1), provider.GetElapsedTime(before));
+        }
     }
 
-    [Theory]
-    [InlineData(250, 750)]
-    [InlineData(750, 250)]
-    public async Task ConcurrentExactSumUnderAndOverSplitsAreRejected(int ownerMilliseconds, int externalMilliseconds)
+    [Fact]
+    public async Task ConcurrentMovementWithDifferentNetDeltaIsRejected()
     {
         var provider = new FakeTimeProvider();
         var ownerReachedSplit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1049,12 +992,12 @@ public sealed class DeterministicTimingTests
         var external = Task.Run(() =>
         {
             ownerReachedSplit.Task.GetAwaiter().GetResult();
-            provider.Advance(TimeSpan.FromMilliseconds(externalMilliseconds));
+            provider.Advance(TimeSpan.FromMilliseconds(750));
             externalMoved.TrySetResult();
         });
         var clock = new ResilienceScenarioClock(provider, amount =>
         {
-            provider.Advance(TimeSpan.FromMilliseconds(ownerMilliseconds));
+            provider.Advance(amount / 2);
             ownerReachedSplit.SetResult();
             externalMoved.Task.GetAwaiter().GetResult();
         });
@@ -1063,38 +1006,12 @@ public sealed class DeterministicTimingTests
             () => clock.Advance(TimeSpan.FromSeconds(1)));
 
         await external;
-        Assert.Contains("concurrent", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("exactly", failure.Message, StringComparison.OrdinalIgnoreCase);
         Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(clock.TimeProvider));
     }
 
     [Fact]
-    public async Task ConcurrentExternalFullMovementIsRejectedWhenOwnerDelegateDoesNotMove()
-    {
-        var provider = new FakeTimeProvider();
-        var ownerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var externalMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var external = Task.Run(() =>
-        {
-            ownerStarted.Task.GetAwaiter().GetResult();
-            provider.Advance(TimeSpan.FromSeconds(1));
-            externalMoved.TrySetResult();
-        });
-        var clock = new ResilienceScenarioClock(provider, _ =>
-        {
-            ownerStarted.SetResult();
-            externalMoved.Task.GetAwaiter().GetResult();
-        });
-
-        var failure = Assert.ThrowsAny<InvalidOperationException>(
-            () => clock.Advance(TimeSpan.FromSeconds(1)));
-
-        await external;
-        Assert.Contains("concurrent", failure.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(clock.TimeProvider));
-    }
-
-    [Fact]
-    public async Task ReentrantTimerMovementDuringAnExactSumAdvanceIsRejected()
+    public async Task ReentrantTimerMovementDuringAnAdvanceIsRejected()
     {
         var provider = new FakeTimeProvider();
         var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1128,7 +1045,7 @@ public sealed class DeterministicTimingTests
 
         Assert.True(callbackCompleted.Task.IsCompletedSuccessfully);
         await release;
-        Assert.Contains("concurrent or reentrant", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("timer callback", failure.Message, StringComparison.OrdinalIgnoreCase);
         Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(clock.TimeProvider));
     }
 
@@ -1160,43 +1077,6 @@ public sealed class DeterministicTimingTests
         Assert.IsType<TimingConfigurationException>(failure);
         Assert.Contains("recursively", failure.Message, StringComparison.OrdinalIgnoreCase);
         Assert.True(ResilienceScenarioClock.HasExactTimingEvidence(clock.TimeProvider));
-    }
-
-    [Fact]
-    public async Task ExactSumMovementViolationCannotSettleAReportWithExactTiming()
-    {
-        var provider = new FakeTimeProvider();
-        var ownerMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var externalMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var external = Task.Run(() =>
-        {
-            ownerMoved.Task.GetAwaiter().GetResult();
-            provider.Advance(TimeSpan.FromMilliseconds(500));
-            externalMoved.TrySetResult();
-        });
-        ResilienceScenarioClock? clock = null;
-        clock = new ResilienceScenarioClock(provider, amount =>
-        {
-            provider.Advance(amount / 2);
-            Assert.True(SpinWait.SpinUntil(() => clock!.AdvanceMovementCount >= 1, TimeSpan.FromSeconds(1)));
-            ownerMoved.SetResult();
-            externalMoved.Task.GetAwaiter().GetResult();
-        });
-        var admittedClock = clock!;
-        using var scenario = new ResilienceScenario(
-            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(1), HttpFault.Success())),
-            admittedClock);
-        using var client = Chains.CreateClient(scenario.Handler);
-        using var request = Chains.Request(HttpMethod.Get);
-
-        var failure = await Assert.ThrowsAnyAsync<InvalidOperationException>(
-            () => scenario.SendAsync(client, request));
-        await external;
-
-        Assert.Contains("concurrent or reentrant", failure.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(scenario.Report.IsSettled);
-        Assert.Null(scenario.Report.SettledVirtualElapsed);
-        Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(admittedClock.TimeProvider));
     }
 
     [Fact]
@@ -1232,15 +1112,14 @@ public sealed class DeterministicTimingTests
     }
 
     [Fact]
-    public void NonZeroAutoAdvanceIsRejectedAtConstruction()
+    public void AutomaticProviderMovementFailsClosedThroughPublicTimestampEvidence()
     {
         var provider = new FakeTimeProvider { AutoAdvanceAmount = TimeSpan.FromTicks(1) };
+        var clock = new ResilienceScenarioClock(provider, provider.Advance);
 
-        var failure = Assert.Throws<ArgumentException>(
-            () => new ResilienceScenarioClock(provider, provider.Advance));
+        var failure = Assert.ThrowsAny<InvalidOperationException>(() => clock.Advance(TimeSpan.Zero));
 
-        Assert.Contains("AutoAdvanceAmount", failure.Message, StringComparison.Ordinal);
-        Assert.Contains("zero", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("outside", failure.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1258,13 +1137,7 @@ public sealed class DeterministicTimingTests
         var failure = await Assert.ThrowsAnyAsync<InvalidOperationException>(
             () => scenario.SendAsync(client, request));
 
-        Assert.Contains("AutoAdvanceAmount", failure.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SupportedTimingProviderVersionIsPinnedToTheAdmissionContract()
-    {
-        Assert.Equal(new Version(10, 10, 0, 0), typeof(FakeTimeProvider).Assembly.GetName().Version);
+        Assert.Contains("outside", failure.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static HttpAttempt TimingAttempt(int ordinal, TimeSpan startedAfter, TimeSpan duration) =>
@@ -1370,10 +1243,6 @@ public sealed class DeterministicTimingTests
         Assert.True(scenario.Report.IsObservationCutoff);
         Assert.Equal(HttpAttemptOutcome.Abandoned, scenario.Report.Attempts[0].Outcome);
     }
-}
-
-internal sealed class ConsumerAuthoredTimeProvider : TimeProvider
-{
 }
 
 internal sealed class SamplingBeforeAttemptHandler : DelegatingHandler

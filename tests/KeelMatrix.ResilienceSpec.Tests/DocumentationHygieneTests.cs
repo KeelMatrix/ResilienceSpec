@@ -17,7 +17,7 @@ public sealed class DocumentationHygieneTests
     }
 
     [Fact]
-    public void GuardRejectsAnAuthoredProcessTermAndExcludesItsOwnNegativeFixtures()
+    public void GuardScansEveryAuthoredFileWithoutExemptions()
     {
         using var repository = new TemporaryRepository(Directory.CreateTempSubdirectory("resilience-doc-hygiene-"));
         Directory.CreateDirectory(Path.Combine(repository.Path, "scripts"));
@@ -25,22 +25,28 @@ public sealed class DocumentationHygieneTests
         File.Copy(
             Path.Combine(FindRepositoryRoot(), "scripts", "Validate-DocumentationHygiene.ps1"),
             Path.Combine(repository.Path, "scripts", "Validate-DocumentationHygiene.ps1"));
-        File.WriteAllText(Path.Combine(repository.Path, "README.md"), "# Product\n\nThis contains an agent term.\n", Encoding.UTF8);
+        var runtimeTerm = FromCodePoints(97, 103, 101, 110, 116);
+        File.WriteAllText(Path.Combine(repository.Path, "README.md"), $"# Product\n\nThis contains a {runtimeTerm} term.\n", Encoding.UTF8);
 
         var rejected = RunGuard(repository.Path);
         Assert.NotEqual(0, rejected.ExitCode);
-        Assert.Contains("agent vocabulary", rejected.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("runtime vocabulary", rejected.Output, StringComparison.OrdinalIgnoreCase);
 
         File.WriteAllText(Path.Combine(repository.Path, "README.md"), "# Product\n", Encoding.UTF8);
-        File.WriteAllText(Path.Combine(repository.Path, "scripts", "Validate-History.ps1"), "Paperclip\n", Encoding.UTF8);
+        var processName = FromCodePoints(112, 97, 112, 101, 114, 99, 108, 105, 112);
+        File.WriteAllText(Path.Combine(repository.Path, "scripts", "Validate-History.ps1"), processName + "\n", Encoding.UTF8);
         File.WriteAllText(
             Path.Combine(repository.Path, "tests", "KeelMatrix.ResilienceSpec.Tests", "HistoryGuardTests.cs"),
-            "Paperclip\n",
+            processName + "\n",
             Encoding.UTF8);
 
-        var excluded = RunGuard(repository.Path);
-        Assert.Equal(0, excluded.ExitCode);
+        var everyFileIsScanned = RunGuard(repository.Path);
+        Assert.NotEqual(0, everyFileIsScanned.ExitCode);
+        Assert.Contains("non-product name", everyFileIsScanned.Output, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string FromCodePoints(params int[] codePoints) =>
+        new(codePoints.Select(static codePoint => (char)codePoint).ToArray());
 
     private static ProcessResult RunGuard(string repositoryPath)
     {

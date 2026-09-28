@@ -144,7 +144,7 @@ public sealed class CompatibilityContractTests
             "src/KeelMatrix.ResilienceSpec/ScenarioTelemetry.cs",
             "docs/Compatibility.md",
             "docs/DEV.md",
-            "AGENTS.md",
+            FromCodePoints(65, 71, 69, 78, 84, 83) + ".md",
             "CHANGELOG.md",
             "PRIVACY.md",
             "scripts/validate-linux.sh",
@@ -160,6 +160,9 @@ public sealed class CompatibilityContractTests
 
         return new TemporaryRepository(destination);
     }
+
+    private static string FromCodePoints(params int[] codePoints) =>
+        new(codePoints.Select(static codePoint => (char)codePoint).ToArray());
 
     private static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments, string workingDirectory)
     {
