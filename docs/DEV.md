@@ -50,10 +50,25 @@ The gate performs, in order: reachable-history hygiene, restore from `NuGet.conf
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
 restores the shipping package from its own temporary local feed.
 
-The documentation hygiene step scans every tracked relative path and file name, then classifies each file by content. It
-checks authored text regardless of extension or location, decodes NUL-rich UTF-8 plus BOM-aware and bounded BOM-less
-UTF 16/UTF 32 text before scanning it, excludes only content-recognized binary data, and fails closed when a tracked file
-cannot be read or classified.
+The documentation hygiene contract is defined here. The step scans every tracked relative path and file name, then applies
+strict decoding and content validation rather than guessing from an extension, a magic prefix, a NUL, or a byte count. It
+attempts UTF-8 (including a UTF-8 BOM), ASCII, BOM-aware UTF 16 LE/BE and UTF 32 LE/BE, and bounded BOM-less UTF 16/UTF 32
+candidates. Every successful text decode is scanned, including NUL-rich text and every supported encoding that succeeds.
+
+Undecidable content is never silently excluded. The only binary exception is a tracked path listed in
+`scripts/DocumentationBinaryManifest.json`; the listed format must have a full structural validator. The current manifest
+declares only the repository-root `icon.png` as PNG. PNG validation checks the signature, chunk bounds and types, CRCs,
+`IHDR` values, palette rules, contiguous image data, terminal `IEND`, and a valid compressed image-data stream.
+
+| Content state | Guard decision |
+| --- | --- |
+| One or more supported strict decoders succeed | Scan every successful decoded text; any prohibited term fails the guard. |
+| No decoder succeeds and the tracked path is not in the manifest | Fail closed; the file is not skipped. |
+| No decoder succeeds and the path is declared | Run the format validator; skip only after complete validation succeeds. |
+| A declared asset is malformed, truncated, has invalid structure, or has invalid content checks | Fail closed. |
+
+The manifest is the only binary allowlist. Adding another binary format requires a repository-owned entry and a complete
+validator before the guard may exclude it.
 
 ## Linux validation
 

@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text;
 using Xunit;
 
@@ -135,7 +137,7 @@ public sealed class DocumentationHygieneTests
     }
 
     [Fact]
-    public void LegitimateGeneratedFixtureWorkflowEncodingsAndBinaryPass()
+    public void LegitimateGeneratedFixtureWorkflowEncodingsAndDeclaredBinaryPass()
     {
         using var repository = CreateRepository();
         var safe = "Product fixture content.\n";
@@ -144,14 +146,115 @@ public sealed class DocumentationHygieneTests
         WriteText(repository.Path, "fixtures/odd name/[payload].toml", safe, new UnicodeEncoding(false, true));
         WriteText(repository.Path, "fixtures/ascii.csv", safe, new ASCIIEncoding());
         WriteText(repository.Path, "scripts/Validate-DocumentationHygiene.ps1", File.ReadAllText(Path.Combine(FindRepositoryRoot(), "scripts", "Validate-DocumentationHygiene.ps1")), new UTF8Encoding(false));
-        File.WriteAllBytes(Path.Combine(repository.Path, "fixtures", "binary.data"), new byte[] { 0x00, 0x01, 0xFF, 0x7F });
-        WriteBytes(repository.Path, "fixtures/binary.png", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, .. new UTF8Encoding(false).GetBytes(FromCodePoints(97, 103, 101, 110, 116))]);
+        WriteBytes(repository.Path, "fixtures/valid.data", CreateValidPng());
+        WriteBinaryManifest(repository.Path, "fixtures/valid.data");
         AddAll(repository.Path);
 
         var result = RunGuard(repository.Path);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Documentation hygiene passed", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeclaredBinaryPathStillScansSuccessfulTextDecodes()
+    {
+        using var repository = CreateRepository();
+        var runtimeTerm = FromCodePoints(97, 103, 101, 110, 116);
+        WriteText(repository.Path, "fixtures/declared.data", $"Product {runtimeTerm}\n", new UTF8Encoding(false));
+        WriteBinaryManifest(repository.Path, "fixtures/declared.data");
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("fixtures/declared.data", result.Output, StringComparison.Ordinal);
+        Assert.Contains("runtime vocabulary", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [MemberData(nameof(SpoofedBinaryPayloads))]
+    public void SpoofedBinaryPayloadsFailClosed(string relativePath, byte[] bytes)
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, relativePath, bytes);
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(relativePath, result.Output, StringComparison.Ordinal);
+        Assert.True(
+            result.Output.Contains("could not decode", StringComparison.OrdinalIgnoreCase) ||
+            result.Output.Contains("runtime vocabulary", StringComparison.OrdinalIgnoreCase),
+            result.Output);
+    }
+
+    public static IEnumerable<object[]> SpoofedBinaryPayloads()
+    {
+        var runtimeTerm = FromCodePoints(97, 103, 101, 110, 116);
+        var payload = new UTF8Encoding(false).GetBytes($"\n{runtimeTerm}\n");
+        var signatures = new (string Name, byte[] Bytes)[]
+        {
+            ("png", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+            ("jpeg", [0xFF, 0xD8, 0xFF]),
+            ("gzip", [0x1F, 0x8B]),
+            ("pdf", [0x25, 0x50, 0x44, 0x46]),
+            ("zip", [0x50, 0x4B, 0x03, 0x04]),
+        };
+
+        foreach (var signature in signatures)
+        {
+            yield return new object[] { $"fixtures/spoofed-{signature.Name}-after", Combine(signature.Bytes, payload) };
+            yield return new object[] { $"fixtures/spoofed-{signature.Name}-before", Combine(payload, signature.Bytes) };
+        }
+
+        yield return new object[] { "fixtures/invalid-utf8-controls", Combine([0xFF, 0x01], payload) };
+        yield return new object[] { "fixtures/invalid-utf8-controls-after", Combine(payload, [0xFF, 0x01]) };
+        yield return new object[] { "fixtures/nul-before", Combine([0x00], payload) };
+        yield return new object[] { "fixtures/nul-after", Combine(payload, [0x00]) };
+        yield return new object[] { "fixtures/mixed-control-nul", Combine([0x01, 0x00], payload, [0x00, 0x1F]) };
+        yield return new object[] { "docs/payload.xml", payload };
+        yield return new object[] { ".fixture", payload };
+        yield return new object[] { "fixtures/generated/payload", payload };
+        yield return new object[] { ".github/workflows/payload.yml", payload };
+        yield return new object[] { "fixtures/odd name/[payload]", payload };
+
+        yield return new object[] { "fixtures/utf16-le", new UnicodeEncoding(false, false).GetBytes(runtimeTerm) };
+        yield return new object[] { "fixtures/utf16-be", new UnicodeEncoding(true, false).GetBytes(runtimeTerm) };
+        yield return new object[] { "fixtures/utf32-le", new UTF32Encoding(false, false).GetBytes(runtimeTerm) };
+        yield return new object[] { "fixtures/utf32-be", new UTF32Encoding(true, false).GetBytes(runtimeTerm) };
+        yield return new object[] { "fixtures/utf16-le-bom", new UnicodeEncoding(false, true).GetBytes(runtimeTerm) };
+        yield return new object[] { "fixtures/utf16-be-bom", new UnicodeEncoding(true, true).GetBytes(runtimeTerm) };
+        yield return new object[] { "fixtures/utf32-le-bom", new UTF32Encoding(false, true).GetBytes(runtimeTerm) };
+        yield return new object[] { "fixtures/utf32-be-bom", new UTF32Encoding(true, true).GetBytes(runtimeTerm) };
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidDeclaredBinaryAssets))]
+    public void InvalidOrTruncatedDeclaredBinaryAssetsFailClosed(string relativePath, byte[] bytes)
+    {
+        using var repository = CreateRepository();
+        WriteBytes(repository.Path, relativePath, bytes);
+        WriteBinaryManifest(repository.Path, relativePath);
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(relativePath, result.Output, StringComparison.Ordinal);
+        Assert.Contains("rejected declared binary asset", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static IEnumerable<object[]> InvalidDeclaredBinaryAssets()
+    {
+        var valid = CreateValidPng();
+        yield return new object[] { "fixtures/truncated.data", valid[..^12] };
+        yield return new object[] { "fixtures/invalid-signature.data", Combine([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], [0x00]) };
+
+        var invalidCrc = valid.ToArray();
+        invalidCrc[invalidCrc.Length - 5] ^= 0x01;
+        yield return new object[] { "fixtures/invalid-crc.data", invalidCrc };
     }
 
     [Fact]
@@ -165,7 +268,7 @@ public sealed class DocumentationHygieneTests
         var result = RunGuard(repository.Path);
 
         Assert.NotEqual(0, result.ExitCode);
-        Assert.Contains("could not classify", result.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not decode", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FromCodePoints(params int[] codePoints) =>
@@ -180,6 +283,7 @@ public sealed class DocumentationHygieneTests
             Path.Combine(FindRepositoryRoot(), "scripts", "Validate-DocumentationHygiene.ps1"),
             Path.Combine(directory.FullName, "scripts", "Validate-DocumentationHygiene.ps1"));
         WriteText(directory.FullName, "README.md", "# Product\n", new UTF8Encoding(false));
+        WriteBinaryManifest(directory.FullName);
         InitializeGit(directory.FullName);
         AddAll(directory.FullName);
         return new TemporaryRepository(directory);
@@ -198,6 +302,62 @@ public sealed class DocumentationHygieneTests
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, bytes);
     }
+
+    private static void WriteBinaryManifest(string repositoryPath, params string[] paths)
+    {
+        var assets = string.Join(",\n", paths.Select(path => $"    {{\"path\": \"{path}\", \"format\": \"png\"}}"));
+        WriteText(repositoryPath, "scripts/DocumentationBinaryManifest.json", $"{{\n  \"version\": 1,\n  \"assets\": [\n{assets}\n  ]\n}}\n", new UTF8Encoding(false));
+    }
+
+    private static byte[] CreateValidPng()
+    {
+        using var output = new MemoryStream();
+        output.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        WritePngChunk(output, "IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
+
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionMode.Compress, leaveOpen: true))
+        {
+            zlib.Write([0, 0, 0, 0, 0]);
+        }
+
+        WritePngChunk(output, "IDAT", compressed.ToArray());
+        WritePngChunk(output, "IEND", []);
+        return output.ToArray();
+    }
+
+    private static void WritePngChunk(Stream output, string type, byte[] data)
+    {
+        var typeBytes = Encoding.ASCII.GetBytes(type);
+        var length = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(length, (uint)data.Length);
+        output.Write(length);
+        output.Write(typeBytes);
+        output.Write(data);
+
+        var crcInput = Combine(typeBytes, data);
+        var crc = ComputeCrc32(crcInput);
+        var crcBytes = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(crcBytes, crc);
+        output.Write(crcBytes);
+    }
+
+    private static uint ComputeCrc32(byte[] bytes)
+    {
+        uint crc = 0xFFFFFFFF;
+        foreach (var value in bytes)
+        {
+            crc ^= value;
+            for (var bit = 0; bit < 8; bit++)
+            {
+                crc = (crc & 1) == 0 ? crc >> 1 : (crc >> 1) ^ 0xEDB88320;
+            }
+        }
+
+        return crc ^ 0xFFFFFFFF;
+    }
+
+    private static byte[] Combine(params byte[][] parts) => parts.SelectMany(static part => part).ToArray();
 
     private static void InitializeGit(string repositoryPath)
     {

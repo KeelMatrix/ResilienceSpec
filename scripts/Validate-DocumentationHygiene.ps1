@@ -24,48 +24,6 @@ function Get-AuthoredFiles {
     )
 }
 
-function Test-BytePrefix {
-    param(
-        [Parameter(Mandatory = $true)][byte[]]$Bytes,
-        [Parameter(Mandatory = $true)][byte[]]$Signature
-    )
-
-    if ($Bytes.Length -lt $Signature.Length) {
-        return $false
-    }
-
-    for ($index = 0; $index -lt $Signature.Length; $index++) {
-        if ($Bytes[$index] -ne $Signature[$index]) {
-            return $false
-        }
-    }
-
-    return $true
-}
-
-function Test-RecognizedBinarySignature {
-    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
-
-    $signatures = @(
-        [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A),
-        [byte[]](0x00, 0x00, 0x01, 0x00),
-        [byte[]](0x00, 0x00, 0x02, 0x00),
-        [byte[]](0x25, 0x50, 0x44, 0x46),
-        [byte[]](0x50, 0x4B, 0x03, 0x04),
-        [byte[]](0x1F, 0x8B),
-        [byte[]](0xFF, 0xD8, 0xFF),
-        [byte[]](0x7F, 0x45, 0x4C, 0x46)
-    )
-
-    foreach ($signature in $signatures) {
-        if (Test-BytePrefix -Bytes $Bytes -Signature $signature) {
-            return $true
-        }
-    }
-
-    return $false
-}
-
 function Test-BomlessUtf16Pattern {
     param(
         [Parameter(Mandatory = $true)][byte[]]$Bytes,
@@ -130,19 +88,6 @@ function Test-BomlessUtf32Pattern {
         $nonZeroTextCount -ge [Math]::Max(1, [int][Math]::Ceiling($unitCount / 2.0))
 }
 
-function Test-NonTextByteCharacteristics {
-    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
-
-    $nonTextByteCount = 0
-    foreach ($byte in $Bytes) {
-        if ($byte -lt 0x09 -or ($byte -ge 0x0E -and $byte -le 0x1F) -or $byte -eq 0x7F -or $byte -eq 0xFF) {
-            $nonTextByteCount++
-        }
-    }
-
-    return $nonTextByteCount -ge 2
-}
-
 function Try-DecodeText {
     param(
         [Parameter(Mandatory = $true)][byte[]]$Bytes,
@@ -158,10 +103,268 @@ function Try-DecodeText {
     }
 }
 
+function Get-UInt32BigEndian {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Offset
+    )
+
+    [uint64]$value = 0
+    for ($index = 0; $index -lt 4; $index++) {
+        $value = (($value -shl 8) -bor [uint64]$Bytes[$Offset + $index]) -band [uint64]4294967295
+    }
+
+    return [uint32]$value
+}
+
+function Get-PngCrc32 {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Start,
+        [Parameter(Mandatory = $true)][int]$EndExclusive
+    )
+
+    [uint64[]]$table = New-Object 'uint64[]' 256
+    for ($tableIndex = 0; $tableIndex -lt 256; $tableIndex++) {
+        [uint64]$tableValue = [uint64]$tableIndex
+        for ($bit = 0; $bit -lt 8; $bit++) {
+            if (($tableValue -band 1) -ne 0) {
+                $tableValue = (($tableValue -shr 1) -bxor [uint64]3988292384) -band [uint64]4294967295
+            }
+            else {
+                $tableValue = ($tableValue -shr 1) -band [uint64]4294967295
+            }
+        }
+
+        $table[$tableIndex] = $tableValue
+    }
+
+    [uint64]$crc = 4294967295
+    for ($index = $Start; $index -lt $EndExclusive; $index++) {
+        [int]$tableIndex = [int](($crc -bxor [uint64]$Bytes[$index]) -band 0xFF)
+        $crc = (($crc -shr 8) -bxor $table[$tableIndex]) -band [uint64]4294967295
+    }
+
+    return [uint32](($crc -bxor [uint64]4294967295) -band [uint64]4294967295)
+}
+
+function Assert-PngStructure {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    $signature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    if ($Bytes.Length -lt ($signature.Length + 12)) {
+        throw "PNG content is truncated."
+    }
+
+    for ($index = 0; $index -lt $signature.Length; $index++) {
+        if ($Bytes[$index] -ne $signature[$index]) {
+            throw "PNG signature is invalid."
+        }
+    }
+
+    $offset = $signature.Length
+    $seenHeader = $false
+    $seenPalette = $false
+    $seenData = $false
+    $dataEnded = $false
+    $seenEnd = $false
+    $width = 0
+    $height = 0
+    $colorType = 0
+    $idatBytes = [Collections.Generic.List[byte]]::new()
+
+    while ($offset -lt $Bytes.Length) {
+        if (($Bytes.Length - $offset) -lt 12) {
+            throw "PNG chunk header is truncated."
+        }
+
+        [uint32]$chunkLength = Get-UInt32BigEndian -Bytes $Bytes -Offset $offset
+        $remainingAfterHeader = $Bytes.Length - $offset - 12
+        if ($chunkLength -gt [uint32]$remainingAfterHeader) {
+            throw "PNG chunk length exceeds the remaining content."
+        }
+
+        $typeOffset = $offset + 4
+        $dataOffset = $offset + 8
+        $crcOffset = $dataOffset + [int]$chunkLength
+        $typeBytes = $Bytes[$typeOffset..($typeOffset + 3)]
+        foreach ($typeByte in $typeBytes) {
+            if (($typeByte -lt 0x41 -or $typeByte -gt 0x5A) -and ($typeByte -lt 0x61 -or $typeByte -gt 0x7A)) {
+                throw "PNG chunk type is invalid."
+            }
+        }
+
+        if ($typeBytes[2] -ge 0x61 -and $typeBytes[2] -le 0x7A) {
+            throw "PNG chunk type uses a reserved bit."
+        }
+
+        $expectedCrc = Get-PngCrc32 -Bytes $Bytes -Start $typeOffset -EndExclusive $crcOffset
+        $actualCrc = Get-UInt32BigEndian -Bytes $Bytes -Offset $crcOffset
+        if ($expectedCrc -ne $actualCrc) {
+            throw "PNG chunk CRC is invalid."
+        }
+
+        $type = [Text.Encoding]::ASCII.GetString($typeBytes)
+        switch ($type) {
+            'IHDR' {
+                if ($seenHeader -or $offset -ne $signature.Length -or $chunkLength -ne 13) {
+                    throw "PNG header chunk is invalid."
+                }
+
+                [uint32]$width = Get-UInt32BigEndian -Bytes $Bytes -Offset $dataOffset
+                [uint32]$height = Get-UInt32BigEndian -Bytes $Bytes -Offset ($dataOffset + 4)
+                $bitDepth = $Bytes[$dataOffset + 8]
+                $colorType = $Bytes[$dataOffset + 9]
+                if ($width -eq 0 -or $height -eq 0 -or $Bytes[$dataOffset + 10] -ne 0 -or $Bytes[$dataOffset + 11] -ne 0) {
+                    throw "PNG image header values are invalid."
+                }
+
+                $validBitDepth = switch ($colorType) {
+                    0 { $bitDepth -in @(1, 2, 4, 8, 16) }
+                    2 { $bitDepth -in @(8, 16) }
+                    3 { $bitDepth -in @(1, 2, 4, 8) }
+                    4 { $bitDepth -in @(8, 16) }
+                    6 { $bitDepth -in @(8, 16) }
+                    default { $false }
+                }
+                if (-not $validBitDepth) {
+                    throw "PNG color type and bit depth are invalid."
+                }
+
+                if ($Bytes[$dataOffset + 12] -notin @(0, 1)) {
+                    throw "PNG interlace method is invalid."
+                }
+
+                $seenHeader = $true
+            }
+            'PLTE' {
+                if (-not $seenHeader -or $seenPalette -or $dataEnded -or $chunkLength -lt 3 -or ($chunkLength % 3) -ne 0 -or $chunkLength -gt 768) {
+                    throw "PNG palette chunk is invalid."
+                }
+
+                $seenPalette = $true
+            }
+            'IDAT' {
+                if (-not $seenHeader -or $dataEnded -or $chunkLength -eq 0) {
+                    throw "PNG image-data chunk is invalid."
+                }
+
+                $seenData = $true
+                for ($dataIndex = 0; $dataIndex -lt [int]$chunkLength; $dataIndex++) {
+                    $idatBytes.Add($Bytes[$dataOffset + $dataIndex])
+                }
+            }
+            'IEND' {
+                if (-not $seenHeader -or -not $seenData -or $chunkLength -ne 0 -or $seenEnd) {
+                    throw "PNG end chunk is invalid."
+                }
+
+                $seenEnd = $true
+                $offset += 12
+                if ($offset -ne $Bytes.Length) {
+                    throw "PNG content exists after the end chunk."
+                }
+
+                break
+            }
+            default {
+                if ($typeBytes[0] -ge 0x41 -and $typeBytes[0] -le 0x5A) {
+                    throw "PNG contains an unknown critical chunk."
+                }
+
+                if ($seenEnd) {
+                    throw "PNG contains a chunk after the end chunk."
+                }
+            }
+        }
+
+        $offset += 12 + [int]$chunkLength
+        if ($type -eq 'IDAT') {
+            $dataEnded = $false
+        }
+        elseif ($seenData) {
+            $dataEnded = $true
+        }
+    }
+
+    if (-not $seenEnd -or -not $seenHeader -or -not $seenData) {
+        throw "PNG content is incomplete."
+    }
+
+    if (($colorType -eq 3 -and -not $seenPalette) -or ($colorType -in @(0, 4) -and $seenPalette)) {
+        throw "PNG palette usage is invalid for the image color type."
+    }
+
+    try {
+        $compressed = [IO.MemoryStream]::new($idatBytes.ToArray(), $false)
+        $decompressed = [IO.MemoryStream]::new()
+        $zlib = [IO.Compression.ZLibStream]::new($compressed, [IO.Compression.CompressionMode]::Decompress)
+        $zlib.CopyTo($decompressed)
+        $zlib.Dispose()
+        $compressed.Dispose()
+        $decompressed.Dispose()
+    }
+    catch {
+        throw "PNG image data is not a valid compressed stream."
+    }
+}
+
+function Read-BinaryManifest {
+    param([Parameter(Mandatory = $true)][string[]]$TrackedFiles)
+
+    $relativeManifestPath = 'scripts/DocumentationBinaryManifest.json'
+    if (-not ($TrackedFiles -contains $relativeManifestPath)) {
+        throw "Documentation binary manifest '$relativeManifestPath' is not tracked; refusing to skip binary content."
+    }
+
+    $manifestPath = Join-Path $RepositoryPath $relativeManifestPath.Replace('/', [IO.Path]::DirectorySeparatorChar)
+    try {
+        $document = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "Documentation binary manifest could not be parsed; refusing to skip binary content."
+    }
+
+    if ($null -eq $document -or $document.version -ne 1 -or $null -eq $document.assets) {
+        throw "Documentation binary manifest has an invalid schema; refusing to skip binary content."
+    }
+
+    $assets = @{}
+    foreach ($asset in @($document.assets)) {
+        if ($null -eq $asset -or -not ($asset.PSObject.Properties.Name -contains 'path') -or -not ($asset.PSObject.Properties.Name -contains 'format')) {
+            throw "Documentation binary manifest contains an invalid asset entry; refusing to skip binary content."
+        }
+
+        $relativePath = ([string]$asset.path).Replace('\', '/')
+        $segments = $relativePath.Split('/')
+        $hasUnsafeSegment = @($segments | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' }).Count -gt 0
+        if ([string]::IsNullOrWhiteSpace($relativePath) -or [IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '^[A-Za-z]:/' -or $hasUnsafeSegment) {
+            throw "Documentation binary manifest contains an unsafe path; refusing to skip binary content."
+        }
+
+        if ($assets.ContainsKey($relativePath) -or -not ($TrackedFiles -contains $relativePath)) {
+            throw "Documentation binary manifest contains a duplicate or untracked path; refusing to skip binary content."
+        }
+
+        $format = ([string]$asset.format).ToLowerInvariant()
+        if ($format -ne 'png') {
+            throw "Documentation binary manifest contains an unsupported format; refusing to skip binary content."
+        }
+
+        $assets[$relativePath] = $format
+    }
+
+    return $assets
+}
+
 function Read-AuthoredText {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$RelativePath
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $true)][hashtable]$BinaryManifest
     )
 
     try {
@@ -176,65 +379,57 @@ function Read-AuthoredText {
     }
 
     $candidates = [Collections.Generic.List[string]]::new()
-    $bomDetected = $false
-    $offset = 0
-    $encoding = $null
+    $utf8Offset = 0
+    $hasUtf16Bom = $false
+    $hasUtf32Bom = $false
     if ($bytes.Length -ge 4 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0x00 -and $bytes[3] -eq 0x00) {
-        $encoding = [Text.UTF32Encoding]::new($false, $false, $true)
-        $offset = 4
-        $bomDetected = $true
+        $hasUtf32Bom = $true
+        $text = Try-DecodeText -Bytes $bytes -Encoding ([Text.UTF32Encoding]::new($false, $false, $true)) -Offset 4
+        if ($null -ne $text) { $candidates.Add($text) }
     }
     elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0x00 -and $bytes[1] -eq 0x00 -and $bytes[2] -eq 0xFE -and $bytes[3] -eq 0xFF) {
-        $encoding = [Text.UTF32Encoding]::new($true, $false, $true)
-        $offset = 4
-        $bomDetected = $true
+        $hasUtf32Bom = $true
+        $text = Try-DecodeText -Bytes $bytes -Encoding ([Text.UTF32Encoding]::new($true, $false, $true)) -Offset 4
+        if ($null -ne $text) { $candidates.Add($text) }
     }
     elseif ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-        $encoding = [Text.UTF8Encoding]::new($false, $true)
-        $offset = 3
-        $bomDetected = $true
+        $utf8Offset = 3
     }
     elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
-        $encoding = [Text.UnicodeEncoding]::new($false, $false, $true)
-        $offset = 2
-        $bomDetected = $true
+        $hasUtf16Bom = $true
+        $text = Try-DecodeText -Bytes $bytes -Encoding ([Text.UnicodeEncoding]::new($false, $false, $true)) -Offset 2
+        if ($null -ne $text) { $candidates.Add($text) }
     }
     elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
-        $encoding = [Text.UnicodeEncoding]::new($true, $false, $true)
-        $offset = 2
-        $bomDetected = $true
+        $hasUtf16Bom = $true
+        $text = Try-DecodeText -Bytes $bytes -Encoding ([Text.UnicodeEncoding]::new($true, $false, $true)) -Offset 2
+        if ($null -ne $text) { $candidates.Add($text) }
     }
 
-    if ($bomDetected) {
-        $text = Try-DecodeText -Bytes $bytes -Encoding $encoding -Offset $offset
-        if ($null -eq $text) {
-            throw "Documentation hygiene could not classify tracked file '$RelativePath' as text or binary; refusing to skip it."
-        }
-
-        $candidates.Add($text)
-        return [pscustomobject]@{ IsBinary = $false; Texts = $candidates.ToArray() }
-    }
-
-    $utf8 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UTF8Encoding]::new($false, $true)) -Offset 0
+    $utf8 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UTF8Encoding]::new($false, $true)) -Offset $utf8Offset
     if ($null -ne $utf8) {
         $candidates.Add($utf8)
     }
 
-    $heuristicDetected = $false
-    foreach ($bigEndian in @($false, $true)) {
-        if (Test-BomlessUtf16Pattern -Bytes $bytes -BigEndian $bigEndian) {
-            $heuristicDetected = $true
-            $utf16 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UnicodeEncoding]::new($bigEndian, $false, $true)) -Offset 0
-            if ($null -ne $utf16) {
-                $candidates.Add($utf16)
-            }
-        }
+    $ascii = Try-DecodeText -Bytes $bytes -Encoding ([Text.Encoding]::GetEncoding(20127, [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)) -Offset 0
+    if ($null -ne $ascii) {
+        $candidates.Add($ascii)
+    }
 
-        if (Test-BomlessUtf32Pattern -Bytes $bytes -BigEndian $bigEndian) {
-            $heuristicDetected = $true
-            $utf32 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UTF32Encoding]::new($bigEndian, $false, $true)) -Offset 0
-            if ($null -ne $utf32) {
-                $candidates.Add($utf32)
+    if (-not $hasUtf16Bom -and -not $hasUtf32Bom) {
+        foreach ($bigEndian in @($false, $true)) {
+            if (Test-BomlessUtf16Pattern -Bytes $bytes -BigEndian $bigEndian) {
+                $utf16 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UnicodeEncoding]::new($bigEndian, $false, $true)) -Offset 0
+                if ($null -ne $utf16) {
+                    $candidates.Add($utf16)
+                }
+            }
+
+            if (Test-BomlessUtf32Pattern -Bytes $bytes -BigEndian $bigEndian) {
+                $utf32 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UTF32Encoding]::new($bigEndian, $false, $true)) -Offset 0
+                if ($null -ne $utf32) {
+                    $candidates.Add($utf32)
+                }
             }
         }
     }
@@ -243,17 +438,21 @@ function Read-AuthoredText {
         return [pscustomobject]@{ IsBinary = $false; Texts = $candidates.ToArray() }
     }
 
-    if ($heuristicDetected) {
-        throw "Documentation hygiene could not classify tracked file '$RelativePath' as text or binary; refusing to skip it."
-    }
+    if ($BinaryManifest.ContainsKey($RelativePath)) {
+        try {
+            switch ($BinaryManifest[$RelativePath]) {
+                'png' { Assert-PngStructure -Bytes $bytes -RelativePath $RelativePath }
+                default { throw "No validator exists for the declared format." }
+            }
+        }
+        catch {
+            throw "Documentation hygiene rejected declared binary asset '$RelativePath': $($_.Exception.Message)"
+        }
 
-    $recognizedBinary = Test-RecognizedBinarySignature -Bytes $bytes
-    $nonTextCharacteristics = Test-NonTextByteCharacteristics -Bytes $bytes
-    if ($recognizedBinary -or $nonTextCharacteristics) {
         return [pscustomobject]@{ IsBinary = $true; Texts = @() }
     }
 
-    throw "Documentation hygiene could not classify tracked file '$RelativePath' as text or binary; refusing to skip it."
+    throw "Documentation hygiene could not decode tracked file '$RelativePath' as supported text or validate it as a declared binary asset; refusing to skip it."
 }
 
 $processName = Convert-CodePoints @(112, 97, 112, 101, 114, 99, 108, 105, 112)
@@ -297,8 +496,10 @@ $forbiddenPatterns = @(
 )
 
 try {
+    $trackedFiles = @(Get-AuthoredFiles)
+    $binaryManifest = Read-BinaryManifest -TrackedFiles $trackedFiles
     $violations = [Collections.Generic.List[string]]::new()
-    foreach ($relative in Get-AuthoredFiles) {
+    foreach ($relative in $trackedFiles) {
         if ([string]::IsNullOrWhiteSpace($relative) -or $relative.StartsWith('.git/', [StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
@@ -314,7 +515,7 @@ try {
             }
         }
 
-        $classified = Read-AuthoredText -Path $path -RelativePath $relative
+        $classified = Read-AuthoredText -Path $path -RelativePath $relative -BinaryManifest $binaryManifest
         if ($classified.IsBinary) {
             continue
         }
