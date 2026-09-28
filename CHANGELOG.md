@@ -10,6 +10,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 ### Fixed
 
 - The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+- Linux validation now runs the same formatting, Release build, package-consumer, and required direct/transitive
+  dependency gates as the other supported runners; the tag workflow also checks exact remote-main provenance and both
+  verified integration endpoints before publication.
+- Release-facing authored surfaces now have an objective hygiene guard that excludes only its guard implementation and
+  negative fixtures from the process-language scan.
 - Logical-call ownership now requires a positive opaque request association; fresh requests created by flowed handlers
   cannot consume another script step, while deliberate request clones remain supported when they preserve source options,
   including across deliberately suppressed execution-context flow.
@@ -30,12 +35,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Release validation now parses exact invariant ISO calendar dates and shares the canonical stable-tag grammar with the
   release workflow.
 - Release validation now fails closed when a finalized tag leaves substantive content under `[Unreleased]`, and the
-  repository validation path checks reachable commit history for internal metadata and non-conforming authorship.
+  repository validation path checks reachable commit history for non-product provenance or authorship metadata and
+  non-conforming authorship.
 - Exact retry-delay, attempt-duration, and settlement assertions now require equality on exact injected-clock evidence;
   fallback sampling is reported as unavailable exact evidence instead of acting as an implicit tolerance.
 - `ResilienceScenarioClock` now rejects testing-provider versions other than `10.10.0`, non-zero automatic advancement,
-  unexpected provider movement, and advance delegates that do not move the admitted provider by exactly the requested
-  duration.
+  concurrent or reentrant provider movement during an active advance, other unexpected movement, and advance delegates
+  that do not move the admitted provider by exactly the requested duration.
 - Observation-cutoff cleanup no longer supplies a virtual duration that can satisfy a per-attempt timeout assertion;
   genuinely completed earlier attempts remain independently assertable.
 - Native `HttpClient.Timeout` cancellation is classified as `Timeout`, while caller and unrelated cancellations remain

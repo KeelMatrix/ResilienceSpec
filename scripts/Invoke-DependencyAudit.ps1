@@ -3,7 +3,9 @@ param(
     [ValidateSet('Required', 'Tolerant')]
     [string]$Mode = 'Required',
 
-    [string]$Solution = 'KeelMatrix.ResilienceSpec.slnx'
+    [string]$Solution = 'KeelMatrix.ResilienceSpec.slnx',
+
+    [string]$DotnetExecutable = 'dotnet'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,7 +47,7 @@ function Get-UnavailableMatch {
 
 try {
     $repo = Split-Path -Parent $PSScriptRoot
-    $auditOutput = (& dotnet list (Join-Path $repo $Solution) package --vulnerable --include-transitive 2>&1 | Out-String).TrimEnd()
+    $auditOutput = (& $DotnetExecutable list (Join-Path $repo $Solution) package --vulnerable --include-transitive 2>&1 | Out-String).TrimEnd()
     $auditExitCode = $LASTEXITCODE
     Write-Output $auditOutput
 

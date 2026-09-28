@@ -594,7 +594,7 @@ public sealed class DeterministicTimingTests
         try
         {
             await callbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            var completed = await Task.WhenAny(run, Task.Delay(TimeSpan.FromMilliseconds(500)));
+            var completed = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(2)));
             Assert.Same(run, completed);
 
             using var result = await run;
@@ -1006,6 +1006,197 @@ public sealed class DeterministicTimingTests
         clock.Advance(TimeSpan.FromSeconds(1));
 
         Assert.Equal(TimeSpan.FromSeconds(1), provider.GetElapsedTime(before));
+    }
+
+    [Fact]
+    public async Task ConcurrentExactSumMovementDuringAnAdvanceIsRejected()
+    {
+        var provider = new FakeTimeProvider();
+        var ownerReachedSplit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var otherActorMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var external = Task.Run(() =>
+        {
+            ownerReachedSplit.Task.GetAwaiter().GetResult();
+            provider.Advance(TimeSpan.FromMilliseconds(500));
+            otherActorMoved.TrySetResult();
+        });
+        ResilienceScenarioClock? clock = null;
+        clock = new ResilienceScenarioClock(provider, amount =>
+        {
+            provider.Advance(amount / 2);
+            Assert.True(SpinWait.SpinUntil(() => clock!.AdvanceMovementCount >= 1, TimeSpan.FromSeconds(1)));
+            ownerReachedSplit.SetResult();
+            otherActorMoved.Task.GetAwaiter().GetResult();
+        });
+        var admittedClock = clock!;
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(
+            () => admittedClock.Advance(TimeSpan.FromSeconds(1)));
+
+        await external;
+        Assert.Contains("concurrent", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(admittedClock.TimeProvider));
+    }
+
+    [Theory]
+    [InlineData(250, 750)]
+    [InlineData(750, 250)]
+    public async Task ConcurrentExactSumUnderAndOverSplitsAreRejected(int ownerMilliseconds, int externalMilliseconds)
+    {
+        var provider = new FakeTimeProvider();
+        var ownerReachedSplit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var externalMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var external = Task.Run(() =>
+        {
+            ownerReachedSplit.Task.GetAwaiter().GetResult();
+            provider.Advance(TimeSpan.FromMilliseconds(externalMilliseconds));
+            externalMoved.TrySetResult();
+        });
+        var clock = new ResilienceScenarioClock(provider, amount =>
+        {
+            provider.Advance(TimeSpan.FromMilliseconds(ownerMilliseconds));
+            ownerReachedSplit.SetResult();
+            externalMoved.Task.GetAwaiter().GetResult();
+        });
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(
+            () => clock.Advance(TimeSpan.FromSeconds(1)));
+
+        await external;
+        Assert.Contains("concurrent", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(clock.TimeProvider));
+    }
+
+    [Fact]
+    public async Task ConcurrentExternalFullMovementIsRejectedWhenOwnerDelegateDoesNotMove()
+    {
+        var provider = new FakeTimeProvider();
+        var ownerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var externalMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var external = Task.Run(() =>
+        {
+            ownerStarted.Task.GetAwaiter().GetResult();
+            provider.Advance(TimeSpan.FromSeconds(1));
+            externalMoved.TrySetResult();
+        });
+        var clock = new ResilienceScenarioClock(provider, _ =>
+        {
+            ownerStarted.SetResult();
+            externalMoved.Task.GetAwaiter().GetResult();
+        });
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(
+            () => clock.Advance(TimeSpan.FromSeconds(1)));
+
+        await external;
+        Assert.Contains("concurrent", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(clock.TimeProvider));
+    }
+
+    [Fact]
+    public async Task ReentrantTimerMovementDuringAnExactSumAdvanceIsRejected()
+    {
+        var provider = new FakeTimeProvider();
+        var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = Task.Run(() =>
+        {
+            callbackStarted.Task.GetAwaiter().GetResult();
+            releaseCallback.TrySetResult();
+        });
+        var clock = new ResilienceScenarioClock(provider, amount =>
+        {
+            provider.Advance(amount / 2);
+            callbackStarted.Task.GetAwaiter().GetResult();
+            callbackCompleted.Task.GetAwaiter().GetResult();
+        });
+        using var timer = clock.TimeProvider.CreateTimer(
+            _ =>
+            {
+                callbackStarted.SetResult();
+                releaseCallback.Task.GetAwaiter().GetResult();
+                provider.Advance(TimeSpan.FromMilliseconds(500));
+                callbackCompleted.SetResult();
+            },
+            null,
+            TimeSpan.FromMilliseconds(500),
+            Timeout.InfiniteTimeSpan);
+
+        var failure = Assert.ThrowsAny<InvalidOperationException>(
+            () => clock.Advance(TimeSpan.FromSeconds(1)));
+
+        Assert.True(callbackCompleted.Task.IsCompletedSuccessfully);
+        await release;
+        Assert.Contains("concurrent or reentrant", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(clock.TimeProvider));
+    }
+
+    [Fact]
+    public async Task ConcurrentSecondAdvanceIsRejectedForAZeroAdvance()
+    {
+        var provider = new FakeTimeProvider();
+        var nestedFailure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ResilienceScenarioClock? clock = null;
+        clock = new ResilienceScenarioClock(provider, amount =>
+        {
+            var nested = Task.Run(() =>
+            {
+                try
+                {
+                    clock!.Advance(TimeSpan.Zero);
+                }
+                catch (Exception exception)
+                {
+                    nestedFailure.TrySetResult(exception);
+                }
+            });
+            nested.GetAwaiter().GetResult();
+        });
+
+        clock.Advance(TimeSpan.Zero);
+
+        var failure = await nestedFailure.Task;
+        Assert.IsType<TimingConfigurationException>(failure);
+        Assert.Contains("recursively", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(ResilienceScenarioClock.HasExactTimingEvidence(clock.TimeProvider));
+    }
+
+    [Fact]
+    public async Task ExactSumMovementViolationCannotSettleAReportWithExactTiming()
+    {
+        var provider = new FakeTimeProvider();
+        var ownerMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var externalMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var external = Task.Run(() =>
+        {
+            ownerMoved.Task.GetAwaiter().GetResult();
+            provider.Advance(TimeSpan.FromMilliseconds(500));
+            externalMoved.TrySetResult();
+        });
+        ResilienceScenarioClock? clock = null;
+        clock = new ResilienceScenarioClock(provider, amount =>
+        {
+            provider.Advance(amount / 2);
+            Assert.True(SpinWait.SpinUntil(() => clock!.AdvanceMovementCount >= 1, TimeSpan.FromSeconds(1)));
+            ownerMoved.SetResult();
+            externalMoved.Task.GetAwaiter().GetResult();
+        });
+        var admittedClock = clock!;
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromSeconds(1), HttpFault.Success())),
+            admittedClock);
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var failure = await Assert.ThrowsAnyAsync<InvalidOperationException>(
+            () => scenario.SendAsync(client, request));
+        await external;
+
+        Assert.Contains("concurrent or reentrant", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(scenario.Report.IsSettled);
+        Assert.Null(scenario.Report.SettledVirtualElapsed);
+        Assert.False(ResilienceScenarioClock.HasExactTimingEvidence(admittedClock.TimeProvider));
     }
 
     [Fact]

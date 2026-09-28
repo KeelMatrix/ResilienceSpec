@@ -60,17 +60,15 @@ run:
 bash ./scripts/validate-linux.sh
 ```
 
-The script checks reachable history, restores `KeelMatrix.ResilienceSpec.slnx` with `NuGet.config`, runs the core and
-integration Release tests, then runs `scripts/Invoke-PackageSmoke.ps1` and `scripts/Run-Sample.ps1`. The package smoke includes pack, package
-inspection, and an isolated clean-consumer restore. Linux does not run the formatting gate or the dependency audit.
-Windows and macOS use `scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0`, which includes formatting, the same
-package smoke and sample stages, and the required dependency audit.
+The script delegates to `scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0`, so Linux executes the same
+reachable-history, compatibility, restore, formatting, Release build and test, package smoke, sample, and required
+dependency-audit gates as Windows and macOS. The package smoke includes pack, package inspection, and an isolated
+clean-consumer restore.
 
 ## Hosted CI status
 
 The repository contains `.github/workflows/validate.yml`, which runs on pushes to `main` and on manual dispatch with
-Windows, Ubuntu, and macOS hosted runners. Windows and macOS invoke Full validation against `10.10.0`; Linux runs its
-repository-controlled test, package-smoke, and sample path without the format or audit stages. Every runner then runs
+Windows, Ubuntu, and macOS hosted runners. Every runner invokes Full validation against `10.10.0` and then runs
 explicit integration jobs for both `9.8.0` and `10.10.0`. Only `net8.0` is exercised; a hosted result is evidence from
 the specific runner, not physical hardware.
 
@@ -138,8 +136,10 @@ Timing assertions require a `ResilienceScenarioClock` around an exact
 `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0` used
 by the client pipeline. Other testing-package versions are unverified and rejected by admission. Keep
 `AutoAdvanceAmount` at zero, register `clock.TimeProvider`, and pass the clock object to the scenario. The scenario
-invokes the wrapper's verified advance operation itself. The wrapper verifies that its delegate moves the admitted provider once by exactly the requested duration and detects
-direct or other unexpected provider movement. Admission explicitly loads
+invokes the wrapper's verified advance operation itself. The wrapper verifies that its delegate moves the admitted
+provider once by exactly the requested duration. A second provider mutation observed during one active advance is
+treated as concurrent or reentrant movement and rejects the advance, even when the final net delta is exact; direct
+or other unexpected movement is rejected as well. Admission explicitly loads
 `Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the dependency path beside the package
 assembly, checks the expected Microsoft strong-name public-key token, and compares the provider type with the type from
 that assembly; `TimeProvider.System`, consumer-authored derived or delegating providers, same-name assemblies from
@@ -172,8 +172,8 @@ the wait runs on the injected clock, so it is deliberately not exposed.
 ## Dependency audit evidence
 
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required` fails closed unless direct and transitive advisory data is
-available and every project reports no vulnerable packages from `https://api.nuget.org/v3/index.json`. Windows and
-macOS Full validation run this audit; Linux does not. Audit evidence is valid only for the exact candidate and hosted
+available and every project reports no vulnerable packages from `https://api.nuget.org/v3/index.json`. Full validation
+runs this audit on Windows, Linux, and macOS. Audit evidence is valid only for the exact candidate and hosted
 run that produced it, so use the current candidate's CI conclusion rather than a dated statement in this document.
 Treat a non-zero result as a release blocker. No release action is authorized by a passing audit.
 
@@ -183,7 +183,9 @@ Before a release: promote accepted `PublicAPI.Unshipped.txt` entries into `Publi
 `CHANGELOG.md` entry for the target version, and re-run the full gate on the resulting commit. Tagging, publishing,
 and repository visibility changes are separate, explicitly approved steps.
 
-The tag-time release backstop is `scripts/Validate-ReleaseContract.ps1`. A finalized changelog must retain exactly one
-`## [Unreleased]` heading with no non-whitespace content beneath it; release notes belong under the dated target
-version. `scripts/Validate-History.ps1` scans every commit reachable from the release revision and rejects internal
-task identifiers, orchestration/model metadata, prohibited attribution trailers, and non-conforming authorship.
+The tag-time release backstop is `scripts/Validate-ReleaseContract.ps1`. The release workflow also requires the tag
+commit to equal the refreshed `origin/main` revision through `scripts/Validate-ReleaseProvenance.ps1`, then runs
+formatting, Release build/tests, both verified integration endpoints, package smoke, and the required dependency audit
+before either publication step. A finalized changelog must retain exactly one `## [Unreleased]` heading with no
+non-whitespace content beneath it; release notes belong under the dated target version. The release-facing hygiene
+guard scans authored surfaces while excluding only its own guard implementation and negative fixtures.

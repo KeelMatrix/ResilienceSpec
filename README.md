@@ -228,7 +228,9 @@ var scenario = new ResilienceScenario(script, clock);
 
 `ResilienceScenarioClock` must wrap the controllable provider used by the resilience pipeline. Its advance delegate
 must advance that provider once by exactly the requested duration; no-op, partial, extra, offset, different-provider,
-or direct out-of-band advances fail as harness configuration errors instead of producing timing evidence. The
+or direct out-of-band advances fail as harness configuration errors instead of producing timing evidence. A second
+provider mutation observed during one active advance is treated as concurrent or reentrant movement, rejected, and
+marks exact timing evidence ineligible even when the final net delta happens to equal the requested duration. The
 provider's `AutoAdvanceAmount` must be zero when the wrapper is created and throughout the run, so reading the clock
 cannot move virtual time. Register the wrapper's
 `TimeProvider` property with `services.AddSingleton<TimeProvider>(clock.TimeProvider)` and pass the clock object to

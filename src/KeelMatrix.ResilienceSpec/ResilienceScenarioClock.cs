@@ -15,8 +15,10 @@ namespace KeelMatrix.ResilienceSpec;
 /// </para>
 /// <para>
 /// The wrapped provider must keep <c>AutoAdvanceAmount</c> at zero, and its advance operation must move that provider
-/// by exactly the requested duration and synchronously dispatch timers released by the advance. Movement outside that
-/// operation is rejected. The package admits only version 10.10.0.0 and the runtime <see cref="Type"/> identity loaded
+/// by exactly the requested duration and synchronously dispatch timers released by the advance. A concurrent or
+/// reentrant second provider mutation during one active advance is rejected even when the final net delta is exact;
+/// movement outside that operation is rejected as well. The package admits only version 10.10.0.0 and the runtime
+/// <see cref="Type"/> identity loaded
 /// from the <c>Microsoft.Extensions.TimeProvider.Testing.dll</c> file beside the package assembly, after checking the
 /// expected Microsoft strong-name public-key token. Derived, delegating, and name-spoofed consumer types are rejected
 /// because their assembly provenance is not that resolved dependency path; the check does not attest a file that a
@@ -93,7 +95,7 @@ public sealed class ResilienceScenarioClock
         var before = _controller.BeginAdvance(targetsKnownDeadline || amount == TimeSpan.Zero);
         try
         {
-            _advanceInner(amount);
+            _controller.RunAdvanceDelegate(() => _advanceInner(amount));
         }
         catch
         {
@@ -113,6 +115,7 @@ public sealed class ResilienceScenarioClock
     private const string SupportedControllableProviderAssemblyName = "Microsoft.Extensions.TimeProvider.Testing";
     private const string SupportedControllableProviderAssemblyFileName = "Microsoft.Extensions.TimeProvider.Testing.dll";
     private const string AutoAdvanceAmountPropertyName = "AutoAdvanceAmount";
+    private const string MovementNotificationEventName = "GateOpening";
     private static readonly byte[] SupportedControllableProviderPublicKeyToken =
         Convert.FromHexString("31BF3856AD364E35");
     private static readonly Version SupportedControllableProviderAssemblyVersion = new(10, 10, 0, 0);
@@ -121,6 +124,9 @@ public sealed class ResilienceScenarioClock
     private static readonly PropertyInfo? AutoAdvanceAmountProperty = SupportedControllableProviderType?.GetProperty(
         AutoAdvanceAmountPropertyName,
         BindingFlags.Instance | BindingFlags.Public);
+    private static readonly EventInfo? MovementNotificationEvent = SupportedControllableProviderType?.GetEvent(
+        MovementNotificationEventName,
+        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 
     private static bool IsSupportedControllableProvider(TimeProvider provider) =>
         SupportedControllableProviderType is { } supportedType && provider.GetType() == supportedType;
@@ -225,6 +231,8 @@ public sealed class ResilienceScenarioClock
     internal static bool HasExactTimingEvidence(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).HasExactTimingEvidence;
 
+    internal int AdvanceMovementCount => _controller.AdvanceMovementCount;
+
     internal static void BeginLogicalCall(TimeProvider provider) =>
         ((TrackingTimeProvider)provider).BeginLogicalCall();
 
@@ -246,13 +254,24 @@ public sealed class ResilienceScenarioClock
         private readonly object _gate = new();
         private readonly TimeProvider _inner;
         private long _lastVerifiedTimestamp;
+        private long _lastObservedTimestamp;
         private bool _advanceInProgress;
         private bool _hasExactTimingEvidence = true;
+        private int _advanceMovementCount;
+        private int _advanceOwnerThreadId;
+        private bool _advanceMovementViolation;
+        private readonly AsyncLocal<int> _advanceDelegateDepth = new();
+        private readonly EventHandler _movementNotificationHandler;
+        private readonly AsyncLocal<int> _timerCallbackDepth = new();
+        private readonly AsyncLocal<long?> _timerCallbackStartTimestamp = new();
 
         internal ProviderController(TimeProvider inner)
         {
             _inner = inner;
             _lastVerifiedTimestamp = inner.GetTimestamp();
+            _lastObservedTimestamp = _lastVerifiedTimestamp;
+            _movementNotificationHandler = HandleMovementNotification;
+            AttachMovementNotification();
         }
 
         internal bool HasExactTimingEvidence
@@ -267,6 +286,8 @@ public sealed class ResilienceScenarioClock
                 }
             }
         }
+
+        internal int AdvanceMovementCount => Volatile.Read(ref _advanceMovementCount);
 
         internal long BeginAdvance(bool producesExactEvidence)
         {
@@ -283,7 +304,24 @@ public sealed class ResilienceScenarioClock
 
                 _advanceInProgress = true;
                 _hasExactTimingEvidence &= producesExactEvidence;
+                _advanceMovementCount = 0;
+                _advanceOwnerThreadId = Environment.CurrentManagedThreadId;
+                _advanceMovementViolation = false;
                 return _lastVerifiedTimestamp;
+            }
+        }
+
+        internal void RunAdvanceDelegate(Action advance)
+        {
+            ArgumentNullException.ThrowIfNull(advance);
+            _advanceDelegateDepth.Value++;
+            try
+            {
+                advance();
+            }
+            finally
+            {
+                _advanceDelegateDepth.Value--;
             }
         }
 
@@ -302,9 +340,26 @@ public sealed class ResilienceScenarioClock
             lock (_gate)
             {
                 ValidateAutoAdvanceDisabled();
+            }
+
+            lock (_gate)
+            {
+                ValidateAutoAdvanceDisabled();
                 var after = _inner.GetTimestamp();
-                _advanceInProgress = false;
                 var actual = _inner.GetElapsedTime(before, after);
+                _advanceInProgress = false;
+                var movementCount = _advanceMovementCount;
+                var movementViolation = _advanceMovementViolation;
+                if (movementViolation || movementCount > 1)
+                {
+                    _lastVerifiedTimestamp = after;
+                    _hasExactTimingEvidence = false;
+                    throw new TimingConfigurationException(
+                        "The admitted FakeTimeProvider was moved by a concurrent or reentrant actor during one " +
+                        "scenario-controlled advance, so exact timing evidence is unavailable. Use one owner advance " +
+                        "operation at a time and do not share the underlying provider.");
+                }
+
                 if (actual != requested)
                 {
                     _lastVerifiedTimestamp = after;
@@ -323,11 +378,16 @@ public sealed class ResilienceScenarioClock
         {
             lock (_gate)
             {
+                ValidateAutoAdvanceDisabled();
+            }
+
+            lock (_gate)
+            {
                 _advanceInProgress = false;
                 if (GetAutoAdvanceAmount(_inner) == TimeSpan.Zero)
                 {
                     var after = _inner.GetTimestamp();
-                    if (after != before)
+                    if (after != before || _advanceMovementCount > 0)
                     {
                         _lastVerifiedTimestamp = after;
                         _hasExactTimingEvidence = false;
@@ -385,6 +445,95 @@ public sealed class ResilienceScenarioClock
             }
         }
 
+        internal void BeginTimerCallback()
+        {
+            if (_timerCallbackDepth.Value == 0)
+            {
+                _timerCallbackStartTimestamp.Value = _inner.GetTimestamp();
+            }
+
+            _timerCallbackDepth.Value++;
+        }
+
+        internal void EndTimerCallback()
+        {
+            var depth = _timerCallbackDepth.Value - 1;
+            _timerCallbackDepth.Value = depth;
+            if (depth != 0)
+            {
+                return;
+            }
+
+            var start = _timerCallbackStartTimestamp.Value;
+            _timerCallbackStartTimestamp.Value = null;
+            if (start is not { } callbackStart)
+            {
+                return;
+            }
+
+            var current = _inner.GetTimestamp();
+            lock (_gate)
+            {
+                if (_advanceInProgress && current != callbackStart)
+                {
+                    _advanceMovementCount++;
+                    _advanceMovementViolation = true;
+                }
+            }
+        }
+
+        private void AttachMovementNotification()
+        {
+            if (MovementNotificationEvent?.GetAddMethod(nonPublic: true) is not { } addMethod ||
+                MovementNotificationEvent.EventHandlerType != typeof(EventHandler))
+            {
+                throw new ArgumentException(
+                    "The supported FakeTimeProvider does not expose its required synchronous movement notification " +
+                    "contract; exact timing evidence cannot be proven.",
+                    nameof(_inner));
+            }
+
+            try
+            {
+                addMethod.Invoke(_inner, new object?[] { _movementNotificationHandler });
+            }
+            catch (TargetInvocationException exception) when (exception.InnerException is not null)
+            {
+                throw new ArgumentException(
+                    "The supported FakeTimeProvider movement notification could not be attached; exact timing " +
+                    "evidence cannot be proven.",
+                    nameof(_inner),
+                    exception.InnerException);
+            }
+        }
+
+        private void HandleMovementNotification(object? _, EventArgs __)
+        {
+            var observed = _inner.GetTimestamp();
+            lock (_gate)
+            {
+                if (observed == _lastObservedTimestamp)
+                {
+                    return;
+                }
+
+                _lastObservedTimestamp = observed;
+                if (!_advanceInProgress)
+                {
+                    _hasExactTimingEvidence = false;
+                    return;
+                }
+
+                _advanceMovementCount++;
+                if (Environment.CurrentManagedThreadId != _advanceOwnerThreadId ||
+                    _advanceDelegateDepth.Value == 0 ||
+                    _timerCallbackDepth.Value > 0)
+                {
+                    _advanceMovementViolation = true;
+                }
+            }
+        }
+
         private TimingConfigurationException UnexpectedMovement(long observed)
         {
             var moved = _inner.GetElapsedTime(_lastVerifiedTimestamp, observed);
@@ -394,6 +543,7 @@ public sealed class ResilienceScenarioClock
                 $"The admitted FakeTimeProvider moved by {TimeFormat.Describe(moved)} outside the scenario-controlled " +
                 "advance operation. Do not advance the underlying provider directly or share it with another clock.");
         }
+
     }
 
     private sealed class TrackingTimeProvider : TimeProvider
@@ -429,6 +579,10 @@ public sealed class ResilienceScenarioClock
         }
 
         internal long TimerScheduleVersion => Interlocked.Read(ref _timerScheduleVersion);
+
+        internal void BeginTimerCallback() => _controller.BeginTimerCallback();
+
+        internal void EndTimerCallback() => _controller.EndTimerCallback();
 
         internal Task WaitForTimerScheduleAsync(long observedVersion)
         {
@@ -717,14 +871,16 @@ public sealed class ResilienceScenarioClock
 
         internal void Invoke(object? _)
         {
-            _owner.MarkTimerCallback(this);
+            _owner.BeginTimerCallback();
             try
             {
+                _owner.MarkTimerCallback(this);
                 _callback(_state);
             }
             finally
             {
                 _owner.CompleteTimerCallback();
+                _owner.EndTimerCallback();
             }
         }
 

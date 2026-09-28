@@ -144,6 +144,17 @@ public sealed class ReleaseContractTests
         Assert.Contains("Release contract passed", result.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ValidVersionTagOnAStaleOrNonMainCommitFailsProvenance()
+    {
+        var result = RunProvenance(
+            "1111111111111111111111111111111111111111",
+            "2222222222222222222222222222222222222222");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("not the exact remote-main candidate", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("### Added\n- Provides an item.")]
     [InlineData("### Fixed\n- Corrects an item.")]
@@ -196,6 +207,25 @@ public sealed class ReleaseContractTests
         Assert.Contains("--no-symbols", packageStep, StringComparison.Ordinal);
         Assert.DoesNotContain(".snupkg", packageStep, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(symbolsStep, ".snupkg"));
+    }
+
+    [Fact]
+    public void ReleaseWorkflowRequiresMainProvenanceAndAllApplicableGatesBeforePublication()
+    {
+        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "release.yml"));
+
+        Assert.Contains("Validate-ReleaseProvenance.ps1", workflow, StringComparison.Ordinal);
+        Assert.Contains("refs/remotes/origin/main", workflow, StringComparison.Ordinal);
+        Assert.Contains("dotnet format", workflow, StringComparison.Ordinal);
+        Assert.Contains("dotnet build KeelMatrix.ResilienceSpec.slnx", workflow, StringComparison.Ordinal);
+        Assert.Contains("ResilienceVersion=9.8.0", workflow, StringComparison.Ordinal);
+        Assert.Contains("ResilienceVersion=10.10.0", workflow, StringComparison.Ordinal);
+        Assert.Contains("Invoke-PackageSmoke.ps1", workflow, StringComparison.Ordinal);
+        Assert.Contains("Invoke-DependencyAudit.ps1 -Mode Required", workflow, StringComparison.Ordinal);
+        Assert.True(
+            workflow.IndexOf("Audit direct and transitive dependencies", StringComparison.Ordinal) <
+                workflow.IndexOf("name: Publish package", StringComparison.Ordinal),
+            "The required audit must complete before package publication.");
     }
 
     [Fact]
@@ -903,6 +933,36 @@ public sealed class ReleaseContractTests
         {
             tempDirectory.Delete(recursive: true);
         }
+    }
+
+    private static ContractResult RunProvenance(string tagRevision, string remoteMainRevision)
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var scriptPath = Path.Combine(repositoryRoot, "scripts", "Validate-ReleaseProvenance.ps1");
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "pwsh",
+            WorkingDirectory = repositoryRoot,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var argument in new[]
+        {
+            "-NoProfile", "-File", scriptPath,
+            "-TagRevision", tagRevision,
+            "-RemoteMainRevision", remoteMainRevision
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Unable to start pwsh.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        Assert.True(process.WaitForExit(30_000), "Release provenance process did not finish within 30 seconds.");
+        return new ContractResult(process.ExitCode, $"{output.Result}{Environment.NewLine}{error.Result}");
     }
 
     private static string FindRepositoryRoot()

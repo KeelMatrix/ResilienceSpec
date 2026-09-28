@@ -93,7 +93,9 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   `Microsoft.Extensions.Time.Testing.FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`.
   Keep `AutoAdvanceAmount` at zero, register the wrapper's `TimeProvider` property in the client pipeline, and pass
   the clock object to the scenario. The scenario invokes the wrapper's verified advance operation. The wrapper verifies that each advance moves the admitted
-  provider once by exactly the requested duration and rejects direct or different-provider movement. Without the
+  provider once by exactly the requested duration. A second provider mutation during one active advance is treated as
+  concurrent or reentrant movement and rejected, even when the final net delta is exact; direct or different-provider
+  movement is rejected as well. Without the
   wrapper, timing scenarios fail with
   `MissingTimeProviderException` instead of falling back to sleeps. The wrapper explicitly loads
   `Microsoft.Extensions.TimeProvider.Testing.dll` version `10.10.0.0` from the dependency path beside the package

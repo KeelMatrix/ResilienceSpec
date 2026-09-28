@@ -13,7 +13,8 @@
   deliberately outside the solution.
 - `samples/KeelMatrix.ResilienceSpec.Sample` is a runnable walkthrough of the documented quick start.
 - `scripts` contains the repository gates: `Validate.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`,
-  `Invoke-DependencyAudit.ps1`, `Validate-History.ps1`, and `Validate-ReleaseContract.ps1`.
+  `Invoke-DependencyAudit.ps1`, `Validate-History.ps1`, `Validate-DocumentationHygiene.ps1`,
+  `Validate-ReleaseProvenance.ps1`, and `Validate-ReleaseContract.ps1`.
 - `docs/DEV.md` explains the local validation path; `README.md` and `src/KeelMatrix.ResilienceSpec/README.md` are the
   user-facing documentation.
 
@@ -40,7 +41,8 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   `Retry-After` value, and injected-clock timing only. Never record or echo URIs, query strings, headers, cookies,
   authorization values, bodies, or exception messages.
 - Timing assertions run on an injected clock only. Never introduce a wall-clock sleep, an elapsed-time tolerance, or a
-  silent fallback that makes a timing claim true.
+  silent fallback that makes a timing claim true. During one active advance, a concurrent or reentrant provider
+  mutation rejects the advance and invalidates exact timing evidence even when the final net delta is exact.
 - Scripted delays use whole-millisecond precision and reject values above the controlled timer's `int.MaxValue`
   millisecond limit. `Retry-After` uses integer whole-second HTTP wire values, rejects fractional or sub-second
   values, and keeps its HTTP delta-seconds limit separate from the timer limit; observation, pending, and cleanup
@@ -63,7 +65,7 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   allowed on the validation path.
 - Set `KEELMATRIX_NO_TELEMETRY=1` for local validation. Repository validation must never emit production telemetry.
 - Release-tag validation requires `[Unreleased]` to contain only its heading and blank lines. Reachable commit history
-  is also checked for internal identifiers, orchestration/model metadata, prohibited trailers, and non-conforming
+  is also checked for non-product provenance or authorship metadata, prohibited trailers, and non-conforming
   authorship; the GitHub web-flow `KeelMatrix` author / `GitHub` committer exception remains valid.
 - The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
   `build/ResilienceCompatibility.props` is the source of truth and its drift validator covers docs, workflows, the DI

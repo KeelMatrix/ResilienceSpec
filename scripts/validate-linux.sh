@@ -17,16 +17,7 @@ if ! command -v pwsh >/dev/null 2>&1; then
     exit 1
 fi
 
-pwsh -NoProfile -File scripts/Validate-History.ps1 -Revision HEAD -RepositoryPath "$repository_root"
-pwsh -NoProfile -File scripts/Validate-CompatibilityContract.ps1 -RepositoryPath "$repository_root"
+pwsh -NoProfile -File scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0
 
-dotnet restore KeelMatrix.ResilienceSpec.slnx --configfile NuGet.config
-dotnet test tests/KeelMatrix.ResilienceSpec.Tests -c Release --no-restore
-
-if [[ -f tests/KeelMatrix.ResilienceSpec.IntegrationTests/KeelMatrix.ResilienceSpec.IntegrationTests.csproj ]]; then
-    dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
-    dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0
-fi
-
-pwsh -NoProfile -File scripts/Invoke-PackageSmoke.ps1
-pwsh -NoProfile -File scripts/Run-Sample.ps1
+dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
+dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0

@@ -51,6 +51,7 @@ $sampleScript = Join-Path $PSScriptRoot 'Run-Sample.ps1'
 $auditScript = Join-Path $PSScriptRoot 'Invoke-DependencyAudit.ps1'
 $historyScript = Join-Path $PSScriptRoot 'Validate-History.ps1'
 $compatibilityScript = Join-Path $PSScriptRoot 'Validate-CompatibilityContract.ps1'
+$documentationHygieneScript = Join-Path $PSScriptRoot 'Validate-DocumentationHygiene.ps1'
 $durations = [ordered]@{}
 
 $saved = [Environment]::GetEnvironmentVariable('KEELMATRIX_NO_TELEMETRY', 'Process')
@@ -76,6 +77,10 @@ try {
     Invoke-Step -Name 'Validate reachable commit history' -File $pwshExecutable -Arguments @(
         '-NoProfile', '-File', $historyScript, '-Revision', 'HEAD', '-RepositoryPath', $repo)
     $durations['history'] = $script:stepDuration
+
+    Invoke-Step -Name 'Validate release-facing documentation hygiene' -File $pwshExecutable -Arguments @(
+        '-NoProfile', '-File', $documentationHygieneScript, '-RepositoryPath', $repo)
+    $durations['documentation'] = $script:stepDuration
 
     Invoke-Step -Name 'Restore' -File 'dotnet' -Arguments (@('restore', $solution, '--configfile', $nugetConfig) + $common)
     $durations['restore'] = $script:stepDuration

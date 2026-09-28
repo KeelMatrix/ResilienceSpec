@@ -28,6 +28,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Require the exact remote-main candidate
+        shell: pwsh
+        run: |
+          git fetch origin main --force --prune
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to refresh the remote-main reference."
+          }
+          $remoteMainRevision = (git rev-parse refs/remotes/origin/main).Trim()
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to resolve the remote-main candidate."
+          }
+          pwsh -NoProfile -File scripts/Validate-ReleaseProvenance.ps1 `
+            -TagRevision $env:GITHUB_SHA `
+            -RemoteMainRevision $remoteMainRevision
+
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -36,6 +51,10 @@ jobs:
       - name: Validate reachable commit history
         shell: pwsh
         run: pwsh -NoProfile -File scripts/Validate-History.ps1 -Revision HEAD -RepositoryPath $env:GITHUB_WORKSPACE
+
+      - name: Validate release-facing documentation hygiene
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/Validate-DocumentationHygiene.ps1 -RepositoryPath $env:GITHUB_WORKSPACE
 
       - name: Validate release tag
         id: release-version
@@ -58,6 +77,13 @@ jobs:
           --no-cache
           --force
           -p:NuGetAudit=false
+
+      - name: Verify formatting and analyzers
+        run: >-
+          dotnet format KeelMatrix.ResilienceSpec.slnx
+          --verify-no-changes
+          --no-restore
+          --verbosity quiet
 
       - name: Build
         run: >-
@@ -85,12 +111,30 @@ jobs:
             --no-restore \
             -p:Version=${{ steps.release-version.outputs.version }} \
             -p:NuGetAudit=false
-          dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests/KeelMatrix.ResilienceSpec.IntegrationTests.csproj \
-            --configuration Release \
-            --no-build \
-            --no-restore \
-            -p:Version=${{ steps.release-version.outputs.version }} \
-            -p:NuGetAudit=false
+
+      - name: Run integration endpoint 9.8.0
+        shell: pwsh
+        run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
+
+      - name: Run integration endpoint 10.10.0
+        shell: pwsh
+        run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0
+
+      - name: Run package smoke and sample
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/Invoke-PackageSmoke.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Package smoke failed with exit code $LASTEXITCODE."
+          }
+          pwsh -NoProfile -File scripts/Run-Sample.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Sample verification failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Audit direct and transitive dependencies
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/Invoke-DependencyAudit.ps1 -Mode Required
 
       - name: Pack shipping project
         shell: pwsh
