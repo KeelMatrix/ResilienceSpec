@@ -24,6 +24,140 @@ function Get-AuthoredFiles {
     )
 }
 
+function Test-BytePrefix {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][byte[]]$Signature
+    )
+
+    if ($Bytes.Length -lt $Signature.Length) {
+        return $false
+    }
+
+    for ($index = 0; $index -lt $Signature.Length; $index++) {
+        if ($Bytes[$index] -ne $Signature[$index]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-RecognizedBinarySignature {
+    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
+
+    $signatures = @(
+        [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A),
+        [byte[]](0x00, 0x00, 0x01, 0x00),
+        [byte[]](0x00, 0x00, 0x02, 0x00),
+        [byte[]](0x25, 0x50, 0x44, 0x46),
+        [byte[]](0x50, 0x4B, 0x03, 0x04),
+        [byte[]](0x1F, 0x8B),
+        [byte[]](0xFF, 0xD8, 0xFF),
+        [byte[]](0x7F, 0x45, 0x4C, 0x46)
+    )
+
+    foreach ($signature in $signatures) {
+        if (Test-BytePrefix -Bytes $Bytes -Signature $signature) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-BomlessUtf16Pattern {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][bool]$BigEndian
+    )
+
+    if ($Bytes.Length -lt 4 -or ($Bytes.Length % 2) -ne 0) {
+        return $false
+    }
+
+    $unitCount = [int]($Bytes.Length / 2)
+    $zeroPayloadCount = 0
+    $nonZeroTextCount = 0
+    for ($index = 0; $index -lt $Bytes.Length; $index += 2) {
+        $zeroIndex = if ($BigEndian) { $index } else { $index + 1 }
+        $textIndex = if ($BigEndian) { $index + 1 } else { $index }
+        if ($Bytes[$zeroIndex] -eq 0) {
+            $zeroPayloadCount++
+        }
+        if ($Bytes[$textIndex] -ne 0) {
+            $nonZeroTextCount++
+        }
+    }
+
+    return $zeroPayloadCount -ge [Math]::Max(2, [int][Math]::Ceiling($unitCount / 2.0)) -and
+        $nonZeroTextCount -ge [Math]::Max(1, [int][Math]::Ceiling($unitCount / 2.0))
+}
+
+function Test-BomlessUtf32Pattern {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][bool]$BigEndian
+    )
+
+    if ($Bytes.Length -lt 8 -or ($Bytes.Length % 4) -ne 0) {
+        return $false
+    }
+
+    $unitCount = [int]($Bytes.Length / 4)
+    $zeroPrefixCount = 0
+    $nonZeroTextCount = 0
+    for ($index = 0; $index -lt $Bytes.Length; $index += 4) {
+        $textIndex = if ($BigEndian) { $index + 3 } else { $index }
+        $zeroIndexes = if ($BigEndian) { @(0, 1, 2) } else { @(1, 2, 3) }
+        $allZeroPrefix = $true
+        foreach ($offset in $zeroIndexes) {
+            if ($Bytes[$index + $offset] -ne 0) {
+                $allZeroPrefix = $false
+                break
+            }
+        }
+
+        if ($allZeroPrefix) {
+            $zeroPrefixCount++
+        }
+        if ($Bytes[$textIndex] -ne 0) {
+            $nonZeroTextCount++
+        }
+    }
+
+    return $zeroPrefixCount -ge [Math]::Max(1, [int][Math]::Ceiling($unitCount / 2.0)) -and
+        $nonZeroTextCount -ge [Math]::Max(1, [int][Math]::Ceiling($unitCount / 2.0))
+}
+
+function Test-NonTextByteCharacteristics {
+    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
+
+    $nonTextByteCount = 0
+    foreach ($byte in $Bytes) {
+        if ($byte -lt 0x09 -or ($byte -ge 0x0E -and $byte -le 0x1F) -or $byte -eq 0x7F -or $byte -eq 0xFF) {
+            $nonTextByteCount++
+        }
+    }
+
+    return $nonTextByteCount -ge 2
+}
+
+function Try-DecodeText {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][Text.Encoding]$Encoding,
+        [Parameter(Mandatory = $true)][int]$Offset
+    )
+
+    try {
+        return $Encoding.GetString($Bytes, $Offset, $Bytes.Length - $Offset)
+    }
+    catch {
+        return $null
+    }
+}
+
 function Read-AuthoredText {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -38,42 +172,88 @@ function Read-AuthoredText {
     }
 
     if ($bytes.Length -eq 0) {
-        return [pscustomobject]@{ IsBinary = $false; Text = '' }
+        return [pscustomobject]@{ IsBinary = $false; Texts = @('') }
     }
 
-    $encoding = $null
+    $candidates = [Collections.Generic.List[string]]::new()
+    $bomDetected = $false
     $offset = 0
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+    $encoding = $null
+    if ($bytes.Length -ge 4 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0x00 -and $bytes[3] -eq 0x00) {
+        $encoding = [Text.UTF32Encoding]::new($false, $false, $true)
+        $offset = 4
+        $bomDetected = $true
+    }
+    elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0x00 -and $bytes[1] -eq 0x00 -and $bytes[2] -eq 0xFE -and $bytes[3] -eq 0xFF) {
+        $encoding = [Text.UTF32Encoding]::new($true, $false, $true)
+        $offset = 4
+        $bomDetected = $true
+    }
+    elseif ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
         $encoding = [Text.UTF8Encoding]::new($false, $true)
         $offset = 3
+        $bomDetected = $true
     }
     elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
         $encoding = [Text.UnicodeEncoding]::new($false, $false, $true)
         $offset = 2
+        $bomDetected = $true
     }
     elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
         $encoding = [Text.UnicodeEncoding]::new($true, $false, $true)
         $offset = 2
-    }
-    elseif ($bytes -contains [byte]0) {
-        return [pscustomobject]@{ IsBinary = $true; Text = $null }
-    }
-    else {
-        $encoding = [Text.UTF8Encoding]::new($false, $true)
+        $bomDetected = $true
     }
 
-    try {
-        $text = $encoding.GetString($bytes, $offset, $bytes.Length - $offset)
+    if ($bomDetected) {
+        $text = Try-DecodeText -Bytes $bytes -Encoding $encoding -Offset $offset
+        if ($null -eq $text) {
+            throw "Documentation hygiene could not classify tracked file '$RelativePath' as text or binary; refusing to skip it."
+        }
+
+        $candidates.Add($text)
+        return [pscustomobject]@{ IsBinary = $false; Texts = $candidates.ToArray() }
     }
-    catch {
+
+    $utf8 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UTF8Encoding]::new($false, $true)) -Offset 0
+    if ($null -ne $utf8) {
+        $candidates.Add($utf8)
+    }
+
+    $heuristicDetected = $false
+    foreach ($bigEndian in @($false, $true)) {
+        if (Test-BomlessUtf16Pattern -Bytes $bytes -BigEndian $bigEndian) {
+            $heuristicDetected = $true
+            $utf16 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UnicodeEncoding]::new($bigEndian, $false, $true)) -Offset 0
+            if ($null -ne $utf16) {
+                $candidates.Add($utf16)
+            }
+        }
+
+        if (Test-BomlessUtf32Pattern -Bytes $bytes -BigEndian $bigEndian) {
+            $heuristicDetected = $true
+            $utf32 = Try-DecodeText -Bytes $bytes -Encoding ([Text.UTF32Encoding]::new($bigEndian, $false, $true)) -Offset 0
+            if ($null -ne $utf32) {
+                $candidates.Add($utf32)
+            }
+        }
+    }
+
+    if ($candidates.Count -gt 0) {
+        return [pscustomobject]@{ IsBinary = $false; Texts = $candidates.ToArray() }
+    }
+
+    if ($heuristicDetected) {
         throw "Documentation hygiene could not classify tracked file '$RelativePath' as text or binary; refusing to skip it."
     }
 
-    if ($text.IndexOf([char]0) -ge 0) {
-        return [pscustomobject]@{ IsBinary = $true; Text = $null }
+    $recognizedBinary = Test-RecognizedBinarySignature -Bytes $bytes
+    $nonTextCharacteristics = Test-NonTextByteCharacteristics -Bytes $bytes
+    if ($recognizedBinary -or $nonTextCharacteristics) {
+        return [pscustomobject]@{ IsBinary = $true; Texts = @() }
     }
 
-    return [pscustomobject]@{ IsBinary = $false; Text = $text }
+    throw "Documentation hygiene could not classify tracked file '$RelativePath' as text or binary; refusing to skip it."
 }
 
 $processName = Convert-CodePoints @(112, 97, 112, 101, 114, 99, 108, 105, 112)
@@ -139,11 +319,16 @@ try {
             continue
         }
 
-        $lines = [regex]::Split($classified.Text, "\r\n|\n|\r")
-        for ($lineNumber = 0; $lineNumber -lt $lines.Count; $lineNumber++) {
-            foreach ($forbidden in $forbiddenPatterns) {
-                if ($lines[$lineNumber] -match $forbidden.Pattern) {
-                    $violations.Add("${relative}:$($lineNumber + 1): $($forbidden.Label)")
+        foreach ($text in $classified.Texts) {
+            $lines = [regex]::Split($text, "\r\n|\n|\r")
+            for ($lineNumber = 0; $lineNumber -lt $lines.Count; $lineNumber++) {
+                foreach ($forbidden in $forbiddenPatterns) {
+                    if ($lines[$lineNumber] -match $forbidden.Pattern) {
+                        $violation = "${relative}:$($lineNumber + 1): $($forbidden.Label)"
+                        if (-not $violations.Contains($violation)) {
+                            $violations.Add($violation)
+                        }
+                    }
                 }
             }
         }

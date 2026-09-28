@@ -66,6 +66,57 @@ public sealed class DocumentationHygieneTests
     }
 
     [Fact]
+    public void NulRichUnicodeAndAuthoredPathVariantsAreScanned()
+    {
+        using var repository = CreateRepository();
+        var runtimeTerm = FromCodePoints(97, 103, 101, 110, 116);
+        var utf8 = new UTF8Encoding(false);
+
+        WriteBytes(repository.Path, "fixtures/nul-after.txt", utf8.GetBytes(runtimeTerm + "\0 tail"));
+        WriteBytes(repository.Path, "fixtures/nul-before.txt", utf8.GetBytes("head\0" + runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/utf16-le", new UnicodeEncoding(false, false).GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/utf16-be", new UnicodeEncoding(true, false).GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/utf32-le", new UTF32Encoding(false, false).GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/utf32-be", new UTF32Encoding(true, false).GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/utf16-le-bom", new UnicodeEncoding(false, true).GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/utf16-be-bom", new UnicodeEncoding(true, true).GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/utf32-le-bom", new UTF32Encoding(false, true).GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/utf32-be-bom", new UTF32Encoding(true, true).GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "fixtures/generated/mixed-control", [1, 0, .. utf8.GetBytes(runtimeTerm), 0, 31]);
+        WriteBytes(repository.Path, "fixtures/odd name/[payload]", utf8.GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, ".fixture", utf8.GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, ".github/workflows/payload.yml", utf8.GetBytes(runtimeTerm));
+        WriteBytes(repository.Path, "docs/payload.xml", utf8.GetBytes(runtimeTerm));
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("runtime vocabulary", result.Output, StringComparison.OrdinalIgnoreCase);
+        foreach (var path in new[]
+        {
+            "fixtures/nul-after.txt",
+            "fixtures/nul-before.txt",
+            "fixtures/utf16-le",
+            "fixtures/utf16-be",
+            "fixtures/utf32-le",
+            "fixtures/utf32-be",
+            "fixtures/utf16-le-bom",
+            "fixtures/utf16-be-bom",
+            "fixtures/utf32-le-bom",
+            "fixtures/utf32-be-bom",
+            "fixtures/generated/mixed-control",
+            "fixtures/odd name/[payload]",
+            ".fixture",
+            ".github/workflows/payload.yml",
+            "docs/payload.xml",
+        })
+        {
+            Assert.Contains(path, result.Output, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void PathsAndFileNamesFailClosedWithoutReadingAnExtensionAllowlist()
     {
         using var repository = CreateRepository();
@@ -94,6 +145,7 @@ public sealed class DocumentationHygieneTests
         WriteText(repository.Path, "fixtures/ascii.csv", safe, new ASCIIEncoding());
         WriteText(repository.Path, "scripts/Validate-DocumentationHygiene.ps1", File.ReadAllText(Path.Combine(FindRepositoryRoot(), "scripts", "Validate-DocumentationHygiene.ps1")), new UTF8Encoding(false));
         File.WriteAllBytes(Path.Combine(repository.Path, "fixtures", "binary.data"), new byte[] { 0x00, 0x01, 0xFF, 0x7F });
+        WriteBytes(repository.Path, "fixtures/binary.png", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, .. new UTF8Encoding(false).GetBytes(FromCodePoints(97, 103, 101, 110, 116))]);
         AddAll(repository.Path);
 
         var result = RunGuard(repository.Path);
@@ -138,6 +190,13 @@ public sealed class DocumentationHygieneTests
         var path = Path.Combine(repositoryPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, text, encoding);
+    }
+
+    private static void WriteBytes(string repositoryPath, string relativePath, byte[] bytes)
+    {
+        var path = Path.Combine(repositoryPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, bytes);
     }
 
     private static void InitializeGit(string repositoryPath)

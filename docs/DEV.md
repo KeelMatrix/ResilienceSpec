@@ -51,8 +51,9 @@ The gate performs, in order: reachable-history hygiene, restore from `NuGet.conf
 restores the shipping package from its own temporary local feed.
 
 The documentation hygiene step scans every tracked relative path and file name, then classifies each file by content. It
-checks authored text regardless of extension or location, excludes only content-recognized binary data, and fails closed
-when a tracked file cannot be read or classified.
+checks authored text regardless of extension or location, decodes NUL-rich UTF-8 plus BOM-aware and bounded BOM-less
+UTF 16/UTF 32 text before scanning it, excludes only content-recognized binary data, and fails closed when a tracked file
+cannot be read or classified.
 
 ## Linux validation
 
