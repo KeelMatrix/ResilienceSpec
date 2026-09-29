@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ### Fixed
 
+- Full validation now bounds every repository command and test step, and the dependency audit terminates its advisory
+  query child process with captured diagnostics on timeout; hosted validation gives the full-validation and direct
+  integration steps their own deadlines.
 - The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
 - Linux validation now runs the same formatting, Release build, package-consumer, and required direct/transitive
   dependency gates as the other supported runners; the tag workflow also checks exact remote-main provenance and both

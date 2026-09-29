@@ -9,37 +9,34 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. (Join-Path $PSScriptRoot '../build/Invoke-NestedPwsh.ps1')
+. (Join-Path $PSScriptRoot '../build/Invoke-ExternalCommand.ps1')
 $pwshExecutable = 'pwsh'
 
 function Invoke-Checked {
     param(
         [Parameter(Mandatory = $true)][string]$File,
         [Parameter(Mandatory = $false)][string[]]$Arguments = @(),
-        [string]$WorkingDirectory
+        [string]$WorkingDirectory,
+        [Parameter(Mandatory = $false)][ValidateRange(1, 3600)][int]$TimeoutSeconds = 600
     )
 
     $start = Get-Date
-    if ($WorkingDirectory) {
-        Push-Location $WorkingDirectory
+    $commandDirectory = if ($WorkingDirectory) { $WorkingDirectory } else { (Get-Location).Path }
+    $result = Invoke-ExternalCommand -FilePath $File -ArgumentList $Arguments -WorkingDirectory $commandDirectory -TimeoutSeconds $TimeoutSeconds
+    if (-not [string]::IsNullOrWhiteSpace($result.Output)) {
+        Write-Output $result.Output.TrimEnd()
     }
-
-    try {
-        if ($File -match '^(?i:pwsh|powershell)(?:\.exe)?$') {
-            Invoke-NestedPwsh -ArgumentList $Arguments
-        }
-        else {
-            & $File @Arguments
-        }
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        if ($WorkingDirectory) {
-            Pop-Location
-        }
+    if (-not [string]::IsNullOrWhiteSpace($result.Error)) {
+        Write-Output $result.Error.TrimEnd()
     }
 
     $elapsed = (Get-Date) - $start
+    if ($result.TimedOut) {
+        $killSuffix = if ($result.KillError) { " Kill attempt reported: $($result.KillError)." } else { '' }
+        throw "Command '$File $($Arguments -join ' ')' timed out after $TimeoutSeconds seconds; blocked operation: $File $($Arguments -join ' '). The child process was terminated.$killSuffix"
+    }
+
+    $exitCode = $result.ExitCode
     Write-Output ("  {0} {1} (exit {2}, {3:n1}s)" -f $File, ($Arguments -join ' '), $exitCode, $elapsed.TotalSeconds)
     if ($exitCode -ne 0) {
         throw "Command '$File $($Arguments -join ' ')' failed with exit code $exitCode."
@@ -183,12 +180,12 @@ try {
     [Environment]::SetEnvironmentVariable('NUGET_SCRATCH', $scratch, 'Process')
     [Environment]::SetEnvironmentVariable('NUGET_PLUGINS_CACHE_PATH', $pluginsCache, 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_CLI_HOME', $dotnetHome, 'Process')
-    Invoke-Checked 'dotnet' ($packArguments + @('-o', $firstPack))
-    Invoke-Checked 'dotnet' ($packArguments + @('-o', $secondPack))
+    Invoke-Checked 'dotnet' ($packArguments + @('-o', $firstPack)) -TimeoutSeconds 600
+    Invoke-Checked 'dotnet' ($packArguments + @('-o', $secondPack)) -TimeoutSeconds 600
 
     foreach ($packDirectory in @($firstPack, $secondPack)) {
         foreach ($archiveName in @($nupkgName, $snupkgName)) {
-    Invoke-Checked $pwshExecutable @('-NoProfile', '-File', $normalizationScript, '-PackagePath', (Join-Path $packDirectory $archiveName))
+            Invoke-Checked $pwshExecutable @('-NoProfile', '-File', $normalizationScript, '-PackagePath', (Join-Path $packDirectory $archiveName)) -TimeoutSeconds 60
         }
     }
 
@@ -231,8 +228,7 @@ try {
         # -WindowStyle on Unix-like hosts.
         $inspectionArguments = @('-NoProfile', '-WindowStyle', 'Hidden', '-File', $inspectionScript, '-PackagePath', $nupkg, '-SymbolsPath', $snupkg, '-ExpectedVersion', $PackageVersion, '-ExpectedRepositoryCommit', $expectedCommit)
     }
-    Invoke-NestedPwsh -ArgumentList $inspectionArguments
-    Assert-Contract ($LASTEXITCODE -eq 0) 'Package inspection failed.'
+    Invoke-Checked $pwshExecutable $inspectionArguments -TimeoutSeconds 60
 
     $escapedFeed = [Security.SecurityElement]::Escape($packageFeed)
     @"
@@ -269,7 +265,7 @@ try {
         'restore', $smokeProject,
         '--configfile', $nugetConfig,
         "-p:RestorePackagesPath=$consumerPackages",
-        '-p:NuGetAudit=false')
+        '-p:NuGetAudit=false') -TimeoutSeconds 180
 
     $restoredPackage = Join-Path $consumerPackages 'keelmatrix.resiliencespec'
     Assert-Contract (Test-Path -LiteralPath $restoredPackage -PathType Container) 'The clean consumer did not restore the candidate package.'

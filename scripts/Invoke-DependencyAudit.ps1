@@ -5,11 +5,15 @@ param(
 
     [string]$Solution = 'KeelMatrix.ResilienceSpec.slnx',
 
-    [string]$DotnetExecutable = 'dotnet'
+    [string]$DotnetExecutable = 'dotnet',
+
+    [ValidateRange(1, 3600)]
+    [int]$TimeoutSeconds = 120
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../build/Invoke-ExternalCommand.ps1')
 
 function Write-AuditSummary {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -47,9 +51,23 @@ function Get-UnavailableMatch {
 
 try {
     $repo = Split-Path -Parent $PSScriptRoot
-    $auditOutput = (& $DotnetExecutable list (Join-Path $repo $Solution) package --vulnerable --include-transitive 2>&1 | Out-String).TrimEnd()
-    $auditExitCode = $LASTEXITCODE
+    $auditArguments = @(
+        'list',
+        (Join-Path $repo $Solution),
+        'package',
+        '--vulnerable',
+        '--include-transitive'
+    )
+    $result = Invoke-ExternalCommand -FilePath $DotnetExecutable -ArgumentList $auditArguments -WorkingDirectory $repo -TimeoutSeconds $TimeoutSeconds
+    $auditOutput = (@($result.Output, $result.Error) -join [Environment]::NewLine).TrimEnd()
+    $auditExitCode = $result.ExitCode
     Write-Output $auditOutput
+
+    if ($result.TimedOut) {
+        $killSuffix = if ($result.KillError) { " Kill attempt reported: $($result.KillError)." } else { '' }
+        Write-AuditSummary "Dependency audit: command timed out after $TimeoutSeconds seconds; blocked operation: dotnet list package --vulnerable --include-transitive. The child process was terminated.$killSuffix"
+        exit 1
+    }
 
     if ($auditOutput -match '(?im)has the following vulnerable package|NU190[1-4]') {
         Write-AuditSummary 'Dependency audit: vulnerable package data was returned.'

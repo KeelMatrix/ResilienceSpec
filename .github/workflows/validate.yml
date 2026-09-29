@@ -51,6 +51,7 @@ jobs:
 
       - name: Run full repository validation on Windows and macOS
         if: runner.os != 'Linux'
+        timeout-minutes: 15
         shell: pwsh
         run: pwsh -NoProfile -File scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0
 
@@ -60,10 +61,12 @@ jobs:
         run: ./scripts/validate-linux.sh
 
       - name: Run integration endpoint 9.8.0
+        timeout-minutes: 5
         shell: pwsh
         run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
 
       - name: Run integration endpoint 10.10.0
+        timeout-minutes: 5
         shell: pwsh
         run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0
 

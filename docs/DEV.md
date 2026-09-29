@@ -98,7 +98,9 @@ clean-consumer restore.
 The repository contains `.github/workflows/validate.yml`, which runs on pushes to `main` and on manual dispatch with
 Windows, Ubuntu, and macOS hosted runners. Every runner invokes Full validation against `10.10.0` and then runs
 explicit integration jobs for both `9.8.0` and `10.10.0`. Only `net8.0` is exercised; a hosted result is evidence from
-the specific runner, not physical hardware.
+the specific runner, not physical hardware. The Windows and macOS Full-validation step is bounded to 15 minutes, and
+each direct integration step is bounded to 5 minutes; a timeout fails the named step rather than waiting for the
+matrix job's outer limit.
 
 Useful narrower variants:
 
@@ -205,8 +207,13 @@ the wait runs on the injected clock, so it is deliberately not exposed.
 
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required` fails closed unless direct and transitive advisory data is
 available and every project reports no vulnerable packages from `https://api.nuget.org/v3/index.json`. Full validation
-runs this audit on Windows, Linux, and macOS. Audit evidence is valid only for the exact candidate and hosted
-run that produced it, so use the current candidate's CI conclusion rather than a dated statement in this document.
+runs this audit on Windows, Linux, and macOS. The audit's `dotnet list package --vulnerable --include-transitive`
+child command has a 120-second deadline, captures both output streams, and terminates the child process tree on
+expiry; a timeout names the blocked operation and fails closed. Full validation also applies per-step watchdogs:
+60 seconds for repository guards, 180 seconds for restore, 300 seconds for formatting/build/sample, 360 seconds for
+each test project, 600 seconds for package smoke, and 180 seconds for the audit step. Audit evidence is valid only
+for the exact candidate and hosted run that produced it, so use the current candidate's CI conclusion rather than a
+dated statement in this document.
 Treat a non-zero result as a release blocker. No release action is authorized by a passing audit.
 
 ## Release preparation

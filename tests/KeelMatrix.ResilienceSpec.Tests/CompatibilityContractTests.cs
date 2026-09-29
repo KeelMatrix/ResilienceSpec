@@ -111,6 +111,48 @@ public sealed class CompatibilityContractTests
         Assert.Contains("unavailable", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ValidationCommandsAndHostedStepsHaveExplicitDeadlines()
+    {
+        var repository = FindRepositoryRoot();
+        var validation = File.ReadAllLines(Path.Combine(repository, "scripts", "Validate.ps1"));
+        var invokeStepLines = validation
+            .Where(static line => line.TrimStart().StartsWith("Invoke-Step -Name", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(invokeStepLines);
+        Assert.All(invokeStepLines, line => Assert.Contains("-TimeoutSeconds", line, StringComparison.Ordinal));
+
+        var workflow = File.ReadAllText(Path.Combine(repository, ".github", "workflows", "validate.yml"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("      - name: Run full repository validation on Windows and macOS\n        if: runner.os != 'Linux'\n        timeout-minutes: 15", workflow, StringComparison.Ordinal);
+        Assert.Contains("      - name: Run integration endpoint 9.8.0\n        timeout-minutes: 5", workflow, StringComparison.Ordinal);
+        Assert.Contains("      - name: Run integration endpoint 10.10.0\n        timeout-minutes: 5", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DependencyAuditBoundsAndCapturesItsChildCommand()
+    {
+        var repository = FindRepositoryRoot();
+        var audit = File.ReadAllText(Path.Combine(repository, "scripts", "Invoke-DependencyAudit.ps1"));
+        var runner = File.ReadAllText(Path.Combine(repository, "build", "Invoke-ExternalCommand.ps1"));
+
+        Assert.Contains("[int]$TimeoutSeconds = 120", audit, StringComparison.Ordinal);
+        Assert.Contains("blocked operation: dotnet list package --vulnerable --include-transitive", audit, StringComparison.Ordinal);
+        Assert.Contains("Invoke-ExternalCommand", audit, StringComparison.Ordinal);
+        Assert.Contains("ReadToEndAsync", runner, StringComparison.Ordinal);
+        Assert.Contains("WaitForExit", runner, StringComparison.Ordinal);
+        Assert.Contains("$process.Kill($true)", runner, StringComparison.Ordinal);
+
+        foreach (var relativePath in new[] { "scripts/Invoke-PackageSmoke.ps1", "scripts/Run-Sample.ps1" })
+        {
+            var script = File.ReadAllText(Path.Combine(repository, relativePath));
+            Assert.Contains("Invoke-ExternalCommand", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("Invoke-NestedPwsh", script, StringComparison.Ordinal);
+            Assert.Contains("-TimeoutSeconds", script, StringComparison.Ordinal);
+        }
+    }
+
     private static ProcessResult RunValidator(string repositoryPath, string? resilienceVersion = null)
     {
         var arguments = new List<string>
