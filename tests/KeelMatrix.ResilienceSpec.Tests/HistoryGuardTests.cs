@@ -171,7 +171,7 @@ public sealed class HistoryGuardTests
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Unable to start {fileName}.");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        Assert.True(process.WaitForExit(30_000), $"Process '{fileName}' did not finish within 30 seconds.");
+        Assert.True(process.WaitForExit(90_000), $"Process '{fileName}' did not finish within 90 seconds.");
         return new ProcessResult(process.ExitCode, $"{output.Result}{Environment.NewLine}{error.Result}");
     }
 

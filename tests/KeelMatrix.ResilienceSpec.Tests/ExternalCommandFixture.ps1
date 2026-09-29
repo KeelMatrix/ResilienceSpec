@@ -33,7 +33,21 @@ switch ($Scenario) {
         $arguments += 'Start-Sleep -Seconds 30'
     }
     'Descendant' {
-        $arguments += "`$child = Start-Process -FilePath '$pwsh' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden; [Console]::WriteLine(('child=' + `$child.Id)); exit 0"
+        $pwshBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pwsh))
+        $arguments += @'
+$pwsh = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PWSH_PATH__'))
+$childStartInfo = [Diagnostics.ProcessStartInfo]::new()
+$childStartInfo.FileName = $pwsh
+$childStartInfo.UseShellExecute = $false
+$childStartInfo.CreateNoWindow = $true
+[void]$childStartInfo.ArgumentList.Add('-NoProfile')
+[void]$childStartInfo.ArgumentList.Add('-Command')
+[void]$childStartInfo.ArgumentList.Add('Start-Sleep -Seconds 30')
+$child = [Diagnostics.Process]::Start($childStartInfo)
+[Console]::WriteLine(('child=' + $child.Id))
+$child.Dispose()
+exit 0
+'@.Replace('__PWSH_PATH__', $pwshBase64)
     }
 }
 
