@@ -23,12 +23,18 @@ namespace KeelMatrix.ResilienceSpec;
 /// Create one scenario per test case.
 /// </para>
 /// <para>
-/// Optional activation telemetry is considered only after this logical call genuinely settles. An activation is
-/// requested only after a settled scenario has either observed an injected failure published by an executed attempt,
-/// an executed injected timeout classified as a timeout by the settled client or strategy, or a recognized native
-/// HttpClient.Timeout outcome with at least one executed attempt, and an assertion is evaluated at or after
-/// settlement. Plain caller cancellation and arbitrary timeout exceptions do not contribute a timeout category.
-/// Assertions made while the report is live or during observation cleanup do not activate telemetry.
+/// Telemetry policy: An activation is requested only after a settled scenario has either observed an injected failure
+/// published by an executed attempt, an executed injected timeout classified as a timeout by the settled client or
+/// strategy, or a positively recognized native HttpClient.Timeout outcome with at least one executed attempt, and an
+/// assertion is evaluated at or after settlement. ResponseFault is true only for an HTTP response with status 400 or
+/// higher published by an executed attempt. ExceptionFault is true only for a network failure published by an
+/// executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
+/// positively recognized native HttpClient.Timeout outcome whose cancellation token is the same token passed to an
+/// executed scripted attempt and is canceled. Plain caller cancellation, arbitrary upstream timeout exceptions
+/// (including native-shaped exceptions without that token evidence), unused planned script steps, and observation
+/// cleanup do not set ExceptionFault. Failure categories accumulate across executed attempts: any case with a
+/// published response or network category produces one signal containing the accumulated categories, while a case
+/// with no category produces zero sink signals.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenario : IDisposable
@@ -144,7 +150,7 @@ public sealed class ResilienceScenario : IDisposable
                 var callerCanceled = cancellationToken.IsCancellationRequested;
                 var settledElapsed = Handler.Observer.MarkSettled(
                     ResilienceResult.IsTimeout(exception, callerCanceled),
-                    !callerCanceled && ResilienceResult.IsNativeHttpClientTimeout(exception)) ?? virtualElapsed;
+                    !callerCanceled && Handler.Observer.HasNativeHttpClientTimeoutEvidence(exception)) ?? virtualElapsed;
                 return ResilienceResult.ForException(exception, callerCanceled, settledElapsed, Handler.Report);
             }
 
@@ -355,7 +361,7 @@ public sealed class ResilienceScenario : IDisposable
                 var callerCanceled = cancellationToken.IsCancellationRequested;
                 var settledElapsed = Handler.Observer.MarkSettled(
                     ResilienceResult.IsTimeout(exception, callerCanceled),
-                    !callerCanceled && ResilienceResult.IsNativeHttpClientTimeout(exception)) ?? virtualElapsed;
+                    !callerCanceled && Handler.Observer.HasNativeHttpClientTimeoutEvidence(exception)) ?? virtualElapsed;
                 return ResilienceResult.ForException(exception, callerCanceled, settledElapsed, Handler.Report);
             }
         }

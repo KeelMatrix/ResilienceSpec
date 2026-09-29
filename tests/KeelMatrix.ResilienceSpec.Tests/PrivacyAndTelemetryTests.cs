@@ -225,6 +225,64 @@ public sealed class TelemetryTests
     }
 
     [Fact]
+    public async Task CustomTimeoutAfterADelayedSuccessDoesNotAddExceptionTelemetry()
+    {
+        var clock = Chains.CreateClock();
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromMilliseconds(1), HttpFault.Success())),
+            clock,
+            Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler, new TimeoutAfterTerminalHandler());
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        Assert.Equal(1, result.Report.AttemptCount);
+        Assert.Equal(HttpAttemptOutcome.Response, Assert.Single(result.Report.Attempts).Outcome);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
+    public async Task CustomTimeoutAfterANetworkErrorPublishesOnlyTheUnderlyingExceptionCategory()
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.NetworkError()),
+            options: Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler, new TimeoutAfterTerminalHandler());
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        Assert.Equal(1, result.Report.AttemptCount);
+        Assert.Equal(HttpAttemptOutcome.NetworkError, Assert.Single(result.Report.Attempts).Outcome);
+        var signal = Assert.Single(sink.Signals);
+        Assert.False(signal.ResponseFault);
+        Assert.True(signal.ExceptionFault);
+    }
+
+    [Fact]
+    public async Task ForgedNativeShapedTimeoutAfterASuccessfulAttemptDoesNotAddExceptionTelemetry()
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            options: Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler, new NativeTimeoutAfterTerminalHandler());
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        Assert.Equal(1, result.Report.AttemptCount);
+        Assert.Equal(HttpAttemptOutcome.Response, Assert.Single(result.Report.Attempts).Outcome);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
     public async Task NativeShapedTimeoutWithoutAnAttemptDoesNotActivateTelemetry()
     {
         var sink = new RecordingTelemetrySink();

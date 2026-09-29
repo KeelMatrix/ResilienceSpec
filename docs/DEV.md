@@ -179,14 +179,18 @@ is not reported as request settlement. Cancellation cleanup is separately bounde
 and cannot be reused after cleanup. The initial client invocation and each injected-clock advance execute behind the
 bounded observation watchdog, so a synchronous timer callback cannot block the observer indefinitely; late work remains
 observed until the logical-call lease can be released. Optional activation telemetry uses the same lifecycle boundary.
-An activation is requested only after a settled scenario has either observed an injected failure published by an
+Telemetry policy: An activation is requested only after a settled scenario has either observed an injected failure
+published by an executed attempt, an executed injected timeout classified as a timeout by the settled client or
+strategy, or a positively recognized native HttpClient.Timeout outcome with at least one executed attempt, and an
+assertion is evaluated at or after settlement. ResponseFault is true only for an HTTP response with status 400 or
+higher published by an executed attempt. ExceptionFault is true only for a network failure published by an
 executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
-recognized native HttpClient.Timeout outcome with at least one executed attempt, and an assertion is evaluated at or
-after settlement. An injected timeout also sets the exception category when the settled result is classified as a
-timeout, and a recognized native HttpClient.Timeout outcome does so only when an attempt reached the scripted
-downstream. Plain caller cancellation and arbitrary timeout exceptions do not add the timeout category. Interim
-live-report and observation-cleanup assertions are not activation evidence, and unused planned fault steps do not set
-telemetry categories.
+positively recognized native HttpClient.Timeout outcome whose cancellation token is the same token passed to an
+executed scripted attempt and is canceled. Plain caller cancellation, arbitrary upstream timeout exceptions
+(including native-shaped exceptions without that token evidence), unused planned script steps, and observation
+cleanup do not set ExceptionFault. Failure categories accumulate across executed attempts: any case with a
+published response or network category produces one signal containing the accumulated categories, while a case
+with no category produces zero sink signals.
 
 Scripted `HttpFault.Delay` durations accept whole milliseconds only and are capped at
 `TimeSpan.FromMilliseconds(int.MaxValue)`. `Retry-After` deltas use integer whole-second wire values and are bounded

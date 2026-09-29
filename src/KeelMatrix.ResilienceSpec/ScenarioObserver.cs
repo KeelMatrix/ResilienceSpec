@@ -267,6 +267,8 @@ internal sealed class ScenarioObserver
     private TimeSpan? _settledVirtualElapsed;
     private bool _settledVirtualElapsedIsExact;
     private bool _injectedTimeoutObserved;
+    private CancellationToken _lastAttemptCancellationToken;
+    private bool _hasAttemptCancellationToken;
 
     internal ScenarioObserver(HttpFaultScript script, TimeProvider? clock, ResilienceScenarioOptions options)
     {
@@ -319,7 +321,7 @@ internal sealed class ScenarioObserver
         }
     }
 
-    internal AttemptScope BeginAttempt(HttpRequestMessage request)
+    internal AttemptScope BeginAttempt(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!LogicalCallOwnership.IsOwnedBy(this, request))
@@ -344,6 +346,8 @@ internal sealed class ScenarioObserver
             _settledVirtualElapsed = null;
             _settledVirtualElapsedIsExact = false;
             var ordinal = ++_ordinal;
+            _lastAttemptCancellationToken = cancellationToken;
+            _hasAttemptCancellationToken = true;
             entry = new AttemptEntry(
                 ordinal,
                 request.Method,
@@ -409,6 +413,27 @@ internal sealed class ScenarioObserver
         }
     }
 
+    internal bool HasNativeHttpClientTimeoutEvidence(Exception exception)
+    {
+        if (!ResilienceResult.IsNativeHttpClientTimeout(exception))
+        {
+            return false;
+        }
+
+        var exceptionToken = ((OperationCanceledException)exception).CancellationToken;
+        lock (_gate)
+        {
+            // This proves token lineage and cancellation at the scripted boundary. It does not claim that a public
+            // API can identify which HttpClient implementation initiated cancellation; an arbitrary token from an
+            // upstream handler therefore fails closed because it cannot equal the executed attempt token.
+            return _hasAttemptCancellationToken &&
+                exceptionToken.CanBeCanceled &&
+                exceptionToken.IsCancellationRequested &&
+                exceptionToken == _lastAttemptCancellationToken &&
+                _lastAttemptCancellationToken.IsCancellationRequested;
+        }
+    }
+
     internal TimeSpan? MarkSettled(bool timeoutOutcome = false, bool nativeHttpClientTimeout = false)
     {
         var virtualElapsed = Elapsed();
@@ -428,8 +453,8 @@ internal sealed class ScenarioObserver
         if (timeoutEvidence)
         {
             // A timeout step itself only waits for cancellation. Record an exception category only when an executed
-            // injected timeout step, or a recognized native HttpClient.Timeout outcome with an executed attempt,
-            // proves the settled caller-visible result is timeout evidence.
+            // injected timeout step, or a native HttpClient.Timeout outcome with positive cancellation-token lineage
+            // evidence from an executed attempt, proves the settled caller-visible result is timeout evidence.
             Telemetry.RecordFailure(responseFault: false, exceptionFault: true);
         }
 

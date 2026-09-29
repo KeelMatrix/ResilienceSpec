@@ -358,6 +358,23 @@ internal sealed class TimeoutAfterTerminalHandler : DelegatingHandler
     }
 }
 
+/// <summary>Replaces a successful terminal result with a forged native-timeout-shaped cancellation.</summary>
+internal sealed class NativeTimeoutAfterTerminalHandler : DelegatingHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var forgedCancellation = new CancellationTokenSource();
+        forgedCancellation.Cancel();
+        throw new TaskCanceledException(
+            "The upstream forged a native timeout shape after the terminal handler succeeded.",
+            new TimeoutException("The forged native timeout elapsed."),
+            forgedCancellation.Token);
+    }
+}
+
 /// <summary>Surfaces the native timeout exception shape without allowing an attempt to reach the terminal handler.</summary>
 internal sealed class NativeTimeoutBeforeTerminalHandler : DelegatingHandler
 {

@@ -24,12 +24,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Timer schedule publication is reentrancy-aware, and initial sends/provider advances are bounded by observation
   watchdogs so immediate changes, one-shot timers, and synchronous callbacks cannot create phantom deadlines or hang
   observation. Each prepared scenario also starts elapsed-time and exact-evidence tracking at logical-call admission.
-- Activation telemetry now counts only settled scenarios with a failure published by an executed attempt or an
-  executed injected timeout classified as a timeout by the client/strategy, plus an assertion evaluated at or after
-  settlement. Canceled delays, unused later script steps, and interim live-report or observation-cleanup assertions do
-  not activate demand measurement. Reported response and network-exception categories come from published outcomes;
-  an injected timeout contributes the exception category only when the settled result is classified as a timeout,
-  never for plain caller cancellation.
+- Telemetry policy: An activation is requested only after a settled scenario has either observed an injected failure
+  published by an executed attempt, an executed injected timeout classified as a timeout by the settled client or
+  strategy, or a positively recognized native HttpClient.Timeout outcome with at least one executed attempt, and an
+  assertion is evaluated at or after settlement. ResponseFault is true only for an HTTP response with status 400 or
+  higher published by an executed attempt. ExceptionFault is true only for a network failure published by an
+  executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
+  positively recognized native HttpClient.Timeout outcome whose cancellation token is the same token passed to an
+  executed scripted attempt and is canceled. Plain caller cancellation, arbitrary upstream timeout exceptions
+  (including native-shaped exceptions without that token evidence), unused planned script steps, and observation
+  cleanup do not set ExceptionFault. Failure categories accumulate across executed attempts: any case with a
+  published response or network category produces one signal containing the accumulated categories, while a case
+  with no category produces zero sink signals.
 - `ShouldRespectRetryAfter` now fails closed when the evaluated interval used sampled or incomplete timing evidence,
   while retaining the minimum-wait rule for exact equal or longer waits.
 - Virtual-time observation now follows legitimate timer-to-timer continuations and correctly retires zero-period,
@@ -91,8 +97,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   and exception messages, with bounded scripts, a bounded attempt timeline that reports `IsOverflowed` and fails
   attempt-state assertions with `AttemptStateOverflowException` instead of truncating silently, and single-consumer
   semantics by default.
-- Best-effort activation telemetry through `KeelMatrix.Telemetry`. An activation is requested only after a settled
-  scenario has either observed an injected failure published by an executed attempt, an executed injected timeout
-  classified as a timeout by the settled client or strategy, or a recognized native HttpClient.Timeout outcome with at
-  least one executed attempt, and an assertion is evaluated at or after settlement. The opt-out remains
+- Best-effort activation telemetry through `KeelMatrix.Telemetry`. Telemetry policy: An activation is requested only
+  after a settled scenario has either observed an injected failure published by an executed attempt, an executed
+  injected timeout classified as a timeout by the settled client or strategy, or a positively recognized native
+  HttpClient.Timeout outcome with at least one executed attempt, and an assertion is evaluated at or after settlement.
+  ResponseFault is true only for an HTTP response with status 400 or higher published by an executed attempt.
+  ExceptionFault is true only for a network failure published by an executed attempt, an executed injected timeout
+  classified as a timeout by the settled client or strategy, or a positively recognized native HttpClient.Timeout
+  outcome whose cancellation token is the same token passed to an executed scripted attempt and is canceled. Plain
+  caller cancellation, arbitrary upstream timeout exceptions (including native-shaped exceptions without that token
+  evidence), unused planned script steps, and observation cleanup do not set ExceptionFault. Failure categories
+  accumulate across executed attempts: any case with a published response or network category produces one signal
+  containing the accumulated categories, while a case with no category produces zero sink signals. The opt-out remains
   `KEELMATRIX_NO_TELEMETRY=1`.

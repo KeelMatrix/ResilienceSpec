@@ -157,15 +157,18 @@ unverified. The implementation-neutral script, report, and assertion core does n
 
 ## Telemetry
 
-An activation is requested only after a settled scenario has either observed an injected failure published by an
+Telemetry policy: An activation is requested only after a settled scenario has either observed an injected failure
+published by an executed attempt, an executed injected timeout classified as a timeout by the settled client or
+strategy, or a positively recognized native HttpClient.Timeout outcome with at least one executed attempt, and an
+assertion is evaluated at or after settlement. ResponseFault is true only for an HTTP response with status 400 or
+higher published by an executed attempt. ExceptionFault is true only for a network failure published by an
 executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
-recognized native HttpClient.Timeout outcome with at least one executed attempt, and an assertion is evaluated at or
-after settlement. Response and network-exception categories come from published attempt outcomes. An injected timeout
-also contributes the exception category when the settled client or resilience strategy classifies the outcome as a
-timeout, and a recognized native HttpClient.Timeout outcome contributes it only when an attempt reached the scripted
-downstream. Plain caller cancellation, arbitrary timeout exceptions, unused later script steps, a delayed failure
-canceled before its wrapped fault starts, and assertions against an interim live or observation-cleanup report do not
-activate telemetry or add the timeout category. Telemetry is best-effort, cannot break the host,
+positively recognized native HttpClient.Timeout outcome whose cancellation token is the same token passed to an
+executed scripted attempt and is canceled. Plain caller cancellation, arbitrary upstream timeout exceptions
+(including native-shaped exceptions without that token evidence), unused planned script steps, and observation
+cleanup do not set ExceptionFault. Failure categories accumulate across executed attempts: any case with a
+published response or network category produces one signal containing the accumulated categories, while a case
+with no category produces zero sink signals. Telemetry is best-effort, cannot break the host,
 and can be disabled with
 `KEELMATRIX_NO_TELEMETRY=1`. The package never transmits request data, client names, URLs, headers, bodies, or
 exception messages.

@@ -83,7 +83,7 @@ public sealed class ScriptedHttpMessageHandler : HttpMessageHandler
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        using var attempt = _observer.BeginAttempt(request);
+        using var attempt = _observer.BeginAttempt(request, cancellationToken);
         var fault = attempt.Entry.Fault;
         if (fault is null)
         {
