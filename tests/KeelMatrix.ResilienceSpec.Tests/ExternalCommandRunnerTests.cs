@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Xunit;
 
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
 namespace KeelMatrix.ResilienceSpec.Tests;
 
 [CollectionDefinition("External command process-tree fixtures", DisableParallelization = true)]
