@@ -171,13 +171,23 @@ $results | ConvertTo-Json -Compress
     }
 
     [Fact]
-    public void UnixDetachedDescendantIsContainedOrFailsClosed()
+    public void UnixDetachedDescendantIsContainedOrFailsClosedOrReportsMacLimitation()
     {
         var result = RunFixture("Detached");
         var output = result.GetProperty("Output").GetString() ?? string.Empty;
         var match = Regex.Match(output, "child=(\\d+)", RegexOptions.CultureInvariant);
 
         Assert.True(match.Success, output);
+
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.Equal("macos-session-process-group", result.GetProperty("ContainmentKind").GetString());
+            Assert.Contains("new session", result.GetProperty("ContainmentLimitation").GetString(), StringComparison.OrdinalIgnoreCase);
+            Assert.True(result.GetProperty("CaptureComplete").GetBoolean());
+            Assert.True(WaitForProcessExit(int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)));
+            return;
+        }
+
         Assert.False(result.GetProperty("Succeeded").GetBoolean());
         Assert.False(result.GetProperty("DescendantsContained").GetBoolean());
         Assert.Contains("descendant", result.GetProperty("FailureReason").GetString(), StringComparison.OrdinalIgnoreCase);
