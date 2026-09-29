@@ -77,7 +77,7 @@ $childStartInfo.UseShellExecute = $false
 $childStartInfo.CreateNoWindow = $true
 [void]$childStartInfo.ArgumentList.Add('-NoProfile')
 [void]$childStartInfo.ArgumentList.Add('-Command')
-[void]$childStartInfo.ArgumentList.Add('$grandchild = Start-Process -FilePath "__PWSH_PATH__" -ArgumentList @("-NoProfile", "-Command", "Start-Sleep -Seconds 30") -PassThru -WindowStyle Hidden; [Console]::WriteLine(("grandchild=" + $grandchild.Id)); Start-Sleep -Seconds 30')
+[void]$childStartInfo.ArgumentList.Add('$grandchildStartInfo = [Diagnostics.ProcessStartInfo]::new(); $grandchildStartInfo.FileName = "__PWSH_PATH__"; $grandchildStartInfo.UseShellExecute = $false; $grandchildStartInfo.CreateNoWindow = $true; [void]$grandchildStartInfo.ArgumentList.Add("-NoProfile"); [void]$grandchildStartInfo.ArgumentList.Add("-Command"); [void]$grandchildStartInfo.ArgumentList.Add("Start-Sleep -Seconds 30"); $grandchild = [Diagnostics.Process]::Start($grandchildStartInfo); [Console]::WriteLine(("grandchild=" + $grandchild.Id)); Start-Sleep -Seconds 30')
 $child = [Diagnostics.Process]::Start($childStartInfo)
 [Console]::WriteLine(('child=' + $child.Id))
 $child.Dispose()
@@ -88,7 +88,14 @@ exit 0
         $pwshBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pwsh))
         $arguments += @'
 $pwsh = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PWSH_PATH__'))
-$grandchild = Start-Process -FilePath $pwsh -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
+$grandchildStartInfo = [Diagnostics.ProcessStartInfo]::new()
+$grandchildStartInfo.FileName = $pwsh
+$grandchildStartInfo.UseShellExecute = $false
+$grandchildStartInfo.CreateNoWindow = $true
+[void]$grandchildStartInfo.ArgumentList.Add('-NoProfile')
+[void]$grandchildStartInfo.ArgumentList.Add('-Command')
+[void]$grandchildStartInfo.ArgumentList.Add('Start-Sleep -Seconds 30')
+$grandchild = [Diagnostics.Process]::Start($grandchildStartInfo)
 [Console]::WriteLine(('grandchild=' + $grandchild.Id))
 exit 0
 '@.Replace('__PWSH_PATH__', $pwshBase64)
