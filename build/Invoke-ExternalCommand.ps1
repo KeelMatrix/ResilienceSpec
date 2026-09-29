@@ -586,8 +586,12 @@ function Invoke-ExternalCommand {
     $stdoutMarkerTask = $null
     $savedBuildServerReuse = [Environment]::GetEnvironmentVariable('MSBUILDDISABLENODEREUSE', 'Process')
     $savedDotnetBuildServerDisable = [Environment]::GetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', 'Process')
+    $savedSharedCompilation = [Environment]::GetEnvironmentVariable('UseSharedCompilation', 'Process')
+    $savedMsBuildNodeReuse = [Environment]::GetEnvironmentVariable('MSBuildNodeReuse', 'Process')
     [Environment]::SetEnvironmentVariable('MSBUILDDISABLENODEREUSE', '1', 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', '1', 'Process')
+    [Environment]::SetEnvironmentVariable('UseSharedCompilation', 'false', 'Process')
+    [Environment]::SetEnvironmentVariable('MSBuildNodeReuse', 'false', 'Process')
 
     try {
         if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) {
@@ -609,7 +613,25 @@ function Invoke-ExternalCommand {
         }
         else {
             $pwshPath = Resolve-ExternalExecutable -FilePath ([string]::Join('', @('p', 'w', 's', 'h')))
-            $wrapperCommand = 'Add-Type -Name ExternalCommandSession -Namespace KeelMatrix -MemberDefinition ''[DllImport("libc")] public static extern int setsid();''; if ([KeelMatrix.ExternalCommandSession]::setsid() -lt 0) { exit 125 }; [Console]::WriteLine("__KEELMATRIX_EXTERNAL_COMMAND_CONTAINED__"); if ($args.Count -gt 1) { & $args[0] @($args[1..($args.Count - 1)]) } else { & $args[0] }; exit $LASTEXITCODE'
+            $payload = [ordered]@{
+                FilePath  = $resolvedFilePath
+                Arguments = @($ArgumentList | ForEach-Object { [string]$_ })
+            } | ConvertTo-Json -Compress
+            $payloadBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
+            $sessionSource = 'using System.Runtime.InteropServices; public static class ExternalCommandSession { [DllImport("libc")] public static extern int setsid(); }'
+            $sessionSourceBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sessionSource))
+            $wrapperCommand = @'
+$source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__SESSION_SOURCE__'))
+Add-Type -TypeDefinition $source
+if ([ExternalCommandSession]::setsid() -lt 0) { exit 125 }
+[Console]::WriteLine('__KEELMATRIX_EXTERNAL_COMMAND_CONTAINED__')
+$payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ARGUMENT_PAYLOAD__'))
+$invocation = $payload | ConvertFrom-Json
+$target = [string]$invocation.FilePath
+$arguments = @($invocation.Arguments | ForEach-Object { [string]$_ })
+& $target @arguments
+exit $LASTEXITCODE
+'@.Replace('__SESSION_SOURCE__', $sessionSourceBase64).Replace('__ARGUMENT_PAYLOAD__', $payloadBase64)
             $startInfo = [Diagnostics.ProcessStartInfo]::new()
             $startInfo.FileName = $pwshPath
             $startInfo.WorkingDirectory = $WorkingDirectory
@@ -620,10 +642,6 @@ function Invoke-ExternalCommand {
             [void]$startInfo.ArgumentList.Add('-NoProfile')
             [void]$startInfo.ArgumentList.Add('-Command')
             [void]$startInfo.ArgumentList.Add($wrapperCommand)
-            [void]$startInfo.ArgumentList.Add($resolvedFilePath)
-            foreach ($argument in $ArgumentList) {
-                [void]$startInfo.ArgumentList.Add([string]$argument)
-            }
 
             $process = [Diagnostics.Process]::new()
             $process.StartInfo = $startInfo
@@ -775,6 +793,8 @@ function Invoke-ExternalCommand {
 
         [Environment]::SetEnvironmentVariable('MSBUILDDISABLENODEREUSE', $savedBuildServerReuse, 'Process')
         [Environment]::SetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', $savedDotnetBuildServerDisable, 'Process')
+        [Environment]::SetEnvironmentVariable('UseSharedCompilation', $savedSharedCompilation, 'Process')
+        [Environment]::SetEnvironmentVariable('MSBuildNodeReuse', $savedMsBuildNodeReuse, 'Process')
     }
 
     New-ExternalCommandResult -ExitCode $exitCode -TimedOut $timedOut -Output $output -Error $errorText `
