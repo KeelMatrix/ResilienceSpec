@@ -662,6 +662,9 @@ exit $LASTEXITCODE
             $stdoutTask = $process.StandardOutput.ReadToEndAsync()
             $completed = $process.WaitForExit([int]([int64]$TimeoutSeconds * 1000))
             $timedOut = -not $completed
+            if ($completed) {
+                $exitCode = $process.ExitCode
+            }
         }
 
         if ($timedOut) {
@@ -723,9 +726,6 @@ exit $LASTEXITCODE
 
             if ($IsWindows) {
                 $exitCode = [KeelMatrix.ExternalCommandNative]::GetExitCode($native.ProcessHandle)
-            }
-            else {
-                $exitCode = $process.ExitCode
             }
         }
     }
