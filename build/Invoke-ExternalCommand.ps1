@@ -542,30 +542,54 @@ function New-UnixProcessCgroup {
     }
 
     $root = '/sys/fs/cgroup'
-    $controllers = Join-Path $root 'cgroup.controllers'
-    if (-not (Test-Path -LiteralPath $controllers -PathType Leaf)) {
-        throw 'Unix process-tree containment requires an available cgroup v2 hierarchy.'
-    }
+    $parents = [System.Collections.Generic.List[string]]::new()
+    [void]$parents.Add($root)
+    $currentCgroupFile = '/proc/self/cgroup'
+    if (Test-Path -LiteralPath $currentCgroupFile -PathType Leaf) {
+        foreach ($line in [IO.File]::ReadAllLines($currentCgroupFile)) {
+            $match = [regex]::Match($line, '^0::(?<path>/.*)$')
+            if ($match.Success) {
+                $relative = $match.Groups['path'].Value.TrimStart('/')
+                if (-not [string]::IsNullOrWhiteSpace($relative)) {
+                    $candidate = Join-Path $root $relative
+                    if (-not $parents.Contains($candidate)) {
+                        [void]$parents.Add($candidate)
+                    }
+                }
 
-    $name = "keelmatrix-external-$PID-$([Guid]::NewGuid().ToString('N'))"
-    $path = Join-Path $root $name
-    try {
-        [IO.Directory]::CreateDirectory($path) | Out-Null
-        foreach ($required in @('cgroup.procs', 'cgroup.events')) {
-            if (-not (Test-Path -LiteralPath (Join-Path $path $required) -PathType Leaf)) {
-                throw "The cgroup v2 containment directory did not expose '$required'."
+                break
             }
         }
-
-        return $path
     }
-    catch {
-        if (Test-Path -LiteralPath $path -PathType Container) {
-            try { [IO.Directory]::Delete($path) } catch { }
+
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($parent in $parents) {
+        if (-not (Test-Path -LiteralPath (Join-Path $parent 'cgroup.controllers') -PathType Leaf)) {
+            continue
         }
 
-        throw "Unable to establish Unix cgroup v2 containment: $($_.Exception.Message)"
+        $name = "keelmatrix-external-$PID-$([Guid]::NewGuid().ToString('N'))"
+        $path = Join-Path $parent $name
+        try {
+            [IO.Directory]::CreateDirectory($path) | Out-Null
+            foreach ($required in @('cgroup.procs', 'cgroup.events')) {
+                if (-not (Test-Path -LiteralPath (Join-Path $path $required) -PathType Leaf)) {
+                    throw "The cgroup v2 containment directory did not expose '$required'."
+                }
+            }
+
+            return $path
+        }
+        catch {
+            [void]$errors.Add("${parent}: $($_.Exception.Message)")
+            if (Test-Path -LiteralPath $path -PathType Container) {
+                try { [IO.Directory]::Delete($path) } catch { }
+            }
+        }
     }
+
+    $detail = if ($errors.Count -gt 0) { " Attempts: $($errors -join ' | ')" } else { '' }
+    throw "Unable to establish Unix cgroup v2 containment in a writable hierarchy.$detail"
 }
 
 function Add-UnixProcessToCgroup {
