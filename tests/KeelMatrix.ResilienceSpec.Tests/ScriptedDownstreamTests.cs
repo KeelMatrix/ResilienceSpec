@@ -209,7 +209,7 @@ public sealed class ScriptedDownstreamTests
             scenario.Handler,
             new RetryHandler(callCount - 1, TimeSpan.Zero, TimeProvider.System, Chains.IsRetryableStatus));
 
-        var snapshotter = Task.Run(() =>
+        var snapshotter = Task.Factory.StartNew(() =>
         {
             try
             {
@@ -228,14 +228,14 @@ public sealed class ScriptedDownstreamTests
                         }
                     }
 
-                    Thread.Yield();
+                    Thread.Sleep(1);
                 }
             }
             catch (Exception exception)
             {
                 errors.Enqueue(exception);
             }
-        });
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         await snapshotStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         using var request = Chains.Request(HttpMethod.Get);
