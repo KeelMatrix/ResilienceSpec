@@ -218,8 +218,8 @@ public sealed class ReleaseContractTests
         Assert.Contains("refs/remotes/origin/main", workflow, StringComparison.Ordinal);
         Assert.Contains("dotnet format", workflow, StringComparison.Ordinal);
         Assert.Contains("dotnet build KeelMatrix.ResilienceSpec.slnx", workflow, StringComparison.Ordinal);
-        Assert.Contains("ResilienceVersion=9.8.0", workflow, StringComparison.Ordinal);
-        Assert.Contains("ResilienceVersion=10.10.0", workflow, StringComparison.Ordinal);
+        Assert.Contains("-ResilienceVersion 9.8.0", workflow, StringComparison.Ordinal);
+        Assert.Contains("-ResilienceVersion 10.10.0", workflow, StringComparison.Ordinal);
         Assert.Contains("Invoke-PackageSmoke.ps1", workflow, StringComparison.Ordinal);
         Assert.Contains("Invoke-DependencyAudit.ps1 -Mode Required", workflow, StringComparison.Ordinal);
         Assert.True(

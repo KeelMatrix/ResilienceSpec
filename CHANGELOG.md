@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ### Fixed
 
+- The bounded external-command runner now establishes process-tree containment before execution, fails closed on
+  incomplete capture, timeout, termination, nonzero exit, or surviving descendants, and is used by every package-smoke
+  and sample gate invocation; executable process-tree fixtures cover the success, diagnostics, timeout, and orphan cases.
 - Full validation now bounds every repository command and test step, and the dependency audit terminates its advisory
   query child process with captured diagnostics on timeout; hosted validation gives the full-validation and direct
   integration steps their own deadlines.

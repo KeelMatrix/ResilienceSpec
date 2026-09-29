@@ -156,8 +156,8 @@ other dependencies from NuGet.org into an isolated cache, verifies the restored 
 `build/ResilienceCompatibility.props` is the canonical source for the first-party integration versions. The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified. `Directory.Packages.props` imports that source through the `ResilienceVersion` property. Run the integration suite once per verified endpoint; hosted validation runs both explicitly:
 
 ```powershell
-dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
-dotnet test .\tests\KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0
+pwsh -NoProfile -File .\scripts\Invoke-IntegrationTests.ps1 -ResilienceVersion 9.8.0
+pwsh -NoProfile -File .\scripts\Invoke-IntegrationTests.ps1 -ResilienceVersion 10.10.0
 ```
 
 ## Deterministic timing contract
@@ -208,8 +208,13 @@ the wait runs on the injected clock, so it is deliberately not exposed.
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required` fails closed unless direct and transitive advisory data is
 available and every project reports no vulnerable packages from `https://api.nuget.org/v3/index.json`. Full validation
 runs this audit on Windows, Linux, and macOS. The audit's `dotnet list package --vulnerable --include-transitive`
-child command has a 120-second deadline, captures both output streams, and terminates the child process tree on
-expiry; a timeout names the blocked operation and fails closed. Full validation also applies per-step watchdogs:
+child command has a 120-second deadline, captures both output streams, and runs inside the shared bounded external-command
+runner. The runner establishes a Windows Job Object or Unix `setsid` process group before execution, owns the whole
+process tree for the command lifetime, and fails closed when containment, capture, termination, or exit status cannot be
+proven. A timeout names the blocked operation and fails closed. All validation-script gate commands, including package
+smoke, inspection, restore, the final consumer, the sample run, and the direct integration endpoints, use the same
+runner; stdout is printed before stderr, so the runner does not promise cross-stream chronology. Full validation also
+applies per-step watchdogs:
 60 seconds for repository guards, 180 seconds for restore, 300 seconds for formatting/build/sample, 360 seconds for
 each test project, 600 seconds for package smoke, and 180 seconds for the audit step. Audit evidence is valid only
 for the exact candidate and hosted run that produced it, so use the current candidate's CI conclusion rather than a

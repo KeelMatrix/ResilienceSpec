@@ -19,5 +19,5 @@ fi
 
 pwsh -NoProfile -File scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0
 
-dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
-dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0
+pwsh -NoProfile -File scripts/Invoke-IntegrationTests.ps1 -ResilienceVersion 9.8.0
+pwsh -NoProfile -File scripts/Invoke-IntegrationTests.ps1 -ResilienceVersion 10.10.0

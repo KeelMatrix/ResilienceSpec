@@ -36,6 +36,10 @@ function Invoke-Step {
         throw "$Name timed out after $TimeoutSeconds seconds; blocked operation: $File $($Arguments -join ' '). The child process was terminated.$killSuffix"
     }
 
+    if (-not $result.Succeeded) {
+        throw "$Name failed closed: $($result.FailureReason)"
+    }
+
     $exitCode = $result.ExitCode
     Write-Host ("   exit {0} in {1:n1}s" -f $exitCode, $elapsed.TotalSeconds)
     if ($exitCode -ne 0) {

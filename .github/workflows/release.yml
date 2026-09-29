@@ -114,13 +114,14 @@ jobs:
 
       - name: Run integration endpoint 9.8.0
         shell: pwsh
-        run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
+        run: pwsh -NoProfile -File scripts/Invoke-IntegrationTests.ps1 -ResilienceVersion 9.8.0
 
       - name: Run integration endpoint 10.10.0
         shell: pwsh
-        run: dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=10.10.0
+        run: pwsh -NoProfile -File scripts/Invoke-IntegrationTests.ps1 -ResilienceVersion 10.10.0
 
       - name: Run package smoke and sample
+        timeout-minutes: 15
         shell: pwsh
         run: |
           pwsh -NoProfile -File scripts/Invoke-PackageSmoke.ps1

@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../build/Invoke-ExternalCommand.ps1')
 
 function Convert-CodePoints {
     param([Parameter(Mandatory = $true)][int[]]$Codes)
@@ -13,15 +14,17 @@ function Convert-CodePoints {
 }
 
 function Get-AuthoredFiles {
-    $tracked = @(& git -C $RepositoryPath ls-files 2>$null)
-    if ($LASTEXITCODE -eq 0 -and $tracked.Count -gt 0) {
-        return $tracked
+    $result = Invoke-ExternalCommand -FilePath 'git' -ArgumentList @('-C', $RepositoryPath, 'ls-files') -WorkingDirectory $RepositoryPath -TimeoutSeconds 60
+    if (-not $result.Succeeded) {
+        throw "Documentation hygiene could not resolve tracked files: $($result.FailureReason)"
     }
 
-    return @(
-        Get-ChildItem -LiteralPath $RepositoryPath -File -Recurse |
-            ForEach-Object { [IO.Path]::GetRelativePath($RepositoryPath, $_.FullName).Replace('\', '/') }
-    )
+    $tracked = @($result.Output -split "`r?`n" | Where-Object { $_ -ne '' })
+    if ($tracked.Count -eq 0) {
+        throw 'Documentation hygiene could not resolve any tracked files.'
+    }
+
+    return $tracked
 }
 
 function Test-BomlessUtf16Pattern {

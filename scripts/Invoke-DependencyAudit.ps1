@@ -69,6 +69,11 @@ try {
         exit 1
     }
 
+    if (-not $result.Succeeded) {
+        Write-AuditSummary "Dependency audit: unavailable; command failed closed: $($result.FailureReason)"
+        exit 1
+    }
+
     if ($auditOutput -match '(?im)has the following vulnerable package|NU190[1-4]') {
         Write-AuditSummary 'Dependency audit: vulnerable package data was returned.'
         exit 1

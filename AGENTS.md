@@ -13,7 +13,7 @@
   deliberately outside the solution.
 - `samples/KeelMatrix.ResilienceSpec.Sample` is a runnable walkthrough of the documented quick start.
 - `scripts` contains the repository gates: `Validate.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`,
-  `Invoke-DependencyAudit.ps1`, `Validate-History.ps1`, `Validate-DocumentationHygiene.ps1`,
+  `Invoke-IntegrationTests.ps1`, `Invoke-DependencyAudit.ps1`, `Validate-History.ps1`, `Validate-DocumentationHygiene.ps1`,
   `Validate-ReleaseProvenance.ps1`, and `Validate-ReleaseContract.ps1`.
 - `docs/DEV.md` explains the local validation path; `README.md` and `src/KeelMatrix.ResilienceSpec/README.md` are the
   user-facing documentation.
@@ -74,6 +74,10 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   `PublicAPI.Unshipped.txt` and is promoted to `PublicAPI.Shipped.txt` during release preparation.
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is
   allowed on the validation path.
+- Every external validation gate runs through `build/Invoke-ExternalCommand.ps1`. The runner must establish Windows
+  Job Object or Unix process-group containment before starting the command, capture both streams completely, report
+  exit/timeout/termination/descendant state explicitly, and fail closed unless the whole process tree is owned and
+  drained. It prints stdout before stderr; cross-stream chronology is not part of the contract.
 - Set `KEELMATRIX_NO_TELEMETRY=1` for local validation. Repository validation must never emit production telemetry.
 - Release-tag validation requires `[Unreleased]` to contain only its heading and blank lines. Reachable commit history
   is also checked for non-product provenance or authorship metadata, prohibited trailers, and non-conforming

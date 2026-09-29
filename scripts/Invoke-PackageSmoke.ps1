@@ -36,6 +36,10 @@ function Invoke-Checked {
         throw "Command '$File $($Arguments -join ' ')' timed out after $TimeoutSeconds seconds; blocked operation: $File $($Arguments -join ' '). The child process was terminated.$killSuffix"
     }
 
+    if (-not $result.Succeeded) {
+        throw "Command '$File $($Arguments -join ' ')' failed closed: $($result.FailureReason)"
+    }
+
     $exitCode = $result.ExitCode
     Write-Output ("  {0} {1} (exit {2}, {3:n1}s)" -f $File, ($Arguments -join ' '), $exitCode, $elapsed.TotalSeconds)
     if ($exitCode -ne 0) {
@@ -121,22 +125,17 @@ try {
 
     $expectedCommit = $ExpectedRepositoryCommit
     if ([string]::IsNullOrWhiteSpace($expectedCommit)) {
-        $expectedCommit = (& git -C $repo rev-parse HEAD 2>&1 | Out-String).Trim()
-        Assert-Contract ($LASTEXITCODE -eq 0) 'Unable to resolve the repository commit.'
+        $commitResult = Invoke-ExternalCommand -FilePath 'git' -ArgumentList @('-C', $repo, 'rev-parse', 'HEAD') -WorkingDirectory $repo -TimeoutSeconds 60
+        Assert-Contract $commitResult.Succeeded "Unable to resolve the repository commit: $($commitResult.FailureReason)"
+        $expectedCommit = $commitResult.Output.Trim()
     }
 
     $globalJson = Get-Content -LiteralPath (Join-Path $repo 'global.json') -Raw | ConvertFrom-Json
     $expectedSdkVersion = [string]$globalJson.sdk.version
     $rollForward = [string]$globalJson.sdk.rollForward
-    Push-Location $repo
-    try {
-        $selectedSdkVersion = (& dotnet --version 2>&1 | Out-String).Trim()
-        $sdkExitCode = $LASTEXITCODE
-    }
-    finally {
-        Pop-Location
-    }
-    Assert-Contract ($sdkExitCode -eq 0 -and $selectedSdkVersion -match '^\d+\.\d+\.\d+$') 'Unable to resolve the selected .NET SDK version.'
+    $sdkResult = Invoke-ExternalCommand -FilePath 'dotnet' -ArgumentList @('--version') -WorkingDirectory $repo -TimeoutSeconds 60
+    $selectedSdkVersion = $sdkResult.Output.Trim()
+    Assert-Contract ($sdkResult.Succeeded -and $selectedSdkVersion -match '^\d+\.\d+\.\d+$') "Unable to resolve the selected .NET SDK version: $($sdkResult.FailureReason)"
     Assert-Contract ($rollForward -ceq 'disable') 'global.json must disable SDK roll-forward for package identity evidence.'
     Assert-Contract ($selectedSdkVersion -ceq $expectedSdkVersion) "The selected .NET SDK '$selectedSdkVersion' does not match pinned global.json SDK '$expectedSdkVersion'."
     Write-Output "Package identity toolchain: .NET SDK $selectedSdkVersion; global.json rollForward=$rollForward"
@@ -280,12 +279,14 @@ try {
 
     Write-Output 'Run the clean consumer'
     $smokeStart = Get-Date
-    $smokeOutput = (& dotnet run --project $smokeProject -c Release --no-restore "-p:RestorePackagesPath=$consumerPackages" 2>&1 | Out-String)
-    $smokeExitCode = $LASTEXITCODE
+    $smokeResult = Invoke-ExternalCommand -FilePath 'dotnet' -ArgumentList @(
+        'run', '--project', $smokeProject, '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$consumerPackages") `
+        -WorkingDirectory $repo -TimeoutSeconds 300
+    $smokeOutput = (@($smokeResult.Output, $smokeResult.Error) -join [Environment]::NewLine).TrimEnd()
     $smokeElapsed = (Get-Date) - $smokeStart
     Write-Output $smokeOutput
     $smokeOutput | Set-Content -LiteralPath $smokeLog -Encoding utf8
-    Assert-Contract ($smokeExitCode -eq 0) "The clean package consumer failed with exit code $smokeExitCode."
+    Assert-Contract $smokeResult.Succeeded "The clean package consumer failed closed: $($smokeResult.FailureReason)"
 
     Write-Output ("Package smoke passed in {0:n1}s. Log: {1}" -f $smokeElapsed.TotalSeconds, $smokeLog)
     exit 0

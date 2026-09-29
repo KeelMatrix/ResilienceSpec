@@ -19,6 +19,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../build/Invoke-ExternalCommand.ps1')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $packageId = 'KeelMatrix.ResilienceSpec'
@@ -49,8 +50,9 @@ function Get-ExpectedCommit {
     }
 
     $repo = Split-Path -Parent $PSScriptRoot
-    $resolved = (& git -C $repo rev-parse HEAD 2>&1 | Out-String).Trim()
-    Assert-Contract ($LASTEXITCODE -eq 0 -and $resolved -match '^[0-9a-fA-F]{40}$') 'Unable to resolve the expected repository commit.'
+    $result = Invoke-ExternalCommand -FilePath 'git' -ArgumentList @('-C', $repo, 'rev-parse', 'HEAD') -WorkingDirectory $repo -TimeoutSeconds 60
+    $resolved = $result.Output.Trim()
+    Assert-Contract ($result.Succeeded -and $resolved -match '^[0-9a-fA-F]{40}$') "Unable to resolve the expected repository commit: $($result.FailureReason)"
     return $resolved.ToLowerInvariant()
 }
 

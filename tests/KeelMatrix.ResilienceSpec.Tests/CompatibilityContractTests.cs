@@ -48,7 +48,7 @@ public sealed class CompatibilityContractTests
         var workflow = File.ReadAllText(workflowPath);
         File.WriteAllText(
             workflowPath,
-            workflow.Replace("-p:ResilienceVersion=9.8.0", "-p:ResilienceVersion=9.7.0", StringComparison.Ordinal));
+            workflow.Replace("-ResilienceVersion 9.8.0", "-ResilienceVersion 9.7.0", StringComparison.Ordinal));
 
         var result = RunValidator(repository.Path);
 
@@ -131,18 +131,14 @@ public sealed class CompatibilityContractTests
     }
 
     [Fact]
-    public void DependencyAuditBoundsAndCapturesItsChildCommand()
+    public void ExternalGateScriptsUseTheBoundedRunner()
     {
         var repository = FindRepositoryRoot();
         var audit = File.ReadAllText(Path.Combine(repository, "scripts", "Invoke-DependencyAudit.ps1"));
-        var runner = File.ReadAllText(Path.Combine(repository, "build", "Invoke-ExternalCommand.ps1"));
 
         Assert.Contains("[int]$TimeoutSeconds = 120", audit, StringComparison.Ordinal);
         Assert.Contains("blocked operation: dotnet list package --vulnerable --include-transitive", audit, StringComparison.Ordinal);
         Assert.Contains("Invoke-ExternalCommand", audit, StringComparison.Ordinal);
-        Assert.Contains("ReadToEndAsync", runner, StringComparison.Ordinal);
-        Assert.Contains("WaitForExit", runner, StringComparison.Ordinal);
-        Assert.Contains("$process.Kill($true)", runner, StringComparison.Ordinal);
 
         foreach (var relativePath in new[] { "scripts/Invoke-PackageSmoke.ps1", "scripts/Run-Sample.ps1" })
         {

@@ -34,6 +34,10 @@ function Invoke-Checked {
         throw "Command '$File $($Arguments -join ' ')' timed out after $TimeoutSeconds seconds; blocked operation: $File $($Arguments -join ' '). The child process was terminated.$killSuffix"
     }
 
+    if (-not $result.Succeeded) {
+        throw "Command '$File $($Arguments -join ' ')' failed closed: $($result.FailureReason)"
+    }
+
     $exitCode = $result.ExitCode
     Write-Output ("  {0} {1} (exit {2}, {3:n1}s)" -f $File, ($Arguments -join ' '), $exitCode, $elapsed.TotalSeconds)
     if ($exitCode -ne 0) {
@@ -82,8 +86,9 @@ try {
 
     $expectedCommit = $ExpectedRepositoryCommit
     if ([string]::IsNullOrWhiteSpace($expectedCommit)) {
-        $expectedCommit = (& git -C $repo rev-parse HEAD 2>&1 | Out-String).Trim()
-        Assert-Contract ($LASTEXITCODE -eq 0) 'Unable to resolve the repository commit.'
+        $commitResult = Invoke-ExternalCommand -FilePath 'git' -ArgumentList @('-C', $repo, 'rev-parse', 'HEAD') -WorkingDirectory $repo -TimeoutSeconds 60
+        Assert-Contract $commitResult.Succeeded "Unable to resolve the repository commit: $($commitResult.FailureReason)"
+        $expectedCommit = $commitResult.Output.Trim()
     }
 
     foreach ($name in @(
@@ -183,11 +188,13 @@ try {
 
     Write-Output 'Run the sample against the packed package'
     $sampleStart = Get-Date
-    $sampleOutput = (& dotnet run --project $sampleProject -c Release --no-restore "-p:RestorePackagesPath=$consumerPackages" 2>&1 | Out-String)
-    $sampleExitCode = $LASTEXITCODE
+    $sampleResult = Invoke-ExternalCommand -FilePath 'dotnet' -ArgumentList @(
+        'run', '--project', $sampleProject, '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$consumerPackages") `
+        -WorkingDirectory $repo -TimeoutSeconds 300
+    $sampleOutput = (@($sampleResult.Output, $sampleResult.Error) -join [Environment]::NewLine).TrimEnd()
     $sampleElapsed = (Get-Date) - $sampleStart
     Write-Output $sampleOutput.TrimEnd()
-    Assert-Contract ($sampleExitCode -eq 0) "The package-backed sample failed with exit code $sampleExitCode."
+    Assert-Contract $sampleResult.Succeeded "The package-backed sample failed closed: $($sampleResult.FailureReason)"
     Write-Output ("Package-backed sample passed in {0:n1}s." -f $sampleElapsed.TotalSeconds)
     exit 0
 }

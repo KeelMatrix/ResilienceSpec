@@ -7,6 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../build/Invoke-ExternalCommand.ps1')
 
 function Fail-History {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -19,12 +20,12 @@ function Invoke-GitText {
         [Parameter(Mandatory = $true)][string[]]$Arguments
     )
 
-    $output = @(& git -C $RepositoryPath @Arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        Fail-History "Git command failed: git -C '$RepositoryPath' $($Arguments -join ' ')`n$($output -join "`n")"
+    $result = Invoke-ExternalCommand -FilePath 'git' -ArgumentList (@('-C', $RepositoryPath) + $Arguments) -WorkingDirectory $RepositoryPath -TimeoutSeconds 60
+    if (-not $result.Succeeded) {
+        Fail-History "Git command failed closed: git -C '$RepositoryPath' $($Arguments -join ' ')`n$($result.FailureReason)`n$($result.Output)`n$($result.Error)"
     }
 
-    return $output
+    return @($result.Output -split "`r?`n")
 }
 
 function Get-CommitData {

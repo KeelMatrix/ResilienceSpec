@@ -78,7 +78,7 @@ foreach ($document in $requiredDocuments) {
 $workflow = Read-Text '.github/workflows/validate.yml'
 $linuxGate = Read-Text 'scripts/validate-linux.sh'
 foreach ($version in $versions) {
-    $matrixToken = "-p:ResilienceVersion=$version"
+    $matrixToken = "-ResilienceVersion $version"
     Assert-Contract ($workflow.Contains($matrixToken, [StringComparison]::Ordinal)) `
         ".github/workflows/validate.yml must execute the $version integration endpoint."
     Assert-Contract ($linuxGate.Contains($matrixToken, [StringComparison]::Ordinal)) `

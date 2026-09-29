@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../build/Invoke-ExternalCommand.ps1')
 
 function Fail-Contract {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -20,9 +21,11 @@ function Fail-Contract {
 function Get-MSBuildProperties {
     param([Parameter(Mandatory = $true)][string]$ProjectPath)
 
-    $output = (& dotnet msbuild $ProjectPath -nologo -getProperty:PackageId -getProperty:Version -getProperty:IsPackable 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) {
-        Fail-Contract "Unable to read package metadata from '$ProjectPath'."
+    $repository = Split-Path -Parent $PSScriptRoot
+    $result = Invoke-ExternalCommand -FilePath 'dotnet' -ArgumentList @('msbuild', $ProjectPath, '-nologo', '-getProperty:PackageId', '-getProperty:Version', '-getProperty:IsPackable') -WorkingDirectory $repository -TimeoutSeconds 120
+    $output = $result.Output.Trim()
+    if (-not $result.Succeeded) {
+        Fail-Contract "Unable to read package metadata from '$ProjectPath': $($result.FailureReason)"
     }
 
     try {
