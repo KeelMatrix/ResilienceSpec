@@ -9,6 +9,70 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $helperPath = Join-Path $PSScriptRoot 'Invoke-NestedPwsh.ps1'
 $guardPath = $PSCommandPath
 
+function Get-ParsedCommandRecords(
+    [string]$Text,
+    [string]$Path,
+    [System.Management.Automation.Language.Ast]$InitialAst
+) {
+    $pending = [System.Collections.Generic.Queue[object]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $pending.Enqueue([pscustomobject]@{
+            Text = $Text
+            Ast = $InitialAst
+            BaseLine = 0
+            Embedded = $false
+        })
+
+    while ($pending.Count -gt 0) {
+        $item = $pending.Dequeue()
+        if ([string]::IsNullOrWhiteSpace($item.Text) -or -not $seen.Add($item.Text)) {
+            continue
+        }
+
+        $ast = $item.Ast
+        if ($null -eq $ast) {
+            $tokens = $null
+            $parseErrors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput(
+                $item.Text,
+                [ref]$tokens,
+                [ref]$parseErrors)
+            if ($parseErrors.Count -gt 0) {
+                continue
+            }
+        }
+
+        foreach ($command in @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true))) {
+            [pscustomobject]@{
+                Path = $Path
+                BaseLine = $item.BaseLine
+                Command = $command
+            }
+        }
+
+        foreach ($stringAst in @($ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+                    $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]
+                }, $true))) {
+            $value = [string]$stringAst.Value
+            $isHereString = $stringAst -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                ([string]$stringAst.StringConstantType -match 'HereString')
+            $isScriptLike = $value -match '(?i)(?:\r?\n|(?:^|\s)(?:Start-Process|pwsh(?:\.exe)?|powershell(?:\.exe)?|Invoke-Expression)\b\s+\S)'
+            if (-not ($isHereString -or ($item.Embedded -and $isScriptLike))) {
+                continue
+            }
+
+            $pending.Enqueue([pscustomobject]@{
+                    Text = $value
+                    Ast = $null
+                    BaseLine = $item.BaseLine + $stringAst.Extent.StartLineNumber - 1
+                    Embedded = $true
+                })
+        }
+    }
+}
+
 function Get-LaunchViolations([string]$Path) {
     $tokens = $null
     $parseErrors = $null
@@ -17,10 +81,12 @@ function Get-LaunchViolations([string]$Path) {
         return @("${Path} contains PowerShell parse errors.")
     }
 
-    $source = [IO.File]::ReadAllText($Path)
     $violations = [System.Collections.Generic.List[string]]::new()
-    $commands = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)
-    foreach ($command in $commands) {
+    $source = [IO.File]::ReadAllText($Path)
+    $commands = @(Get-ParsedCommandRecords -Text $source -Path $Path -InitialAst $ast)
+    foreach ($record in $commands) {
+        $command = $record.Command
+        $lineNumber = $record.BaseLine + $command.Extent.StartLineNumber
         $nameAst = $command.CommandElements[0]
         $commandName = if ($nameAst -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
             $nameAst.Value
@@ -33,7 +99,7 @@ function Get-LaunchViolations([string]$Path) {
         }
 
         if ($commandName -match '^(?i:pwsh|powershell)(?:\.exe)?$') {
-            [void]$violations.Add("${Path}:$($command.Extent.StartLineNumber): direct nested PowerShell launch")
+            [void]$violations.Add("${Path}:$lineNumber`: direct nested PowerShell launch")
             continue
         }
 
@@ -41,12 +107,12 @@ function Get-LaunchViolations([string]$Path) {
                 $_ -is [System.Management.Automation.Language.StringConstantExpressionAst]
             } | ForEach-Object { $_.Value })
         if ($literalArguments | Where-Object { $_ -match '^(?i:pwsh|powershell)(?:\.exe)?$' }) {
-            [void]$violations.Add("${Path}:$($command.Extent.StartLineNumber): nested PowerShell executable passed to '$commandName'")
+            [void]$violations.Add("${Path}:$lineNumber`: nested PowerShell executable passed to '$commandName'")
         }
 
         if ($commandName -eq 'Start-Process' -and
-            $source -notmatch '(?i)(?:-WindowStyle\s+[''"]?Hidden|(?:\.)?WindowStyle\s*=\s*[''"]?Hidden|CreateNoWindow|NoNewWindow)') {
-            [void]$violations.Add("${Path}:$($command.Extent.StartLineNumber): Start-Process lacks hidden-window containment")
+            $command.Extent.Text -notmatch '(?i)(?:-\s*WindowStyle\s*(?:=|\s)\s*[''"]?Hidden[''"]?(?=\s|$)|(?<!\w)-NoNewWindow(?=\s|$))') {
+            [void]$violations.Add("${Path}:$lineNumber`: Start-Process lacks hidden-window containment")
         }
     }
 
@@ -59,9 +125,23 @@ if ($SelfTest) {
     try {
         $directPath = Join-Path $selfTestRoot 'direct.ps1'
         $processPath = Join-Path $selfTestRoot 'process.ps1'
+        $embeddedPath = Join-Path $selfTestRoot 'embedded.ps1'
+        $embeddedSafePath = Join-Path $selfTestRoot 'embedded-safe.ps1'
         $safePath = Join-Path $selfTestRoot 'safe.ps1'
         [IO.File]::WriteAllText($directPath, '& pwsh -NoProfile')
         [IO.File]::WriteAllText($processPath, "Start-Process 'example.exe'")
+        [IO.File]::WriteAllText($embeddedPath, @'
+$nested = @"
+Start-Process -FilePath 'example.exe'
+"@
+Invoke-NestedPwsh -ArgumentList $nested
+'@)
+        [IO.File]::WriteAllText($embeddedSafePath, @'
+$nested = @"
+Start-Process -FilePath 'example.exe' -WindowStyle Hidden
+"@
+Invoke-NestedPwsh -ArgumentList $nested
+'@)
         [IO.File]::WriteAllText($safePath, "Invoke-NestedPwsh -ArgumentList @('-NoProfile')")
         if (@(Get-LaunchViolations $directPath).Count -eq 0) {
             throw 'The guard self-test did not reject a direct nested PowerShell launch.'
@@ -69,8 +149,23 @@ if ($SelfTest) {
         if (@(Get-LaunchViolations $processPath).Count -eq 0) {
             throw 'The guard self-test did not reject a visible Start-Process launch.'
         }
+        if (@(Get-LaunchViolations $embeddedPath).Count -eq 0) {
+            throw 'The guard self-test did not reject a visible Start-Process launch embedded in a here-string.'
+        }
+        if (@(Get-LaunchViolations $embeddedSafePath).Count -ne 0) {
+            throw 'The guard self-test rejected a hidden Start-Process launch embedded in a here-string.'
+        }
         if (@(Get-LaunchViolations $safePath).Count -ne 0) {
             throw 'The guard self-test rejected a helper-mediated launch.'
+        }
+
+        $fixturePath = Join-Path $repositoryRoot 'tests/KeelMatrix.ResilienceSpec.Tests/ExternalCommandFixture.ps1'
+        if (-not (Test-Path -LiteralPath $fixturePath -PathType Leaf)) {
+            throw "The nested PowerShell launch guard fixture is missing: $fixturePath"
+        }
+        $fixtureViolations = @(Get-LaunchViolations $fixturePath)
+        if ($fixtureViolations.Count -ne 0) {
+            throw "The external-command fixture contains uncontained launch sites: $($fixtureViolations -join '; ')"
         }
     }
     finally {
