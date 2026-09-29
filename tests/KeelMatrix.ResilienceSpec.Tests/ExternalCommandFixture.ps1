@@ -50,19 +50,16 @@ exit 0
 '@.Replace('__PWSH_PATH__', $pwshBase64)
     }
     'Detached' {
-        $pwshBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pwsh))
-        $arguments += @'
+$pwshBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pwsh))
+$arguments += @'
 $pwsh = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PWSH_PATH__'))
-if (-not $IsWindows) {
-    Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class ResilienceSpecDetached { [DllImport("libc")] public static extern int setsid(); }'
-}
 $childStartInfo = [Diagnostics.ProcessStartInfo]::new()
 $childStartInfo.FileName = $pwsh
 $childStartInfo.UseShellExecute = $false
 $childStartInfo.CreateNoWindow = $true
 [void]$childStartInfo.ArgumentList.Add('-NoProfile')
 [void]$childStartInfo.ArgumentList.Add('-Command')
-$childCommand = if ($IsWindows) { 'Start-Sleep -Seconds 30' } else { '[ResilienceSpecDetached]::setsid(); [Console]::In.Close(); [Console]::Out.Close(); [Console]::Error.Close(); Start-Sleep -Seconds 30' }
+$childCommand = if ($IsWindows) { 'Start-Sleep -Seconds 30' } else { 'Add-Type -TypeDefinition ''using System.Runtime.InteropServices; public static class ResilienceSpecDetached { [DllImport("libc")] public static extern int setsid(); }''; [void][ResilienceSpecDetached]::setsid(); [Console]::In.Close(); [Console]::Out.Close(); [Console]::Error.Close(); Start-Sleep -Seconds 30' }
 [void]$childStartInfo.ArgumentList.Add($childCommand)
 $child = [Diagnostics.Process]::Start($childStartInfo)
 [Console]::WriteLine(('child=' + $child.Id))
