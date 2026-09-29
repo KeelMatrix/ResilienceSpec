@@ -174,6 +174,8 @@ internal sealed class AttemptScope : IDisposable
     internal void Complete(HttpAttemptOutcome outcome, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null) =>
         Entry.Complete(outcome, statusCode, retryAfter);
 
+    internal void MarkInjectedTimeout() => _observer.MarkInjectedTimeoutObserved();
+
     public void Dispose()
     {
         if (_disposed)
@@ -264,6 +266,7 @@ internal sealed class ScenarioObserver
     private bool _settled;
     private TimeSpan? _settledVirtualElapsed;
     private bool _settledVirtualElapsedIsExact;
+    private bool _injectedTimeoutObserved;
 
     internal ScenarioObserver(HttpFaultScript script, TimeProvider? clock, ResilienceScenarioOptions options)
     {
@@ -390,6 +393,14 @@ internal sealed class ScenarioObserver
         }
     }
 
+    internal void MarkInjectedTimeoutObserved()
+    {
+        lock (_gate)
+        {
+            _injectedTimeoutObserved = true;
+        }
+    }
+
     internal void MarkObservationCleanupStarted()
     {
         lock (_gate)
@@ -398,24 +409,27 @@ internal sealed class ScenarioObserver
         }
     }
 
-    internal TimeSpan? MarkSettled(bool timeoutOutcome = false)
+    internal TimeSpan? MarkSettled(bool timeoutOutcome = false, bool nativeHttpClientTimeout = false)
     {
         var virtualElapsed = Elapsed();
         var virtualElapsedIsExact = HasExactTimingEvidence();
+        bool timeoutEvidence;
         lock (_gate)
         {
             _settled = true;
             _observationCutoff = false;
             _settledVirtualElapsed = virtualElapsed;
             _settledVirtualElapsedIsExact = virtualElapsedIsExact;
+            timeoutEvidence = timeoutOutcome &&
+                (_injectedTimeoutObserved || (nativeHttpClientTimeout && _ordinal > 0));
         }
 
         SignalProgress();
-        if (timeoutOutcome)
+        if (timeoutEvidence)
         {
-            // A timeout step itself only waits for cancellation. Record an exception category only when the
-            // settled caller-visible result proves that a client/strategy timeout, rather than caller cancellation,
-            // classified the run as a timeout.
+            // A timeout step itself only waits for cancellation. Record an exception category only when an executed
+            // injected timeout step, or a recognized native HttpClient.Timeout outcome with an executed attempt,
+            // proves the settled caller-visible result is timeout evidence.
             Telemetry.RecordFailure(responseFault: false, exceptionFault: true);
         }
 

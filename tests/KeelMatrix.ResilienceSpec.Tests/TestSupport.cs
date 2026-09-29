@@ -331,6 +331,43 @@ internal sealed class UnrelatedCancellationHandler : DelegatingHandler
         Task.FromException<HttpResponseMessage>(new OperationCanceledException("The downstream reported an unrelated cancellation."));
 }
 
+/// <summary>Surfaces a custom timeout before the scripted terminal handler can observe an attempt.</summary>
+internal sealed class TimeoutBeforeTerminalHandler : DelegatingHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromException<HttpResponseMessage>(new TimeoutException("The upstream timed out before the terminal handler."));
+}
+
+/// <summary>Replaces any terminal result with a custom timeout after the terminal handler has observed it.</summary>
+internal sealed class TimeoutAfterTerminalHandler : DelegatingHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            throw new TimeoutException("The upstream timed out after the terminal handler.");
+        }
+
+        throw new TimeoutException("The upstream timed out after the terminal handler.");
+    }
+}
+
+/// <summary>Surfaces the native timeout exception shape without allowing an attempt to reach the terminal handler.</summary>
+internal sealed class NativeTimeoutBeforeTerminalHandler : DelegatingHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromException<HttpResponseMessage>(
+            new OperationCanceledException(
+                "The request timed out before the terminal handler.",
+                new TimeoutException("The native timeout elapsed.")));
+}
+
 /// <summary>Ignores cancellation until the test releases a late response.</summary>
 internal sealed class IgnoreCancellationHandler : DelegatingHandler
 {

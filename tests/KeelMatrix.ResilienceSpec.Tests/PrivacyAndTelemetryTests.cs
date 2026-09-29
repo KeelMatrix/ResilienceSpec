@@ -158,6 +158,90 @@ public sealed class TelemetryTests
     }
 
     [Fact]
+    public async Task UpstreamCustomTimeoutBeforeAnyAttemptDoesNotActivateTelemetry()
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            options: Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler, new TimeoutBeforeTerminalHandler());
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        Assert.IsType<TimeoutException>(result.Exception);
+        Assert.Equal(0, result.Report.AttemptCount);
+        Assert.True(result.Report.IsSettled);
+        Assert.False(result.Report.IsObservationCutoff);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
+    public async Task UpstreamTimeoutDoesNotUsePlannedNonTimeoutStepsAsEvidence()
+    {
+        var scripts = new[]
+        {
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            HttpFaultScript.Sequence(HttpFault.Delay(TimeSpan.FromMilliseconds(1), HttpFault.Success())),
+            HttpFaultScript.Sequence(HttpFault.Response(HttpStatusCode.ServiceUnavailable)),
+            HttpFaultScript.Sequence(HttpFault.NetworkError()),
+        };
+
+        foreach (var script in scripts)
+        {
+            var sink = new RecordingTelemetrySink();
+            using var scenario = new ResilienceScenario(script, Chains.CreateClock(), Options(sink));
+            using var client = Chains.CreateClient(scenario.Handler, new TimeoutBeforeTerminalHandler());
+            using var request = Chains.Request(HttpMethod.Get);
+
+            using var result = await scenario.SendAsync(client, request);
+
+            result.ShouldHaveKind(ResilienceResultKind.Timeout);
+            Assert.Equal(0, result.Report.AttemptCount);
+            Assert.Empty(result.Report.Attempts);
+            Assert.Empty(sink.Signals);
+        }
+    }
+
+    [Fact]
+    public async Task CustomTimeoutAfterAResponseAttemptDoesNotAddExceptionTelemetry()
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Response(HttpStatusCode.ServiceUnavailable)),
+            options: Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler, new TimeoutAfterTerminalHandler());
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        Assert.Equal(1, result.Report.AttemptCount);
+        Assert.Equal(HttpAttemptOutcome.Response, Assert.Single(result.Report.Attempts).Outcome);
+        var signal = Assert.Single(sink.Signals);
+        Assert.True(signal.ResponseFault);
+        Assert.False(signal.ExceptionFault);
+    }
+
+    [Fact]
+    public async Task NativeShapedTimeoutWithoutAnAttemptDoesNotActivateTelemetry()
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Success()),
+            options: Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler, new NativeTimeoutBeforeTerminalHandler());
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        Assert.Equal(0, result.Report.AttemptCount);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
     public async Task CancelingBeforeADelayedFailureDoesNotActivateTelemetry()
     {
         var clock = Chains.CreateClock();
@@ -439,6 +523,63 @@ public sealed class TelemetryTests
         var signal = Assert.Single(sink.Signals);
         Assert.False(signal.ResponseFault);
         Assert.True(signal.ExceptionFault);
+    }
+
+    [Fact]
+    public async Task AnInjectedTimeoutRetriedToSuccessDoesNotActivateTelemetry()
+    {
+        var clock = Chains.CreateClock();
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout(), HttpFault.Success()),
+            clock,
+            Options(sink));
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries: 1,
+                delay: TimeSpan.Zero,
+                timeProvider: clock.TimeProvider,
+                retryExceptions: true),
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        Assert.Equal(2, result.Report.AttemptCount);
+        Assert.Equal(HttpAttemptOutcome.Abandoned, result.Report.Attempts[0].Outcome);
+        Assert.Equal(HttpAttemptOutcome.Response, result.Report.Attempts[1].Outcome);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
+    public async Task ObservationCleanupDoesNotActivateTelemetryForAnInjectedTimeout()
+    {
+        var lateResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            Chains.CreateClock(),
+            new ResilienceScenarioOptions
+            {
+                AdvanceClock = false,
+                PendingObservation = TimeSpan.FromMilliseconds(20),
+                CleanupTimeout = TimeSpan.FromMilliseconds(40),
+                TelemetrySink = sink,
+            });
+        using var stubborn = new IgnoreCancellationHandler(lateResponse);
+        using var client = Chains.CreateClient(scenario.Handler, stubborn);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldBePending();
+        Assert.True(result.Report.IsObservationCutoff);
+        Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(result.Report.Attempts).Outcome);
+        Assert.Empty(sink.Signals);
+
+        lateResponse.SetResult(new HttpResponseMessage(HttpStatusCode.OK));
     }
 
     [Fact]

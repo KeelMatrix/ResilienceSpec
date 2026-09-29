@@ -91,5 +91,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   and exception messages, with bounded scripts, a bounded attempt timeline that reports `IsOverflowed` and fails
   attempt-state assertions with `AttemptStateOverflowException` instead of truncating silently, and single-consumer
   semantics by default.
-- Best-effort activation telemetry through `KeelMatrix.Telemetry` only after a scenario reached an injected failure and
-  evaluated a resilience assertion, with `KEELMATRIX_NO_TELEMETRY=1` opt-out.
+- Best-effort activation telemetry through `KeelMatrix.Telemetry`. An activation is requested only after a settled
+  scenario has either observed an injected failure published by an executed attempt, an executed injected timeout
+  classified as a timeout by the settled client or strategy, or a recognized native HttpClient.Timeout outcome with at
+  least one executed attempt, and an assertion is evaluated at or after settlement. The opt-out remains
+  `KEELMATRIX_NO_TELEMETRY=1`.

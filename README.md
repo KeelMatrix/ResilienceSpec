@@ -400,15 +400,15 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Telemetry
 
 The package uses the shared `KeelMatrix.Telemetry` activation and weekly heartbeat contract. An activation is
-requested only after a scripted scenario settles, an executed attempt publishes at least one injected failure or an
-executed injected timeout is classified as a timeout by the settled client or resilience strategy, and an assertion is
-evaluated at or after the settlement boundary. Response and network-exception categories describe published attempt
-outcomes. An injected timeout also contributes the exception category when the settled client or
-resilience strategy classifies the outcome as a timeout, even though the terminal attempt records `Abandoned` after
-its cancellation wait; plain caller cancellation of the same timeout step does not. Unused later script steps are not
-reported. A delay canceled before its wrapped failure starts and assertions against an interim live or
-observation-cleanup report do not activate telemetry. Constructing a script, handler, or scenario never activates
-telemetry. Telemetry is
+requested only after a settled scenario has either observed an injected failure published by an executed attempt, an
+executed injected timeout classified as a timeout by the settled client or strategy, or a recognized native
+HttpClient.Timeout outcome with at least one executed attempt, and an assertion is evaluated at or after settlement.
+Response and network-exception categories describe published attempt outcomes. An injected timeout also contributes the
+exception category when the settled client or resilience strategy classifies the outcome as a timeout, and a
+recognized native HttpClient.Timeout outcome contributes it only when an attempt reached the scripted downstream.
+Plain caller cancellation, arbitrary timeout exceptions, unused later script steps, a delay canceled before its
+wrapped failure starts, and assertions against an interim live or observation-cleanup report do not activate telemetry
+or add the timeout category. Constructing a script, handler, or scenario never activates telemetry. Telemetry is
 best-effort, never a reliability dependency, cannot break the host, and can be disabled by setting
 `KEELMATRIX_NO_TELEMETRY=1`. See [PRIVACY.md](PRIVACY.md) for the full contract.
 

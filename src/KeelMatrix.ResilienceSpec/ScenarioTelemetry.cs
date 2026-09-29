@@ -116,17 +116,22 @@ internal static class TelemetryHost
 }
 
 /// <summary>
-/// Decides whether one scenario counts as an activation: the scripted downstream must have published at least one
-/// injected failure, or an executed injected timeout must have been classified as a timeout by the settled
-/// client/strategy result; the scenario must have settled; and at least one resilience assertion must have been
-/// evaluated at or after the settlement boundary. Response and network categories are accumulated from attempt
-/// publication events; an injected timeout also contributes an exception category when the settled client/strategy
-/// result is classified as a timeout. Plain caller cancellation, unused planned script steps, and observation cleanup
-/// never contribute a timeout category. Constructing a handler, a script, or a scenario is never an activation on its
-/// own.
+/// Decides whether one scenario counts as an activation. An activation is requested only after a settled scenario
+/// has either observed an injected failure published by an executed attempt, an executed injected timeout classified
+/// as a timeout by the settled client or strategy, or a recognized native HttpClient.Timeout outcome with at least
+/// one executed attempt, and an assertion is evaluated at or after settlement. Response and network categories are
+/// accumulated from attempt publication events. Plain caller cancellation, arbitrary timeout exceptions, unused
+/// planned script steps, and observation cleanup never contribute a timeout category. Constructing a handler, a
+/// script, or a scenario is never an activation on its own.
 /// </summary>
 internal sealed class ScenarioTelemetry
 {
+    internal const string ActivationPolicy =
+        "An activation is requested only after a settled scenario has either observed an injected failure published " +
+        "by an executed attempt, an executed injected timeout classified as a timeout by the settled client or " +
+        "strategy, or a recognized native HttpClient.Timeout outcome with at least one executed attempt, and an " +
+        "assertion is evaluated at or after settlement.";
+
     internal const string SupportedTargetFramework = "net8.0";
 
     private readonly ITelemetrySink _sink;

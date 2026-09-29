@@ -58,10 +58,11 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 - Timing origin and exact-evidence state begin when the logical call is admitted, not when the scenario is constructed;
   prepared scenarios sharing a clock therefore keep independent elapsed-time reports. Initial sends and provider clock
   advances are observed behind bounded watchdogs, with late cleanup retaining the logical-call lease.
-- Telemetry activation requires a settled scenario, a published failure from an actually executed attempt or an
-  executed injected timeout classified as a timeout by the settled client/strategy result, and an assertion evaluated
-  at or after the settlement boundary. Plain caller cancellation, planned failures canceled before execution, unused
-  later script steps, and interim live-report or observation-cleanup assertions do not count.
+- An activation is requested only after a settled scenario has either observed an injected failure published by an
+  executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
+  recognized native HttpClient.Timeout outcome with at least one executed attempt, and an assertion is evaluated at
+  or after settlement. Plain caller cancellation, arbitrary timeout exceptions, planned failures canceled before
+  execution, unused later script steps, and interim live-report or observation-cleanup assertions do not count.
 - Public API changes are recorded in the analyzer baseline next to the package project; new API goes to
   `PublicAPI.Unshipped.txt` and is promoted to `PublicAPI.Shipped.txt` during release preparation.
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is

@@ -131,7 +131,7 @@ public sealed class ResilienceResult : IDisposable
         return false;
     }
 
-    private static bool IsNativeHttpClientTimeout(Exception exception) =>
+    internal static bool IsNativeHttpClientTimeout(Exception exception) =>
         exception is OperationCanceledException && Inner<TimeoutException>(exception) is not null;
 
     private static TException? Inner<TException>(Exception exception)

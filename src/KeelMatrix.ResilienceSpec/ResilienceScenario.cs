@@ -23,11 +23,12 @@ namespace KeelMatrix.ResilienceSpec;
 /// Create one scenario per test case.
 /// </para>
 /// <para>
-/// Optional activation telemetry is considered only after this logical call genuinely settles. It reports failure
-/// categories from attempts that actually published their outcomes; an executed injected timeout also contributes an
-/// exception category when the settled client/strategy result is classified as a timeout. Plain caller cancellation
-/// does not. Assertions made while the report is live or during observation cleanup do not activate telemetry, and an
-/// assertion evaluated at or after settlement is required.
+/// Optional activation telemetry is considered only after this logical call genuinely settles. An activation is
+/// requested only after a settled scenario has either observed an injected failure published by an executed attempt,
+/// an executed injected timeout classified as a timeout by the settled client or strategy, or a recognized native
+/// HttpClient.Timeout outcome with at least one executed attempt, and an assertion is evaluated at or after
+/// settlement. Plain caller cancellation and arbitrary timeout exceptions do not contribute a timeout category.
+/// Assertions made while the report is live or during observation cleanup do not activate telemetry.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenario : IDisposable
@@ -141,7 +142,9 @@ public sealed class ResilienceScenario : IDisposable
             catch (Exception exception)
             {
                 var callerCanceled = cancellationToken.IsCancellationRequested;
-                var settledElapsed = Handler.Observer.MarkSettled(ResilienceResult.IsTimeout(exception, callerCanceled)) ?? virtualElapsed;
+                var settledElapsed = Handler.Observer.MarkSettled(
+                    ResilienceResult.IsTimeout(exception, callerCanceled),
+                    !callerCanceled && ResilienceResult.IsNativeHttpClientTimeout(exception)) ?? virtualElapsed;
                 return ResilienceResult.ForException(exception, callerCanceled, settledElapsed, Handler.Report);
             }
 
@@ -350,7 +353,9 @@ public sealed class ResilienceScenario : IDisposable
             catch (Exception exception)
             {
                 var callerCanceled = cancellationToken.IsCancellationRequested;
-                var settledElapsed = Handler.Observer.MarkSettled(ResilienceResult.IsTimeout(exception, callerCanceled)) ?? virtualElapsed;
+                var settledElapsed = Handler.Observer.MarkSettled(
+                    ResilienceResult.IsTimeout(exception, callerCanceled),
+                    !callerCanceled && ResilienceResult.IsNativeHttpClientTimeout(exception)) ?? virtualElapsed;
                 return ResilienceResult.ForException(exception, callerCanceled, settledElapsed, Handler.Report);
             }
         }
