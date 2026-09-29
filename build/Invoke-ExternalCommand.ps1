@@ -881,7 +881,7 @@ function Get-MacProcessSnapshot {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     [void]$startInfo.ArgumentList.Add('-axo')
-    [void]$startInfo.ArgumentList.Add('pid=,ppid=,pgid=,stat=')
+    [void]$startInfo.ArgumentList.Add('pid=,ppid=,pgid=,sess=,stat=')
 
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
@@ -909,7 +909,7 @@ function Get-MacProcessSnapshot {
             }
 
             $fields = $line.Trim() -split '\s+'
-            if ($fields.Count -lt 4 -or $fields[0] -notmatch '^\d+$' -or $fields[1] -notmatch '^\d+$' -or $fields[2] -notmatch '^\d+$') {
+            if ($fields.Count -lt 5 -or $fields[0] -notmatch '^\d+$' -or $fields[1] -notmatch '^\d+$' -or $fields[2] -notmatch '^\d+$' -or $fields[3] -notmatch '^\d+$') {
                 throw "macOS process inspection returned an invalid record: '$line'."
             }
 
@@ -917,7 +917,8 @@ function Get-MacProcessSnapshot {
                 ProcessId = [int]$fields[0]
                 ParentProcessId = [int]$fields[1]
                 ProcessGroupId = [int]$fields[2]
-                State = [string]$fields[3]
+                SessionId = [int]$fields[3]
+                State = [string]$fields[4]
             })
         }
 
@@ -929,7 +930,11 @@ function Get-MacProcessSnapshot {
 }
 
 function Get-MacDescendantProcesses {
-    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [int]$ProcessGroupId = 0,
+        [int]$SessionId = 0
+    )
 
     $snapshot = @(Get-MacProcessSnapshot)
     $children = @{}
@@ -957,18 +962,35 @@ function Get-MacDescendantProcesses {
         }
     }
 
+    if ($ProcessGroupId -gt 0 -or $SessionId -gt 0) {
+        foreach ($record in $snapshot) {
+            if ($record.ProcessId -eq $RootProcessId -or $record.State -match '^Z') {
+                continue
+            }
+
+            if (($ProcessGroupId -gt 0 -and $record.ProcessGroupId -eq $ProcessGroupId) -or
+                ($SessionId -gt 0 -and $record.SessionId -eq $SessionId)) {
+                if (-not ($descendants | Where-Object { $_.ProcessId -eq $record.ProcessId })) {
+                    [void]$descendants.Add($record)
+                }
+            }
+        }
+    }
+
     return @($descendants)
 }
 
 function Wait-ForMacDescendantExit {
     param(
         [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [Parameter(Mandatory = $true)][int]$ProcessGroupId,
+        [Parameter(Mandatory = $true)][int]$SessionId,
         [int]$TimeoutSeconds = 5
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
-        if (@(Get-MacDescendantProcesses -RootProcessId $RootProcessId).Count -eq 0) {
+        if (@(Get-MacDescendantProcesses -RootProcessId $RootProcessId -ProcessGroupId $ProcessGroupId -SessionId $SessionId).Count -eq 0) {
             return $true
         }
 
@@ -981,12 +1003,14 @@ function Wait-ForMacDescendantExit {
 function Stop-MacDescendants {
     param(
         [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [Parameter(Mandatory = $true)][int]$ProcessGroupId,
+        [Parameter(Mandatory = $true)][int]$SessionId,
         [int]$TimeoutSeconds = 5
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $descendants = @(Get-MacDescendantProcesses -RootProcessId $RootProcessId)
+        $descendants = @(Get-MacDescendantProcesses -RootProcessId $RootProcessId -ProcessGroupId $ProcessGroupId -SessionId $SessionId)
         if ($descendants.Count -eq 0) {
             return
         }
@@ -1001,7 +1025,7 @@ function Stop-MacDescendants {
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    if (@(Get-MacDescendantProcesses -RootProcessId $RootProcessId).Count -gt 0) {
+    if (@(Get-MacDescendantProcesses -RootProcessId $RootProcessId -ProcessGroupId $ProcessGroupId -SessionId $SessionId).Count -gt 0) {
         throw 'The macOS session/process-group inspection still found a running descendant after termination.'
     }
 }
@@ -1237,10 +1261,10 @@ exit $commandExitCode
                 $timedOut = -not $completed
                 if ($completed) {
                     try {
-                        if (-not (Wait-ForMacDescendantExit -RootProcessId $unixRootProcessId)) {
+                        if (-not (Wait-ForMacDescendantExit -RootProcessId $unixRootProcessId -ProcessGroupId $macProcessGroupId -SessionId $macSessionId)) {
                             $descendantError = 'The command exited but macOS session/process-group inspection found a running descendant.'
                             try {
-                                Stop-MacDescendants -RootProcessId $unixRootProcessId
+                                Stop-MacDescendants -RootProcessId $unixRootProcessId -ProcessGroupId $macProcessGroupId -SessionId $macSessionId
                             }
                             catch {
                                 $killError = $_.Exception.Message
@@ -1251,7 +1275,7 @@ exit $commandExitCode
                     catch {
                         $descendantError = "macOS descendant inspection failed: $($_.Exception.Message)"
                         try {
-                            Stop-MacDescendants -RootProcessId $unixRootProcessId
+                            Stop-MacDescendants -RootProcessId $unixRootProcessId -ProcessGroupId $macProcessGroupId -SessionId $macSessionId
                         }
                         catch {
                             $killError = $_.Exception.Message
@@ -1292,7 +1316,7 @@ exit $commandExitCode
                         }
                     }
                     elseif ($unixContainmentMode -eq 'macos-session-process-group') {
-                        Stop-MacDescendants -RootProcessId $unixRootProcessId
+                        Stop-MacDescendants -RootProcessId $unixRootProcessId -ProcessGroupId $macProcessGroupId -SessionId $macSessionId
                     }
                     else {
                         Stop-UnixDescendants -RootProcessId $unixRootProcessId
@@ -1391,7 +1415,7 @@ exit $commandExitCode
                         Stop-UnixCgroup -CgroupPath $unixCgroupPath
                     }
                     elseif ($unixContainmentMode -eq 'macos-session-process-group') {
-                        Stop-MacDescendants -RootProcessId $unixRootProcessId
+                        Stop-MacDescendants -RootProcessId $unixRootProcessId -ProcessGroupId $macProcessGroupId -SessionId $macSessionId
                     }
                     else {
                         Stop-UnixDescendants -RootProcessId $unixRootProcessId
