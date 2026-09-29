@@ -853,7 +853,7 @@ function Invoke-ExternalCommand {
                 Arguments = @($ArgumentList | ForEach-Object { [string]$_ })
             } | ConvertTo-Json -Compress
             $payloadBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
-            $sessionSource = 'using System.Runtime.InteropServices; public static class ExternalCommandSession { [DllImport("libc", SetLastError=true)] public static extern int setsid(); [DllImport("libc", SetLastError=true)] private static extern int prctl(int option, ulong arg2, ulong arg3, ulong arg4, ulong arg5); public static int SetChildSubreaper(int unused) => prctl(36, 1, 0, 0, 0); }'
+            $sessionSource = 'using System; using System.Runtime.InteropServices; public static class ExternalCommandSession { [DllImport("libc", SetLastError=true)] public static extern int setsid(); [DllImport("libc", SetLastError=true)] private static extern int prctl(int option, ulong arg2, ulong arg3, ulong arg4, ulong arg5); [DllImport("libc", SetLastError=true)] private static extern int waitpid(int processId, IntPtr status, int options); public static int SetChildSubreaper(int unused) => prctl(36, 1, 0, 0, 0); public static void ReapChildren(int unused) { while (waitpid(-1, IntPtr.Zero, 1) > 0) { } } }'
             $sessionSourceBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sessionSource))
             $gatePathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixGatePath))
             $exitPathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixExitPath))
@@ -878,6 +878,7 @@ if (__ENABLE_SUBREAPER__) {
     $releasePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__RELEASE_PATH__'))
     [IO.File]::WriteAllText($exitPath, [string]$commandExitCode)
     while (-not [IO.File]::Exists($releasePath)) { Start-Sleep -Milliseconds 10 }
+    [ExternalCommandSession]::ReapChildren(0)
 }
 exit $commandExitCode
 '@.Replace('__SESSION_SOURCE__', $sessionSourceBase64).Replace('__ARGUMENT_PAYLOAD__', $payloadBase64).Replace('__GATE_PATH__', $gatePathBase64).Replace('__EXIT_PATH__', $exitPathBase64).Replace('__RELEASE_PATH__', $releasePathBase64).Replace('__ENABLE_SUBREAPER__', $subreaperLiteral)
