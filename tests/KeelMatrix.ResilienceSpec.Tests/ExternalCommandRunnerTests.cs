@@ -5,6 +5,12 @@ using Xunit;
 
 namespace KeelMatrix.ResilienceSpec.Tests;
 
+[CollectionDefinition("External command process-tree fixtures", DisableParallelization = true)]
+public sealed class ExternalCommandRunnerFixtures
+{
+}
+
+[Collection("External command process-tree fixtures")]
 public sealed class ExternalCommandRunnerTests
 {
     [Fact]
