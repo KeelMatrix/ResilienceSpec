@@ -211,14 +211,62 @@ $results | ConvertTo-Json -Compress
         Assert.Contains("ContainmentError", runner, StringComparison.Ordinal);
     }
 
-    private static JsonElement RunFixture(string scenario, int timeoutSeconds = 5)
+    [Theory]
+    [InlineData("stdout-write")]
+    [InlineData("stderr-write")]
+    [InlineData("thread")]
+    [InlineData("process")]
+    [InlineData("stdout-read")]
+    [InlineData("stderr-read")]
+    [InlineData("job")]
+    [InlineData("descendant")]
+    [InlineData("stdout-write,stderr-write,thread,process,stdout-read,stderr-read,job,descendant")]
+    public void WindowsHandleCloseFaultsAreReportedAsCleanupFailures(string closeFailures)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var scenario = closeFailures.Contains("descendant", StringComparison.Ordinal)
+            ? "Descendant"
+            : "Streams";
+        var result = RunFixture(scenario, closeFailure: closeFailures);
+
+        Assert.False(result.GetProperty("Succeeded").GetBoolean());
+        Assert.False(result.GetProperty("DescendantsContained").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(result.GetProperty("CleanupError").GetString()));
+        Assert.Contains("cleanup", result.GetProperty("FailureReason").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MacRunnerReportsSessionProcessGroupBoundary()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        var result = RunFixture("Streams");
+
+        Assert.True(result.GetProperty("Succeeded").GetBoolean());
+        Assert.Equal("macos-session-process-group", result.GetProperty("ContainmentKind").GetString());
+        Assert.Contains("new session", result.GetProperty("ContainmentLimitation").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.GetProperty("DescendantsContained").GetBoolean());
+    }
+
+    private static JsonElement RunFixture(string scenario, int timeoutSeconds = 5, string? closeFailure = null)
     {
         var fixture = Path.Combine(FindRepositoryRoot(), "tests", "KeelMatrix.ResilienceSpec.Tests", "ExternalCommandFixture.ps1");
-        var result = RunProcess("pwsh", [
-            "-NoProfile", "-File", fixture,
-            "-Scenario", scenario,
-            "-TimeoutSeconds", timeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        ], FindRepositoryRoot());
+        var result = closeFailure is null
+            ? RunProcess("pwsh", [
+                "-NoProfile", "-File", fixture,
+                "-Scenario", scenario,
+                "-TimeoutSeconds", timeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ], FindRepositoryRoot())
+            : RunPowerShell(
+                $"$env:KEELMATRIX_EXTERNAL_COMMAND_CLOSE_FAILURES = '{closeFailure.Replace("'", "''", StringComparison.Ordinal)}'; " +
+                $"& '{fixture.Replace("'", "''", StringComparison.Ordinal)}' -Scenario '{scenario}' -TimeoutSeconds {timeoutSeconds}");
 
         Assert.Equal(0, result.ExitCode);
         using var document = JsonDocument.Parse(result.Output.Trim());
@@ -228,7 +276,11 @@ $results | ConvertTo-Json -Compress
     private static ProcessResult RunPowerShell(string command) =>
         RunProcess("pwsh", ["-NoProfile", "-Command", command], FindRepositoryRoot());
 
-    private static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments, string workingDirectory)
+    private static ProcessResult RunProcess(
+        string fileName,
+        IEnumerable<string> arguments,
+        string workingDirectory,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -242,6 +294,14 @@ $results | ConvertTo-Json -Compress
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+
+        if (environment is not null)
+        {
+            foreach (var pair in environment)
+            {
+                startInfo.Environment[pair.Key] = pair.Value;
+            }
         }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Unable to start {fileName}.");

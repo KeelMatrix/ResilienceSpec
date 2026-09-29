@@ -24,6 +24,7 @@ jobs:
         os:
           - windows-latest
           - ubuntu-latest
+          - macos-latest
 
     steps:
       - name: Check out repository
@@ -62,6 +63,11 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: ./scripts/validate-linux.sh
+
+      - name: Run repository validation on macOS
+        if: runner.os == 'macOS'
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0
 
       - name: Run integration endpoint 9.8.0
         timeout-minutes: 5

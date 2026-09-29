@@ -266,6 +266,50 @@ public sealed class ReleaseContractTests
         }
     }
 
+    [Theory]
+    [InlineData("& dotnet build KeelMatrix.ResilienceSpec.slnx")]
+    [InlineData(". dotnet build KeelMatrix.ResilienceSpec.slnx")]
+    [InlineData("git status; dotnet build KeelMatrix.ResilienceSpec.slnx")]
+    [InlineData("Get-Item . | dotnet build KeelMatrix.ResilienceSpec.slnx")]
+    [InlineData("if ($true) { dotnet build KeelMatrix.ResilienceSpec.slnx }")]
+    [InlineData("foreach ($item in 1) { dotnet build KeelMatrix.ResilienceSpec.slnx }")]
+    [InlineData("Start-Process -FilePath dotnet -ArgumentList 'build KeelMatrix.ResilienceSpec.slnx'")]
+    [InlineData("pwsh -NoProfile -Command 'dotnet build KeelMatrix.ResilienceSpec.slnx'")]
+    [InlineData("pwsh -NoProfile -File inline.ps1")]
+    public void WorkflowExternalCommandGuardRejectsShellStructureMutationsInBothWorkflows(string directGate)
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var guard = Path.Combine(repositoryRoot, "build", "Test-ExternalCommandWorkflow.ps1");
+        var temporaryRoot = Directory.CreateTempSubdirectory("resilience-workflow-structure-");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(temporaryRoot.FullName, ".github", "workflows"));
+            Directory.CreateDirectory(Path.Combine(temporaryRoot.FullName, "build"));
+            File.WriteAllText(
+                Path.Combine(temporaryRoot.FullName, "build", "Test-ExternalCommandWorkflow.ps1"),
+                "Invoke-ExternalCommand");
+
+            foreach (var workflowName in new[] { "validate.yml", "release.yml" })
+            {
+                var otherWorkflow = workflowName == "validate.yml" ? "release.yml" : "validate.yml";
+                File.WriteAllText(
+                    Path.Combine(temporaryRoot.FullName, ".github", "workflows", otherWorkflow),
+                    "name: Other\njobs:\n  job:\n    steps:\n      - run: pwsh -NoProfile -File build/Test-ExternalCommandWorkflow.ps1\n");
+                File.WriteAllText(
+                    Path.Combine(temporaryRoot.FullName, ".github", "workflows", workflowName),
+                    $"name: Mutated\njobs:\n  job:\n    steps:\n      - run: |\n          {directGate}\n");
+
+                var rejected = RunProcess("pwsh", ["-NoProfile", "-File", guard, "-RepositoryPath", temporaryRoot.FullName], temporaryRoot.FullName);
+                Assert.NotEqual(0, rejected.ExitCode);
+                Assert.Contains("direct", rejected.Output, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            temporaryRoot.Delete(true);
+        }
+    }
+
     [Fact]
     public void EveryPackPathPinsRepositoryMetadata()
     {

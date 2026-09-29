@@ -3,6 +3,7 @@ if (-not ($nativeTypeName -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -15,6 +16,26 @@ namespace KeelMatrix
         public IntPtr StandardOutputReadHandle { get; init; }
         public IntPtr StandardErrorReadHandle { get; init; }
         public int ProcessId { get; init; }
+    }
+
+    public sealed class ExternalCommandCleanupException : Exception
+    {
+        public string CleanupError { get; }
+
+        public ExternalCommandCleanupException(string message) : base(message)
+        {
+            CleanupError = message;
+        }
+    }
+
+    public sealed class ExternalCommandStartException : Exception
+    {
+        public string CleanupError { get; }
+
+        public ExternalCommandStartException(string message, string cleanupError) : base(message)
+        {
+            CleanupError = cleanupError;
+        }
     }
 
     public static class ExternalCommandNative
@@ -164,10 +185,15 @@ namespace KeelMatrix
         private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
 
         [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool CloseHandle(IntPtr handle);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr OpenProcess(uint access, bool inheritHandle, int processId);
+
+        private static readonly HashSet<string> InjectedCloseFailures = new(StringComparer.OrdinalIgnoreCase);
 
         public static WindowsExternalCommandHandles StartWindows(string filePath, string[] arguments, string workingDirectory)
         {
@@ -177,6 +203,7 @@ namespace KeelMatrix
             IntPtr errorRead = IntPtr.Zero;
             IntPtr errorWrite = IntPtr.Zero;
             ProcessInformation processInformation = default;
+            var processAssignedToJob = false;
 
             try
             {
@@ -244,22 +271,23 @@ namespace KeelMatrix
                     ThrowLastError("CreateProcess");
                 }
 
-                CloseHandle(outputWrite);
+                CloseOrThrow(outputWrite, "stdout-write");
                 outputWrite = IntPtr.Zero;
-                CloseHandle(errorWrite);
+                CloseOrThrow(errorWrite, "stderr-write");
                 errorWrite = IntPtr.Zero;
 
                 if (!AssignProcessToJobObject(job, processInformation.Process))
                 {
                     ThrowLastError("AssignProcessToJobObject");
                 }
+                processAssignedToJob = true;
 
                 if (ResumeThread(processInformation.Thread) == uint.MaxValue)
                 {
                     ThrowLastError("ResumeThread");
                 }
 
-                CloseHandle(processInformation.Thread);
+                CloseOrThrow(processInformation.Thread, "thread");
                 processInformation.Thread = IntPtr.Zero;
                 return new WindowsExternalCommandHandles
                 {
@@ -270,20 +298,33 @@ namespace KeelMatrix
                     ProcessId = processInformation.ProcessId,
                 };
             }
-            catch
+            catch (Exception exception)
             {
+                var cleanupErrors = new List<string>();
                 if (processInformation.Process != IntPtr.Zero)
                 {
-                    TerminateJobObject(job, 1);
-                    CloseHandle(processInformation.Process);
+                    var terminated = processAssignedToJob
+                        ? TerminateJobObject(job, 1)
+                        : TerminateProcess(processInformation.Process, 1);
+                    if (!terminated)
+                    {
+                        cleanupErrors.Add(processAssignedToJob
+                            ? "TerminateJobObject failed while handling a startup failure."
+                            : "TerminateProcess failed while handling a startup failure.");
+                    }
+                    AddCloseError(cleanupErrors, processInformation.Process, "process");
                 }
 
-                CloseHandle(processInformation.Thread);
-                CloseHandle(outputRead);
-                CloseHandle(outputWrite);
-                CloseHandle(errorRead);
-                CloseHandle(errorWrite);
-                CloseHandle(job);
+                AddCloseError(cleanupErrors, processInformation.Thread, "thread");
+                AddCloseError(cleanupErrors, outputRead, "stdout-read");
+                AddCloseError(cleanupErrors, outputWrite, "stdout-write");
+                AddCloseError(cleanupErrors, errorRead, "stderr-read");
+                AddCloseError(cleanupErrors, errorWrite, "stderr-write");
+                AddCloseError(cleanupErrors, job, "job");
+                if (cleanupErrors.Count > 0)
+                {
+                    throw new ExternalCommandStartException(exception.Message, string.Join(" ", cleanupErrors));
+                }
                 throw;
             }
         }
@@ -371,7 +412,7 @@ namespace KeelMatrix
                         }
                         finally
                         {
-                            CloseHandle(process);
+                            CloseOrThrow(process, "descendant");
                         }
                     }
                 }
@@ -386,12 +427,57 @@ namespace KeelMatrix
 
         public static bool TerminateJob(IntPtr job, uint exitCode) => TerminateJobObject(job, exitCode);
 
-        public static void Close(IntPtr handle)
+        public static string Close(IntPtr handle, string label)
         {
-            if (handle != IntPtr.Zero)
+            if (handle == IntPtr.Zero)
             {
-                CloseHandle(handle);
+                return null;
             }
+
+            var injectedFailure = ShouldInjectCloseFailure(label);
+            if (!CloseHandle(handle))
+            {
+                return new Win32Exception(Marshal.GetLastWin32Error(), $"CloseHandle({label}) failed.").Message;
+            }
+
+            return injectedFailure ? $"CloseHandle({label}) fault was injected." : null;
+        }
+
+        private static void CloseOrThrow(IntPtr handle, string label)
+        {
+            var error = Close(handle, label);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                throw new ExternalCommandCleanupException(error);
+            }
+        }
+
+        private static void AddCloseError(List<string> errors, IntPtr handle, string label)
+        {
+            var error = Close(handle, label);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                errors.Add(error);
+            }
+        }
+
+        private static bool ShouldInjectCloseFailure(string label)
+        {
+            var configured = Environment.GetEnvironmentVariable("KEELMATRIX_EXTERNAL_COMMAND_CLOSE_FAILURES");
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                return false;
+            }
+
+            foreach (var candidate in configured.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if ((candidate == "*" || string.Equals(candidate, label, StringComparison.OrdinalIgnoreCase)) && InjectedCloseFailures.Add(label))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static void ThrowIfZero(IntPtr handle, string operation)
@@ -453,9 +539,38 @@ namespace KeelMatrix
             var error = Marshal.GetLastWin32Error();
             return error == NoSuchProcess ? 0 : -error;
         }
+
+        public static int KillProcessGroup(int processGroupId)
+        {
+            if (processGroupId <= 0)
+            {
+                return -22;
+            }
+
+            if (kill(-processGroupId, 9) == 0)
+            {
+                return 1;
+            }
+
+            var error = Marshal.GetLastWin32Error();
+            return error == NoSuchProcess ? 0 : -error;
+        }
     }
 }
 '@ -Language CSharp
+}
+
+function Add-CleanupErrorText {
+    param(
+        [string]$Existing,
+        [Parameter(Mandatory = $true)][string]$NewError
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Existing)) {
+        return $NewError
+    }
+
+    return "$Existing $NewError"
 }
 
 function New-ExternalCommandResult {
@@ -471,7 +586,9 @@ function New-ExternalCommandResult {
         [string]$DescendantError,
         [string]$KillError,
         [string]$StartError,
-        [string]$CleanupError
+        [string]$CleanupError,
+        [string]$ContainmentKind,
+        [string]$ContainmentLimitation
     )
 
     $reasons = [System.Collections.Generic.List[string]]::new()
@@ -501,6 +618,8 @@ function New-ExternalCommandResult {
         CaptureComplete = $CaptureComplete
         ContainmentEstablished = $ContainmentEstablished
         DescendantsContained = $containmentProven
+        ContainmentKind = $ContainmentKind
+        ContainmentLimitation = $ContainmentLimitation
         KillError = $KillError
         CaptureError = $CaptureError
         ContainmentError = $ContainmentError
@@ -749,6 +868,153 @@ function Stop-UnixDescendants {
     }
 }
 
+function Get-MacProcessSnapshot {
+    if (-not $IsMacOS) {
+        throw 'macOS process inspection was requested on a non-macOS host.'
+    }
+
+    $psPath = Resolve-ExternalExecutable -FilePath 'ps'
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $psPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    [void]$startInfo.ArgumentList.Add('-axo')
+    [void]$startInfo.ArgumentList.Add('pid=,ppid=,pgid=,stat=')
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw 'Unable to start macOS process inspection.'
+    }
+
+    try {
+        $output = $process.StandardOutput.ReadToEndAsync()
+        $errorText = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(5000)) {
+            try { $process.Kill() } catch { }
+            throw 'macOS process inspection exceeded its bounded deadline.'
+        }
+
+        $inspectionError = $errorText.GetAwaiter().GetResult().Trim()
+        if ($process.ExitCode -ne 0) {
+            throw "macOS process inspection failed with exit code $($process.ExitCode): $inspectionError"
+        }
+
+        $snapshot = [System.Collections.Generic.List[object]]::new()
+        foreach ($line in ($output.GetAwaiter().GetResult() -split "`r?`n")) {
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                continue
+            }
+
+            $fields = $line.Trim() -split '\s+'
+            if ($fields.Count -lt 4 -or $fields[0] -notmatch '^\d+$' -or $fields[1] -notmatch '^\d+$' -or $fields[2] -notmatch '^\d+$') {
+                throw "macOS process inspection returned an invalid record: '$line'."
+            }
+
+            [void]$snapshot.Add([pscustomobject]@{
+                ProcessId = [int]$fields[0]
+                ParentProcessId = [int]$fields[1]
+                ProcessGroupId = [int]$fields[2]
+                State = [string]$fields[3]
+            })
+        }
+
+        return @($snapshot)
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Get-MacDescendantProcesses {
+    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+
+    $snapshot = @(Get-MacProcessSnapshot)
+    $children = @{}
+    foreach ($record in $snapshot) {
+        if (-not $children.ContainsKey($record.ParentProcessId)) {
+            $children[$record.ParentProcessId] = [System.Collections.Generic.List[object]]::new()
+        }
+        [void]$children[$record.ParentProcessId].Add($record)
+    }
+
+    $descendants = [System.Collections.Generic.List[object]]::new()
+    $pending = [System.Collections.Generic.Queue[int]]::new()
+    $pending.Enqueue($RootProcessId)
+    while ($pending.Count -gt 0) {
+        $parentProcessId = $pending.Dequeue()
+        if (-not $children.ContainsKey($parentProcessId)) {
+            continue
+        }
+
+        foreach ($child in $children[$parentProcessId]) {
+            if ($child.State -notmatch '^Z') {
+                [void]$descendants.Add($child)
+                $pending.Enqueue($child.ProcessId)
+            }
+        }
+    }
+
+    return @($descendants)
+}
+
+function Wait-ForMacDescendantExit {
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (@(Get-MacDescendantProcesses -RootProcessId $RootProcessId).Count -eq 0) {
+            return $true
+        }
+
+        Start-Sleep -Milliseconds 50
+    }
+
+    return $false
+}
+
+function Stop-MacDescendants {
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $descendants = @(Get-MacDescendantProcesses -RootProcessId $RootProcessId)
+        if ($descendants.Count -eq 0) {
+            return
+        }
+
+        foreach ($record in ($descendants | Sort-Object ProcessId -Descending)) {
+            $state = [KeelMatrix.UnixExternalCommandNative]::KillProcess($record.ProcessId)
+            if ($state -lt 0) {
+                throw "Unable to terminate macOS descendant process $($record.ProcessId) (errno $(-$state))."
+            }
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if (@(Get-MacDescendantProcesses -RootProcessId $RootProcessId).Count -gt 0) {
+        throw 'The macOS session/process-group inspection still found a running descendant after termination.'
+    }
+}
+
+function Stop-MacProcessGroup {
+    param([Parameter(Mandatory = $true)][int]$ProcessGroupId)
+
+    $state = [KeelMatrix.UnixExternalCommandNative]::KillProcessGroup($ProcessGroupId)
+    if ($state -lt 0) {
+        throw "Unable to terminate macOS process group $ProcessGroupId (errno $(-$state))."
+    }
+}
+
 function Wait-ForUnixExitCode {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -787,6 +1053,8 @@ function Invoke-ExternalCommand {
     $killError = $null
     $startError = $null
     $cleanupError = $null
+    $containmentKind = $null
+    $containmentLimitation = $null
     $exitCode = $null
     $timedOut = $false
     $completed = $false
@@ -794,6 +1062,8 @@ function Invoke-ExternalCommand {
     $captureComplete = $false
     $process = $null
     $native = $null
+    $stdoutHandle = $null
+    $stderrHandle = $null
     $stdoutReader = $null
     $stderrReader = $null
     $stdoutTask = $null
@@ -805,6 +1075,8 @@ function Invoke-ExternalCommand {
     $unixGatePath = $null
     $unixExitPath = $null
     $unixReleasePath = $null
+    $macProcessGroupId = $null
+    $macSessionId = $null
     $savedBuildServerReuse = [Environment]::GetEnvironmentVariable('MSBUILDDISABLENODEREUSE', 'Process')
     $savedDotnetBuildServerDisable = [Environment]::GetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', 'Process')
     $savedSharedCompilation = [Environment]::GetEnvironmentVariable('UseSharedCompilation', 'Process')
@@ -823,9 +1095,10 @@ function Invoke-ExternalCommand {
         if ($IsWindows) {
             $native = [KeelMatrix.ExternalCommandNative]::StartWindows($resolvedFilePath, $ArgumentList, $WorkingDirectory)
             $containmentEstablished = $true
+            $containmentKind = 'windows-job-object-whole-tree'
             [void][KeelMatrix.ExternalCommandNative]::GetActiveProcessCount($native.JobHandle)
-            $stdoutHandle = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($native.StandardOutputReadHandle, $true)
-            $stderrHandle = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($native.StandardErrorReadHandle, $true)
+            $stdoutHandle = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($native.StandardOutputReadHandle, $false)
+            $stderrHandle = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($native.StandardErrorReadHandle, $false)
             $stdoutReader = [IO.StreamReader]::new([IO.FileStream]::new($stdoutHandle, [IO.FileAccess]::Read, 4096, $false), [Text.Encoding]::UTF8, $false, 4096, $true)
             $stderrReader = [IO.StreamReader]::new([IO.FileStream]::new($stderrHandle, [IO.FileAccess]::Read, 4096, $false), [Text.Encoding]::UTF8, $false, 4096, $true)
             $stdoutTask = $stdoutReader.ReadToEndAsync()
@@ -834,14 +1107,25 @@ function Invoke-ExternalCommand {
             $timedOut = -not $completed
         }
         else {
-            $unixCgroupError = $null
-            try {
-                $unixCgroupPath = New-UnixProcessCgroup
-                $unixContainmentMode = 'cgroup'
+            if (-not $IsLinux -and -not $IsMacOS) {
+                throw 'This Unix host does not expose a supported external-command containment mechanism.'
             }
-            catch {
-                $unixCgroupError = $_.Exception.Message
-                $unixContainmentMode = 'subreaper'
+
+            if ($IsLinux) {
+                try {
+                    $unixCgroupPath = New-UnixProcessCgroup
+                    $unixContainmentMode = 'cgroup'
+                    $containmentKind = 'linux-cgroup-v2-whole-tree'
+                }
+                catch {
+                    $unixContainmentMode = 'subreaper'
+                    $containmentKind = 'linux-child-subreaper-process-tree'
+                }
+            }
+            else {
+                $unixContainmentMode = 'macos-session-process-group'
+                $containmentKind = 'macos-session-process-group'
+                $containmentLimitation = 'A process that deliberately creates a new session can escape the session/process-group boundary.'
             }
 
             $unixGatePath = Join-Path ([IO.Path]::GetTempPath()) "keelmatrix-external-gate-$([Guid]::NewGuid().ToString('N'))"
@@ -853,18 +1137,19 @@ function Invoke-ExternalCommand {
                 Arguments = @($ArgumentList | ForEach-Object { [string]$_ })
             } | ConvertTo-Json -Compress
             $payloadBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
-            $sessionSource = 'using System; using System.Runtime.InteropServices; public static class ExternalCommandSession { [DllImport("libc", SetLastError=true)] public static extern int setsid(); [DllImport("libc", SetLastError=true)] private static extern int prctl(int option, ulong arg2, ulong arg3, ulong arg4, ulong arg5); [DllImport("libc", SetLastError=true)] private static extern int waitpid(int processId, IntPtr status, int options); public static int SetChildSubreaper(int unused) => prctl(36, 1, 0, 0, 0); public static void ReapChildren(int unused) { while (waitpid(-1, IntPtr.Zero, 1) > 0) { } } }'
+            $sessionSource = 'using System; using System.Runtime.InteropServices; public static class ExternalCommandSession { [DllImport("libc", SetLastError=true)] public static extern int setsid(); [DllImport("libc", SetLastError=true)] public static extern int getpgrp(); [DllImport("libc", SetLastError=true)] public static extern int getsid(int processId); [DllImport("libc", SetLastError=true)] private static extern int prctl(int option, ulong arg2, ulong arg3, ulong arg4, ulong arg5); [DllImport("libc", SetLastError=true)] private static extern int waitpid(int processId, IntPtr status, int options); public static int SetChildSubreaper(int unused) => prctl(36, 1, 0, 0, 0); public static void ReapChildren(int unused) { while (waitpid(-1, IntPtr.Zero, 1) > 0) { } } }'
             $sessionSourceBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sessionSource))
             $gatePathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixGatePath))
             $exitPathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixExitPath))
             $releasePathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixReleasePath))
             $subreaperLiteral = if ($unixContainmentMode -eq 'subreaper') { '$true' } else { '$false' }
+            $heldWrapperLiteral = if ($unixContainmentMode -eq 'subreaper' -or $unixContainmentMode -eq 'macos-session-process-group') { '$true' } else { '$false' }
             $wrapperCommand = @'
 $source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__SESSION_SOURCE__'))
 Add-Type -TypeDefinition $source
 if ([ExternalCommandSession]::setsid() -lt 0) { exit 125 }
 if (__ENABLE_SUBREAPER__ -and [ExternalCommandSession]::SetChildSubreaper(0) -ne 0) { exit 126 }
-[Console]::WriteLine(('__KEELMATRIX_EXTERNAL_COMMAND_PID__' + [Environment]::ProcessId))
+[Console]::WriteLine(('__KEELMATRIX_EXTERNAL_COMMAND_PID__' + [Environment]::ProcessId + ';' + [ExternalCommandSession]::getpgrp() + ';' + [ExternalCommandSession]::getsid(0)))
 $gatePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__GATE_PATH__'))
 while (-not [IO.File]::Exists($gatePath)) { Start-Sleep -Milliseconds 10 }
 $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ARGUMENT_PAYLOAD__'))
@@ -873,7 +1158,7 @@ $target = [string]$invocation.FilePath
 $arguments = @($invocation.Arguments | ForEach-Object { [string]$_ })
 & $target @arguments
 $commandExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
-if (__ENABLE_SUBREAPER__) {
+if (__HOLD_WRAPPER__) {
     $exitPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__EXIT_PATH__'))
     $releasePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__RELEASE_PATH__'))
     [IO.File]::WriteAllText($exitPath, [string]$commandExitCode)
@@ -881,7 +1166,7 @@ if (__ENABLE_SUBREAPER__) {
     [ExternalCommandSession]::ReapChildren(0)
 }
 exit $commandExitCode
-'@.Replace('__SESSION_SOURCE__', $sessionSourceBase64).Replace('__ARGUMENT_PAYLOAD__', $payloadBase64).Replace('__GATE_PATH__', $gatePathBase64).Replace('__EXIT_PATH__', $exitPathBase64).Replace('__RELEASE_PATH__', $releasePathBase64).Replace('__ENABLE_SUBREAPER__', $subreaperLiteral)
+'@.Replace('__SESSION_SOURCE__', $sessionSourceBase64).Replace('__ARGUMENT_PAYLOAD__', $payloadBase64).Replace('__GATE_PATH__', $gatePathBase64).Replace('__EXIT_PATH__', $exitPathBase64).Replace('__RELEASE_PATH__', $releasePathBase64).Replace('__ENABLE_SUBREAPER__', $subreaperLiteral).Replace('__HOLD_WRAPPER__', $heldWrapperLiteral)
             $startInfo = [Diagnostics.ProcessStartInfo]::new()
             $startInfo.FileName = $pwshPath
             $startInfo.WorkingDirectory = $WorkingDirectory
@@ -902,15 +1187,22 @@ exit $commandExitCode
             $stdoutMarkerTask = $process.StandardOutput.ReadLineAsync()
             $stderrTask = $process.StandardError.ReadToEndAsync()
             if (-not $stdoutMarkerTask.Wait(5000)) {
-                throw 'The Unix cgroup containment marker was not published.'
+                throw 'The Unix containment marker was not published.'
             }
             $marker = $stdoutMarkerTask.GetAwaiter().GetResult()
-            $markerMatch = [regex]::Match($marker, '^__KEELMATRIX_EXTERNAL_COMMAND_PID__(?<pid>\d+)$')
+            $markerMatch = [regex]::Match($marker, '^__KEELMATRIX_EXTERNAL_COMMAND_PID__(?<pid>\d+);(?<pgid>\d+);(?<sid>\d+)$')
             if (-not $markerMatch.Success) {
                 throw 'The Unix cgroup containment marker was invalid.'
             }
 
             $unixRootProcessId = [int]$markerMatch.Groups['pid'].Value
+            if ($unixContainmentMode -eq 'macos-session-process-group') {
+                $macProcessGroupId = [int]$markerMatch.Groups['pgid'].Value
+                $macSessionId = [int]$markerMatch.Groups['sid'].Value
+                if ($macProcessGroupId -le 0 -or $macSessionId -le 0) {
+                    throw 'The macOS session/process-group containment marker was invalid.'
+                }
+            }
             if ($unixContainmentMode -eq 'cgroup') {
                 Add-UnixProcessToCgroup -CgroupPath $unixCgroupPath -ProcessId $unixRootProcessId
             }
@@ -935,6 +1227,41 @@ exit $commandExitCode
                     [IO.File]::WriteAllText($unixReleasePath, "release`n")
                     if (-not $process.WaitForExit(5000)) {
                         $cleanupError = 'The Unix subreaper wrapper did not exit after descendant inspection.'
+                        try { $process.Kill() } catch { $killError = "Root-process termination failed: $($_.Exception.Message)" }
+                    }
+                }
+            }
+            elseif ($unixContainmentMode -eq 'macos-session-process-group') {
+                $exitCode = Wait-ForUnixExitCode -Path $unixExitPath -TimeoutSeconds $TimeoutSeconds
+                $completed = $null -ne $exitCode
+                $timedOut = -not $completed
+                if ($completed) {
+                    try {
+                        if (-not (Wait-ForMacDescendantExit -RootProcessId $unixRootProcessId)) {
+                            $descendantError = 'The command exited but macOS session/process-group inspection found a running descendant.'
+                            try {
+                                Stop-MacDescendants -RootProcessId $unixRootProcessId
+                            }
+                            catch {
+                                $killError = $_.Exception.Message
+                                try { Stop-MacProcessGroup -ProcessGroupId $macProcessGroupId } catch { $killError = "$killError $($_.Exception.Message)" }
+                            }
+                        }
+                    }
+                    catch {
+                        $descendantError = "macOS descendant inspection failed: $($_.Exception.Message)"
+                        try {
+                            Stop-MacDescendants -RootProcessId $unixRootProcessId
+                        }
+                        catch {
+                            $killError = $_.Exception.Message
+                            try { Stop-MacProcessGroup -ProcessGroupId $macProcessGroupId } catch { $killError = "$killError $($_.Exception.Message)" }
+                        }
+                    }
+
+                    try { [IO.File]::WriteAllText($unixReleasePath, "release`n") } catch { $cleanupError = $_.Exception.Message }
+                    if (-not $process.WaitForExit(5000)) {
+                        $cleanupError = if ($cleanupError) { "$cleanupError The macOS wrapper did not exit after descendant inspection." } else { 'The macOS wrapper did not exit after descendant inspection.' }
                         try { $process.Kill() } catch { $killError = "Root-process termination failed: $($_.Exception.Message)" }
                     }
                 }
@@ -964,18 +1291,25 @@ exit $commandExitCode
                             $killError = 'The Unix cgroup remained populated after termination.'
                         }
                     }
+                    elseif ($unixContainmentMode -eq 'macos-session-process-group') {
+                        Stop-MacDescendants -RootProcessId $unixRootProcessId
+                    }
                     else {
                         Stop-UnixDescendants -RootProcessId $unixRootProcessId
                     }
                 }
                 catch {
                     $killError = $_.Exception.Message
+                    if ($unixContainmentMode -eq 'macos-session-process-group') {
+                        try { Stop-MacProcessGroup -ProcessGroupId $macProcessGroupId } catch { $killError = "$killError $($_.Exception.Message)" }
+                    }
                 }
 
-                if ($unixContainmentMode -eq 'subreaper') {
+                if ($unixContainmentMode -eq 'subreaper' -or $unixContainmentMode -eq 'macos-session-process-group') {
                     try { [IO.File]::WriteAllText($unixReleasePath, "release`n") } catch { $cleanupError = $_.Exception.Message }
                     if (-not $process.WaitForExit(5000)) {
-                        $cleanupError = if ($cleanupError) { "$cleanupError The Unix subreaper wrapper did not exit." } else { 'The Unix subreaper wrapper did not exit.' }
+                        $wrapperKind = if ($unixContainmentMode -eq 'subreaper') { 'Unix subreaper' } else { 'macOS' }
+                        $cleanupError = if ($cleanupError) { "$cleanupError The $wrapperKind wrapper did not exit." } else { "The $wrapperKind wrapper did not exit." }
                         try { $process.Kill() } catch { $killError = "Root-process termination failed: $($_.Exception.Message)" }
                     }
                 }
@@ -1021,12 +1355,23 @@ exit $commandExitCode
             if ($IsWindows) {
                 $exitCode = [KeelMatrix.ExternalCommandNative]::GetExitCode($native.ProcessHandle)
             }
-            elseif ($unixContainmentMode -eq 'subreaper') {
+            elseif ($unixContainmentMode -eq 'subreaper' -or $unixContainmentMode -eq 'macos-session-process-group') {
                 try { [IO.File]::WriteAllText($unixReleasePath, "release`n") } catch { $cleanupError = $_.Exception.Message }
             }
         }
     }
     catch {
+        $cleanupException = $_.Exception
+        while ($null -ne $cleanupException) {
+            $exceptionCleanupProperty = $cleanupException.PSObject.Properties['CleanupError']
+            if ($null -ne $exceptionCleanupProperty -and -not [string]::IsNullOrWhiteSpace([string]$exceptionCleanupProperty.Value)) {
+                $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError ([string]$exceptionCleanupProperty.Value)
+                break
+            }
+
+            $cleanupException = $cleanupException.InnerException
+        }
+
         if (-not $containmentEstablished) {
             $startError = $_.Exception.Message
         }
@@ -1045,6 +1390,9 @@ exit $commandExitCode
                     if ($unixContainmentMode -eq 'cgroup') {
                         Stop-UnixCgroup -CgroupPath $unixCgroupPath
                     }
+                    elseif ($unixContainmentMode -eq 'macos-session-process-group') {
+                        Stop-MacDescendants -RootProcessId $unixRootProcessId
+                    }
                     else {
                         Stop-UnixDescendants -RootProcessId $unixRootProcessId
                     }
@@ -1053,7 +1401,7 @@ exit $commandExitCode
                     $killError = $_.Exception.Message
                 }
 
-                if ($unixContainmentMode -eq 'subreaper') {
+                if ($unixContainmentMode -eq 'subreaper' -or $unixContainmentMode -eq 'macos-session-process-group') {
                     try { [IO.File]::WriteAllText($unixReleasePath, "release`n") } catch { $cleanupError = $_.Exception.Message }
                 }
             }
@@ -1092,36 +1440,50 @@ exit $commandExitCode
         $captureComplete = $null -eq $captureError
 
         if ($null -ne $unixGatePath -and (Test-Path -LiteralPath $unixGatePath -PathType Leaf)) {
-            try { Remove-Item -LiteralPath $unixGatePath -Force -ErrorAction Stop } catch { $cleanupError = $_.Exception.Message }
+            try { Remove-Item -LiteralPath $unixGatePath -Force -ErrorAction Stop } catch { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError $_.Exception.Message }
         }
 
         foreach ($temporaryPath in @($unixExitPath, $unixReleasePath)) {
             if ($null -ne $temporaryPath -and (Test-Path -LiteralPath $temporaryPath -PathType Leaf)) {
-                try { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction Stop } catch { $cleanupError = if ($cleanupError) { "$cleanupError $($_.Exception.Message)" } else { $_.Exception.Message } }
+                try { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction Stop } catch { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError $_.Exception.Message }
             }
         }
 
         if ($null -ne $unixCgroupPath) {
             try {
                 if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
-                    $cleanupError = if ($cleanupError) { "$cleanupError The Unix cgroup remained populated." } else { 'The Unix cgroup remained populated during cleanup.' }
+                    $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError 'The Unix cgroup remained populated during cleanup.'
                 }
                 if (Test-Path -LiteralPath $unixCgroupPath -PathType Container) {
                     [IO.Directory]::Delete($unixCgroupPath)
                 }
             }
             catch {
-                $cleanupError = if ($cleanupError) { "$cleanupError $($_.Exception.Message)" } else { $_.Exception.Message }
+                $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError $_.Exception.Message
             }
         }
 
-        if ($null -ne $stdoutReader) { $stdoutReader.Dispose() }
-        if ($null -ne $stderrReader) { $stderrReader.Dispose() }
-        if ($null -ne $native) {
-            [KeelMatrix.ExternalCommandNative]::Close($native.ProcessHandle)
-            [KeelMatrix.ExternalCommandNative]::Close($native.JobHandle)
+        if ($null -ne $stdoutReader) {
+            try { $stdoutReader.Dispose() } catch { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError "Standard output reader cleanup failed: $($_.Exception.Message)" }
         }
-        if ($null -ne $process) { $process.Dispose() }
+        if ($null -ne $stderrReader) {
+            try { $stderrReader.Dispose() } catch { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError "Standard error reader cleanup failed: $($_.Exception.Message)" }
+        }
+        if ($null -ne $native) {
+            $closeFailure = [KeelMatrix.ExternalCommandNative]::Close($native.StandardOutputReadHandle, 'stdout-read')
+            if (-not [string]::IsNullOrWhiteSpace($closeFailure)) { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError $closeFailure }
+            $closeFailure = [KeelMatrix.ExternalCommandNative]::Close($native.StandardErrorReadHandle, 'stderr-read')
+            if (-not [string]::IsNullOrWhiteSpace($closeFailure)) { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError $closeFailure }
+        }
+        if ($null -ne $native) {
+            $closeFailure = [KeelMatrix.ExternalCommandNative]::Close($native.ProcessHandle, 'process')
+            if (-not [string]::IsNullOrWhiteSpace($closeFailure)) { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError $closeFailure }
+            $closeFailure = [KeelMatrix.ExternalCommandNative]::Close($native.JobHandle, 'job')
+            if (-not [string]::IsNullOrWhiteSpace($closeFailure)) { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError $closeFailure }
+        }
+        if ($null -ne $process) {
+            try { $process.Dispose() } catch { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError "Unix process cleanup failed: $($_.Exception.Message)" }
+        }
 
         [Environment]::SetEnvironmentVariable('MSBUILDDISABLENODEREUSE', $savedBuildServerReuse, 'Process')
         [Environment]::SetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', $savedDotnetBuildServerDisable, 'Process')
@@ -1132,5 +1494,6 @@ exit $commandExitCode
     New-ExternalCommandResult -ExitCode $exitCode -TimedOut $timedOut -Output $output -Error $errorText `
         -CaptureComplete $captureComplete -ContainmentEstablished $containmentEstablished `
         -CaptureError $captureError -ContainmentError $containmentError -DescendantError $descendantError `
-        -KillError $killError -StartError $startError -CleanupError $cleanupError
+        -KillError $killError -StartError $startError -CleanupError $cleanupError `
+        -ContainmentKind $containmentKind -ContainmentLimitation $containmentLimitation
 }

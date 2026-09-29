@@ -137,10 +137,12 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   judging a partial timeline; result-level assertions remain evaluable. When overflowed, `LastAttempt` is the last
   recorded attempt rather than necessarily the final served attempt. A sufficiently long runaway retry loop may still
   return `Pending` when its observation window ends, with the exact served count and overflow state preserved.
-- The package targets `net8.0`. Hosted validation runs the package gate on Windows and Linux, then runs explicit
-  integration checks against both `9.8.0` and `10.10.0`. Unix external-command containment uses a cgroup v2
-  sub-cgroup when delegated, or the Linux child-subreaper process-tree proof; macOS package use remains a runtime claim
-  and unsupported Unix hosts fail closed rather than claiming containment.
+- The package targets `net8.0`. Hosted validation runs the package gate on Windows, Linux, and macOS, then runs explicit
+  integration checks against both `9.8.0` and `10.10.0`. Windows and Linux external-command validation claim provable
+  whole-tree containment through a Job Object or cgroup v2/child-subreaper process-tree proof. macOS uses
+  session/process-group containment plus descendant inspection; its result exposes that boundary and documents the
+  limitation that a process deliberately creating a new session can escape. Detectable containment, inspection,
+  termination, and cleanup errors fail closed rather than claiming containment.
 - The package gate packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, stores entries
   without compression, emits LF-only UTF-8 package text payloads, compares the `.nupkg` and `.snupkg` SHA256 values, and
   inspects the normalized artifacts before the clean consumer restore. This makes the

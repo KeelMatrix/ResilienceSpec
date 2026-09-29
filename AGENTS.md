@@ -74,13 +74,13 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   `PublicAPI.Unshipped.txt` and is promoted to `PublicAPI.Shipped.txt` during release preparation.
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is
   allowed on the validation path.
-- Every external validation gate runs through `build/Invoke-ExternalCommand.ps1`. The runner must establish Windows
-  Job Object or Unix cgroup v2 containment before starting the command, with a Linux child-subreaper plus `/proc`
-  process-tree fallback when cgroup delegation is unavailable. It captures both streams completely, reports
-  exit/timeout/termination/descendant state explicitly, and fails closed unless the whole process tree is owned and
-  drained. Unix platforms without one of those proof mechanisms cannot report successful completion. Any containment,
-  inspection, probe, termination, or cleanup error forces failure and `DescendantsContained=false`. It prints stdout
-  before stderr; cross-stream chronology is not part of the contract.
+- Every external validation gate runs through `build/Invoke-ExternalCommand.ps1`. Windows Job Objects and Linux cgroup
+  v2/child-subreaper process-tree inspection claim provable whole-tree containment. macOS uses a session/process-group
+  boundary plus descendant inspection and reports that containment kind and limitation explicitly: a process that
+  deliberately creates a new session can escape that boundary. It captures both streams completely, reports
+  exit/timeout/termination/descendant state explicitly, and fails closed for every detectable containment, inspection,
+  probe, termination, or cleanup error. Any such error forces failure and `DescendantsContained=false`. It prints
+  stdout before stderr; cross-stream chronology is not part of the contract.
 - `.github/workflows/validate.yml` and `.github/workflows/release.yml` may invoke repository scripts, but may not
   contain direct Git, .NET, or shell validation gates. `build/Test-ExternalCommandWorkflow.ps1` is the source of
   truth for this workflow routing guard; release verification and publication use `scripts/Invoke-ReleaseWorkflow.ps1`.

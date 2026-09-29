@@ -387,10 +387,12 @@ so this package deliberately asserts the assembled behaviour instead of restatin
 ## Platforms And Target Frameworks
 
 - Target framework: `net8.0`.
-- The package and its tests use portable .NET APIs. Hosted validation runs the package gate on Windows and Linux, then
-  runs explicit integration checks against both `9.8.0` and `10.10.0`. Unix external-command containment uses a
-  cgroup v2 sub-cgroup when delegated, or the Linux child-subreaper process-tree proof; unsupported Unix hosts fail
-  closed rather than claiming containment.
+- The package and its tests use portable .NET APIs. Hosted validation runs the package gate on Windows, Linux, and macOS, then
+  runs explicit integration checks against both `9.8.0` and `10.10.0`. Windows and Linux external-command validation
+  claim provable whole-tree containment through a Job Object or cgroup v2/child-subreaper process-tree proof. macOS
+  uses session/process-group containment plus descendant inspection; its result exposes that boundary and documents
+  the limitation that a process deliberately creating a new session can escape. Detectable containment, inspection,
+  termination, and cleanup errors fail closed rather than claiming containment.
 - Only `net8.0` is exercised. The package gate requires the exact `.NET SDK 10.0.401` pinned by `global.json` with SDK roll-forward
   disabled. It packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, stores entries
   without compression, emits LF-only UTF-8 package text payloads, compares both archive SHA256 values, prints a sorted
