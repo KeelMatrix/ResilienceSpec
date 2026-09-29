@@ -10,9 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 ### Fixed
 
 - The bounded external-command runner now establishes Windows Job Object or Unix cgroup v2 containment before
-  execution, rejects every containment-error state, contains detached Unix descendants when cgroup v2 is available,
-  and fails closed when that proof is unavailable. Release workflow validation and publication gates use the same
-  runner, with an executable workflow guard rejecting newly introduced direct external gates.
+  execution, uses a Linux child-subreaper process-tree proof when cgroup delegation is unavailable, rejects every
+  containment-error state, contains detached Unix descendants, and fails closed when that proof is unavailable.
+  Release workflow validation and publication gates use the same runner, with an executable workflow guard rejecting
+  newly introduced direct external gates.
 - Full validation now bounds every repository command and test step, and the dependency audit terminates its advisory
   query child process with captured diagnostics on timeout; hosted validation gives the full-validation and direct
   integration steps their own deadlines.

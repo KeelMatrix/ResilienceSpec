@@ -75,9 +75,10 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is
   allowed on the validation path.
 - Every external validation gate runs through `build/Invoke-ExternalCommand.ps1`. The runner must establish Windows
-  Job Object or Unix cgroup v2 containment before starting the command, capture both streams completely, report
-  exit/timeout/termination/descendant state explicitly, and fail closed unless the whole process tree is owned and
-  drained. On Unix without a writable cgroup v2 hierarchy, successful completion is not claimed. Any containment,
+  Job Object or Unix cgroup v2 containment before starting the command, with a Linux child-subreaper plus `/proc`
+  process-tree fallback when cgroup delegation is unavailable. It captures both streams completely, reports
+  exit/timeout/termination/descendant state explicitly, and fails closed unless the whole process tree is owned and
+  drained. Unix platforms without one of those proof mechanisms cannot report successful completion. Any containment,
   inspection, probe, termination, or cleanup error forces failure and `DescendantsContained=false`. It prints stdout
   before stderr; cross-stream chronology is not part of the contract.
 - `.github/workflows/validate.yml` and `.github/workflows/release.yml` may invoke repository scripts, but may not

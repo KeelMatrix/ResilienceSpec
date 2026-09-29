@@ -101,7 +101,7 @@ integration jobs for both `9.8.0` and `10.10.0`. Only `net8.0` is exercised; a h
 specific runner, not physical hardware. The Windows Full-validation step is bounded to 15 minutes, and each direct
 integration step is bounded to 5 minutes; a timeout fails the named step rather than waiting for the matrix job's
 outer limit. macOS package use remains a runtime claim, but this repository gate does not claim successful external
-process-tree proof there because the required cgroup v2 containment boundary is unavailable.
+process-tree proof there because neither the cgroup v2 nor Linux child-subreaper containment boundary is available.
 
 Useful narrower variants:
 
@@ -214,7 +214,10 @@ runner. The runner establishes a Windows Job Object or a Unix cgroup v2 sub-cgro
 process tree for the command lifetime (including descendants that create a new session or process group), and fails
 closed when containment, capture, inspection, termination, cleanup, or exit status cannot be proven. Windows uses a
 kill-on-close Job Object without the breakaway creation flag and treats Job Object queries as required evidence. On
-Unix, a writable cgroup v2 hierarchy is required; platforms without that capability do not report successful gates.
+Linux without a writable cgroup v2 hierarchy, the wrapper enables `PR_SET_CHILD_SUBREAPER`, keeps the wrapper alive
+until the target exit and descendant inspection settle, and inspects the same-PID-namespace `/proc` parent tree;
+failure to enable the subreaper, inspect the tree, terminate descendants, or drain the wrapper fails closed. Other
+Unix platforms without either proof mechanism do not report successful gates.
 A timeout names the blocked operation and fails closed. All validation-script gate commands, including package smoke,
 inspection, restore, the final consumer, the sample run, and the direct integration endpoints, use the same runner;
 stdout is printed before stderr, so the runner does not promise cross-stream chronology. Full validation also applies

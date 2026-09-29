@@ -640,6 +640,136 @@ function Stop-UnixCgroup {
     }
 }
 
+function Get-UnixDescendantProcessIds {
+    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+
+    $children = @{}
+    foreach ($directory in [IO.Directory]::EnumerateDirectories('/proc')) {
+        $name = [IO.Path]::GetFileName($directory)
+        if ($name -notmatch '^\d+$') {
+            continue
+        }
+
+        try {
+            $stat = [IO.File]::ReadAllText((Join-Path $directory 'stat'))
+            $closeParenthesis = $stat.LastIndexOf(')')
+            if ($closeParenthesis -lt 0) {
+                throw 'The Linux process stat record had no closing command-name delimiter.'
+            }
+
+            $fields = $stat.Substring($closeParenthesis + 2).Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+            if ($fields.Count -lt 2) {
+                throw 'The Linux process stat record was incomplete.'
+            }
+
+            $state = $fields[0]
+            if ($state -eq 'Z') {
+                continue
+            }
+
+            $parentProcessId = [int]$fields[1]
+            if (-not $children.ContainsKey($parentProcessId)) {
+                $children[$parentProcessId] = [System.Collections.Generic.List[int]]::new()
+            }
+
+            [void]$children[$parentProcessId].Add([int]$name)
+        }
+        catch [IO.FileNotFoundException] {
+            continue
+        }
+        catch [IO.DirectoryNotFoundException] {
+            continue
+        }
+        catch {
+            throw "Unable to inspect Unix process '$name': $($_.Exception.Message)"
+        }
+    }
+
+    $descendants = [System.Collections.Generic.List[int]]::new()
+    $pending = [System.Collections.Generic.Queue[int]]::new()
+    $pending.Enqueue($RootProcessId)
+    while ($pending.Count -gt 0) {
+        $parentProcessId = $pending.Dequeue()
+        if (-not $children.ContainsKey($parentProcessId)) {
+            continue
+        }
+
+        foreach ($childProcessId in $children[$parentProcessId]) {
+            [void]$descendants.Add($childProcessId)
+            $pending.Enqueue($childProcessId)
+        }
+    }
+
+    return @($descendants)
+}
+
+function Wait-ForUnixDescendantExit {
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (@(Get-UnixDescendantProcessIds -RootProcessId $RootProcessId).Count -eq 0) {
+            return $true
+        }
+
+        Start-Sleep -Milliseconds 50
+    }
+
+    return $false
+}
+
+function Stop-UnixDescendants {
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $descendants = @(Get-UnixDescendantProcessIds -RootProcessId $RootProcessId)
+        if ($descendants.Count -eq 0) {
+            return
+        }
+
+        foreach ($processId in $descendants) {
+            $state = [KeelMatrix.UnixExternalCommandNative]::KillProcess($processId)
+            if ($state -lt 0) {
+                throw "Unable to terminate Unix descendant process $processId (errno $(-$state))."
+            }
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if (@(Get-UnixDescendantProcessIds -RootProcessId $RootProcessId).Count -gt 0) {
+        throw 'The Unix subreaper still owned a running descendant after termination.'
+    }
+}
+
+function Wait-ForUnixExitCode {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            $contents = [IO.File]::ReadAllText($Path).Trim()
+            if ($contents -match '^-?\d+$') {
+                return [int]$contents
+            }
+        }
+
+        Start-Sleep -Milliseconds 25
+    }
+
+    return $null
+}
+
 function Invoke-ExternalCommand {
     [CmdletBinding()]
     param(
@@ -670,7 +800,11 @@ function Invoke-ExternalCommand {
     $stderrTask = $null
     $stdoutMarkerTask = $null
     $unixCgroupPath = $null
+    $unixContainmentMode = $null
+    $unixRootProcessId = $null
     $unixGatePath = $null
+    $unixExitPath = $null
+    $unixReleasePath = $null
     $savedBuildServerReuse = [Environment]::GetEnvironmentVariable('MSBUILDDISABLENODEREUSE', 'Process')
     $savedDotnetBuildServerDisable = [Environment]::GetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', 'Process')
     $savedSharedCompilation = [Environment]::GetEnvironmentVariable('UseSharedCompilation', 'Process')
@@ -700,21 +834,36 @@ function Invoke-ExternalCommand {
             $timedOut = -not $completed
         }
         else {
-            $unixCgroupPath = New-UnixProcessCgroup
+            $unixCgroupError = $null
+            try {
+                $unixCgroupPath = New-UnixProcessCgroup
+                $unixContainmentMode = 'cgroup'
+            }
+            catch {
+                $unixCgroupError = $_.Exception.Message
+                $unixContainmentMode = 'subreaper'
+            }
+
             $unixGatePath = Join-Path ([IO.Path]::GetTempPath()) "keelmatrix-external-gate-$([Guid]::NewGuid().ToString('N'))"
+            $unixExitPath = Join-Path ([IO.Path]::GetTempPath()) "keelmatrix-external-exit-$([Guid]::NewGuid().ToString('N'))"
+            $unixReleasePath = Join-Path ([IO.Path]::GetTempPath()) "keelmatrix-external-release-$([Guid]::NewGuid().ToString('N'))"
             $pwshPath = Resolve-ExternalExecutable -FilePath ([string]::Join('', @('p', 'w', 's', 'h')))
             $payload = [ordered]@{
                 FilePath  = $resolvedFilePath
                 Arguments = @($ArgumentList | ForEach-Object { [string]$_ })
             } | ConvertTo-Json -Compress
             $payloadBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
-            $sessionSource = 'using System.Runtime.InteropServices; public static class ExternalCommandSession { [DllImport("libc")] public static extern int setsid(); }'
+            $sessionSource = 'using System.Runtime.InteropServices; public static class ExternalCommandSession { [DllImport("libc", SetLastError=true)] public static extern int setsid(); [DllImport("libc", SetLastError=true)] private static extern int prctl(int option, ulong arg2, ulong arg3, ulong arg4, ulong arg5); public static int SetChildSubreaper(int unused) => prctl(36, 1, 0, 0, 0); }'
             $sessionSourceBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sessionSource))
             $gatePathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixGatePath))
+            $exitPathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixExitPath))
+            $releasePathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixReleasePath))
+            $subreaperLiteral = if ($unixContainmentMode -eq 'subreaper') { '$true' } else { '$false' }
             $wrapperCommand = @'
 $source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__SESSION_SOURCE__'))
 Add-Type -TypeDefinition $source
 if ([ExternalCommandSession]::setsid() -lt 0) { exit 125 }
+if (__ENABLE_SUBREAPER__ -and [ExternalCommandSession]::SetChildSubreaper(0) -ne 0) { exit 126 }
 [Console]::WriteLine(('__KEELMATRIX_EXTERNAL_COMMAND_PID__' + [Environment]::ProcessId))
 $gatePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__GATE_PATH__'))
 while (-not [IO.File]::Exists($gatePath)) { Start-Sleep -Milliseconds 10 }
@@ -723,8 +872,15 @@ $invocation = $payload | ConvertFrom-Json
 $target = [string]$invocation.FilePath
 $arguments = @($invocation.Arguments | ForEach-Object { [string]$_ })
 & $target @arguments
-exit $LASTEXITCODE
-'@.Replace('__SESSION_SOURCE__', $sessionSourceBase64).Replace('__ARGUMENT_PAYLOAD__', $payloadBase64).Replace('__GATE_PATH__', $gatePathBase64)
+$commandExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+if (__ENABLE_SUBREAPER__) {
+    $exitPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__EXIT_PATH__'))
+    $releasePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__RELEASE_PATH__'))
+    [IO.File]::WriteAllText($exitPath, [string]$commandExitCode)
+    while (-not [IO.File]::Exists($releasePath)) { Start-Sleep -Milliseconds 10 }
+}
+exit $commandExitCode
+'@.Replace('__SESSION_SOURCE__', $sessionSourceBase64).Replace('__ARGUMENT_PAYLOAD__', $payloadBase64).Replace('__GATE_PATH__', $gatePathBase64).Replace('__EXIT_PATH__', $exitPathBase64).Replace('__RELEASE_PATH__', $releasePathBase64).Replace('__ENABLE_SUBREAPER__', $subreaperLiteral)
             $startInfo = [Diagnostics.ProcessStartInfo]::new()
             $startInfo.FileName = $pwshPath
             $startInfo.WorkingDirectory = $WorkingDirectory
@@ -753,14 +909,41 @@ exit $LASTEXITCODE
                 throw 'The Unix cgroup containment marker was invalid.'
             }
 
-            Add-UnixProcessToCgroup -CgroupPath $unixCgroupPath -ProcessId ([int]$markerMatch.Groups['pid'].Value)
+            $unixRootProcessId = [int]$markerMatch.Groups['pid'].Value
+            if ($unixContainmentMode -eq 'cgroup') {
+                Add-UnixProcessToCgroup -CgroupPath $unixCgroupPath -ProcessId $unixRootProcessId
+            }
             $containmentEstablished = $true
             [IO.File]::WriteAllText($unixGatePath, "ready`n")
             $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-            $completed = $process.WaitForExit([int]([int64]$TimeoutSeconds * 1000))
-            $timedOut = -not $completed
-            if ($completed) {
-                $exitCode = $process.ExitCode
+            if ($unixContainmentMode -eq 'subreaper') {
+                $exitCode = Wait-ForUnixExitCode -Path $unixExitPath -TimeoutSeconds $TimeoutSeconds
+                $completed = $null -ne $exitCode
+                $timedOut = -not $completed
+                if ($completed) {
+                    if (-not (Wait-ForUnixDescendantExit -RootProcessId $unixRootProcessId)) {
+                        $descendantError = 'The command exited but its Unix subreaper still owned a running descendant.'
+                        try {
+                            Stop-UnixDescendants -RootProcessId $unixRootProcessId
+                        }
+                        catch {
+                            $killError = $_.Exception.Message
+                        }
+                    }
+
+                    [IO.File]::WriteAllText($unixReleasePath, "release`n")
+                    if (-not $process.WaitForExit(5000)) {
+                        $cleanupError = 'The Unix subreaper wrapper did not exit after descendant inspection.'
+                        try { $process.Kill() } catch { $killError = "Root-process termination failed: $($_.Exception.Message)" }
+                    }
+                }
+            }
+            else {
+                $completed = $process.WaitForExit([int]([int64]$TimeoutSeconds * 1000))
+                $timedOut = -not $completed
+                if ($completed) {
+                    $exitCode = $process.ExitCode
+                }
             }
         }
 
@@ -774,13 +957,26 @@ exit $LASTEXITCODE
             }
             else {
                 try {
-                    Stop-UnixCgroup -CgroupPath $unixCgroupPath
-                    if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
-                        $killError = 'The Unix cgroup remained populated after termination.'
+                    if ($unixContainmentMode -eq 'cgroup') {
+                        Stop-UnixCgroup -CgroupPath $unixCgroupPath
+                        if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
+                            $killError = 'The Unix cgroup remained populated after termination.'
+                        }
+                    }
+                    else {
+                        Stop-UnixDescendants -RootProcessId $unixRootProcessId
                     }
                 }
                 catch {
                     $killError = $_.Exception.Message
+                }
+
+                if ($unixContainmentMode -eq 'subreaper') {
+                    try { [IO.File]::WriteAllText($unixReleasePath, "release`n") } catch { $cleanupError = $_.Exception.Message }
+                    if (-not $process.WaitForExit(5000)) {
+                        $cleanupError = if ($cleanupError) { "$cleanupError The Unix subreaper wrapper did not exit." } else { 'The Unix subreaper wrapper did not exit.' }
+                        try { $process.Kill() } catch { $killError = "Root-process termination failed: $($_.Exception.Message)" }
+                    }
                 }
             }
         }
@@ -805,22 +1001,27 @@ exit $LASTEXITCODE
                 }
             }
             else {
-                if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
-                    $descendantError = 'The command exited but its Unix containment cgroup still contained a running descendant.'
-                    try {
-                        Stop-UnixCgroup -CgroupPath $unixCgroupPath
-                        if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
-                            $killError = 'The Unix cgroup remained populated after descendant cleanup.'
+                if ($unixContainmentMode -eq 'cgroup') {
+                    if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
+                        $descendantError = 'The command exited but its Unix containment cgroup still contained a running descendant.'
+                        try {
+                            Stop-UnixCgroup -CgroupPath $unixCgroupPath
+                            if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
+                                $killError = 'The Unix cgroup remained populated after descendant cleanup.'
+                            }
                         }
-                    }
-                    catch {
-                        $killError = $_.Exception.Message
+                        catch {
+                            $killError = $_.Exception.Message
+                        }
                     }
                 }
             }
 
             if ($IsWindows) {
                 $exitCode = [KeelMatrix.ExternalCommandNative]::GetExitCode($native.ProcessHandle)
+            }
+            elseif ($unixContainmentMode -eq 'subreaper') {
+                try { [IO.File]::WriteAllText($unixReleasePath, "release`n") } catch { $cleanupError = $_.Exception.Message }
             }
         }
     }
@@ -840,10 +1041,19 @@ exit $LASTEXITCODE
         elseif ($null -ne $process) {
             if ($containmentEstablished) {
                 try {
-                    Stop-UnixCgroup -CgroupPath $unixCgroupPath
+                    if ($unixContainmentMode -eq 'cgroup') {
+                        Stop-UnixCgroup -CgroupPath $unixCgroupPath
+                    }
+                    else {
+                        Stop-UnixDescendants -RootProcessId $unixRootProcessId
+                    }
                 }
                 catch {
                     $killError = $_.Exception.Message
+                }
+
+                if ($unixContainmentMode -eq 'subreaper') {
+                    try { [IO.File]::WriteAllText($unixReleasePath, "release`n") } catch { $cleanupError = $_.Exception.Message }
                 }
             }
             else {
@@ -882,6 +1092,12 @@ exit $LASTEXITCODE
 
         if ($null -ne $unixGatePath -and (Test-Path -LiteralPath $unixGatePath -PathType Leaf)) {
             try { Remove-Item -LiteralPath $unixGatePath -Force -ErrorAction Stop } catch { $cleanupError = $_.Exception.Message }
+        }
+
+        foreach ($temporaryPath in @($unixExitPath, $unixReleasePath)) {
+            if ($null -ne $temporaryPath -and (Test-Path -LiteralPath $temporaryPath -PathType Leaf)) {
+                try { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction Stop } catch { $cleanupError = if ($cleanupError) { "$cleanupError $($_.Exception.Message)" } else { $_.Exception.Message } }
+            }
         }
 
         if ($null -ne $unixCgroupPath) {
