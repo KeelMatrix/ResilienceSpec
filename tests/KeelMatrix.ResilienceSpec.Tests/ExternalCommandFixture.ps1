@@ -59,7 +59,8 @@ $childStartInfo.UseShellExecute = $false
 $childStartInfo.CreateNoWindow = $true
 [void]$childStartInfo.ArgumentList.Add('-NoProfile')
 [void]$childStartInfo.ArgumentList.Add('-Command')
-$childCommand = if ($IsWindows) { 'Start-Sleep -Seconds 30' } else { 'Add-Type -TypeDefinition ''using System.Runtime.InteropServices; public static class ResilienceSpecDetached { [DllImport("libc")] public static extern int setsid(); [DllImport("libc")] public static extern int close(int fileDescriptor); }''; [void][ResilienceSpecDetached]::setsid(); [void][ResilienceSpecDetached]::close(0); [void][ResilienceSpecDetached]::close(1); [void][ResilienceSpecDetached]::close(2); Start-Sleep -Seconds 2' }
+$detachedSleepSeconds = if ($IsMacOS) { 2 } else { 30 }
+$childCommand = if ($IsWindows) { 'Start-Sleep -Seconds 30' } else { 'Add-Type -TypeDefinition ''using System.Runtime.InteropServices; public static class ResilienceSpecDetached { [DllImport("libc")] public static extern int setsid(); [DllImport("libc")] public static extern int close(int fileDescriptor); }''; [void][ResilienceSpecDetached]::setsid(); [void][ResilienceSpecDetached]::close(0); [void][ResilienceSpecDetached]::close(1); [void][ResilienceSpecDetached]::close(2); Start-Sleep -Seconds {0}' -f $detachedSleepSeconds }
 [void]$childStartInfo.ArgumentList.Add($childCommand)
 $child = [Diagnostics.Process]::Start($childStartInfo)
 [Console]::WriteLine(('child=' + $child.Id))
