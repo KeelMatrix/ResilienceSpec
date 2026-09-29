@@ -80,7 +80,9 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   deliberately creates a new session can escape that boundary. It captures both streams completely, reports
   exit/timeout/termination/descendant state explicitly, and fails closed for every detectable containment, inspection,
   probe, termination, or cleanup error. Any such error forces failure and `DescendantsContained=false`. It prints
-  stdout before stderr; cross-stream chronology is not part of the contract.
+  stdout before stderr; cross-stream chronology is not part of the contract. The shared nested-launch guard also scans
+  C# `ProcessStartInfo`/`Process.Start` sites and requires inspectable, no-shell, redirected, no-window launch settings;
+  the scan fails closed when no C# launch sites are found.
 - `.github/workflows/validate.yml` and `.github/workflows/release.yml` may invoke repository scripts, but may not
   contain direct Git, .NET, or shell validation gates. `build/Test-ExternalCommandWorkflow.ps1` is the source of
   truth for this workflow routing guard; release verification and publication use `scripts/Invoke-ReleaseWorkflow.ps1`.

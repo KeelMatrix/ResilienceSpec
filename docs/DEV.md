@@ -243,6 +243,12 @@ through `build/Invoke-ExternalCommand.ps1`. Workflow/job/step timeouts remain se
 OIDC authentication is an action boundary; only the resulting package push is an external command and it is routed
 through the runner.
 
+`build/Test-NestedPwshLaunch.ps1` is the shared child-launch guard. It checks each PowerShell invocation individually,
+including PowerShell and `Start-Process` commands embedded in here-strings, and scans C# `ProcessStartInfo`/
+`Process.Start` sites. C# launches must use an inspectable `ProcessStartInfo` with shell execution disabled, both
+output streams redirected, and window creation disabled; the guard fails closed if its C# scan is vacuous or finds a
+launch without those settings.
+
 ## Release preparation
 
 Before a release: promote accepted `PublicAPI.Unshipped.txt` entries into `PublicAPI.Shipped.txt`, finalize the

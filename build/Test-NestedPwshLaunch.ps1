@@ -73,6 +73,108 @@ function Get-ParsedCommandRecords(
     }
 }
 
+function Remove-CSharpNonCode([string]$Text) {
+    $pattern = '(?s)//.*?(?=\r?\n|$)|/\*.*?\*/|@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])*'''
+    $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match)
+        [regex]::Replace($match.Value, '[^\r\n]', ' ')
+    }
+    return [regex]::Replace($Text, $pattern, $evaluator)
+}
+
+function Get-SourceLineNumber([string]$Text, [int]$Index) {
+    return 1 + ([regex]::Matches($Text.Substring(0, $Index), '\r\n|\r|\n')).Count
+}
+
+function Find-MatchingBrace([string]$Text, [int]$OpeningIndex) {
+    $depth = 0
+    for ($index = $OpeningIndex; $index -lt $Text.Length; $index++) {
+        switch ($Text[$index]) {
+            '{' { $depth++ }
+            '}' {
+                $depth--
+                if ($depth -eq 0) {
+                    return $index
+                }
+            }
+        }
+    }
+    return -1
+}
+
+function Get-CSharpLaunchReport([string]$Path) {
+    $source = [IO.File]::ReadAllText($Path)
+    $code = Remove-CSharpNonCode $source
+    $violations = [System.Collections.Generic.List[string]]::new()
+    $safeVariables = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $unsafeVariables = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $initializerStartInfoIndexes = [System.Collections.Generic.HashSet[int]]::new()
+
+    $initializerMatches = @([regex]::Matches(
+            $code,
+            '(?m)(?<name>[A-Za-z_]\w*)\s*=\s*new\s+(?:(?:System\.)?Diagnostics\.)?ProcessStartInfo\s*\{'))
+    $allStartInfoMatches = @([regex]::Matches(
+            $code,
+            '\bnew\s+(?:(?:System\.)?Diagnostics\.)?ProcessStartInfo\b'))
+
+    foreach ($match in $initializerMatches) {
+        [void]$initializerStartInfoIndexes.Add($match.Index + $match.Value.IndexOf('new ', [StringComparison]::Ordinal))
+        $openingIndex = $code.IndexOf('{', $match.Index + $match.Length - 1)
+        $closingIndex = Find-MatchingBrace $code $openingIndex
+        $variableName = $match.Groups['name'].Value
+        if ($closingIndex -lt 0) {
+            [void]$violations.Add("${Path}:$(Get-SourceLineNumber $source $match.Index): ProcessStartInfo initializer is not structurally closed")
+            [void]$unsafeVariables.Add($variableName)
+            continue
+        }
+
+        $initializer = $code.Substring($openingIndex + 1, $closingIndex - $openingIndex - 1)
+        $requiredProperties = @(
+            '(?m)\bUseShellExecute\s*=\s*false\b',
+            '(?m)\bRedirectStandardOutput\s*=\s*true\b',
+            '(?m)\bRedirectStandardError\s*=\s*true\b',
+            '(?m)\bCreateNoWindow\s*=\s*true\b')
+        $missingProperties = @($requiredProperties | Where-Object { $initializer -notmatch $_ })
+        if ($missingProperties.Count -gt 0) {
+            [void]$violations.Add("${Path}:$(Get-SourceLineNumber $source $match.Index): ProcessStartInfo '$variableName' lacks required child-process containment settings")
+            [void]$unsafeVariables.Add($variableName)
+        }
+        else {
+            [void]$safeVariables.Add($variableName)
+        }
+    }
+
+    foreach ($match in $allStartInfoMatches) {
+        if (-not $initializerStartInfoIndexes.Contains($match.Index)) {
+            [void]$violations.Add("${Path}:$(Get-SourceLineNumber $source $match.Index): ProcessStartInfo must use an inspectable object initializer")
+        }
+    }
+
+    $processStartMatches = @([regex]::Matches(
+            $code,
+            '(?<![A-Za-z0-9_\.])(?:Process|System\.Diagnostics\.Process)\s*\.\s*Start\s*\('))
+    foreach ($match in $processStartMatches) {
+        $argumentStart = $match.Index + $match.Length
+        $argument = [regex]::Match($code.Substring($argumentStart), '^\s*(?<name>[A-Za-z_]\w*)')
+        if (-not $argument.Success) {
+            [void]$violations.Add("${Path}:$(Get-SourceLineNumber $source $match.Index): Process.Start must receive a contained ProcessStartInfo")
+            continue
+        }
+
+        $variableName = $argument.Groups['name'].Value
+        if ($unsafeVariables.Contains($variableName) -or -not $safeVariables.Contains($variableName)) {
+            [void]$violations.Add("${Path}:$(Get-SourceLineNumber $source $match.Index): Process.Start uses an unverified ProcessStartInfo '$variableName'")
+        }
+    }
+
+    [pscustomobject]@{
+        Path = $Path
+        ProcessStartInfoCount = $allStartInfoMatches.Count
+        ProcessStartCount = $processStartMatches.Count
+        Violations = @($violations.ToArray())
+    }
+}
+
 function Get-LaunchViolations([string]$Path) {
     $tokens = $null
     $parseErrors = $null
@@ -159,6 +261,40 @@ Invoke-NestedPwsh -ArgumentList $nested
             throw 'The guard self-test rejected a helper-mediated launch.'
         }
 
+        $safeCSharpPath = Join-Path $selfTestRoot 'safe.cs'
+        $unsafeCSharpPath = Join-Path $selfTestRoot 'unsafe.cs'
+        [IO.File]::WriteAllText($safeCSharpPath, @'
+using System.Diagnostics;
+class Fixture {
+    void Run() {
+        var startInfo = new ProcessStartInfo {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        using var process = Process.Start(startInfo);
+    }
+}
+'@)
+        [IO.File]::WriteAllText($unsafeCSharpPath, @'
+using System.Diagnostics;
+class Fixture {
+    void Run() {
+        var startInfo = new ProcessStartInfo { UseShellExecute = false };
+        using var process = Process.Start(startInfo);
+    }
+}
+'@)
+        $safeCSharpReport = Get-CSharpLaunchReport $safeCSharpPath
+        if ($safeCSharpReport.ProcessStartInfoCount -ne 1 -or $safeCSharpReport.ProcessStartCount -ne 1 -or $safeCSharpReport.Violations.Count -ne 0) {
+            throw 'The guard self-test rejected a contained C# ProcessStartInfo/Process.Start launch.'
+        }
+        $unsafeCSharpReport = Get-CSharpLaunchReport $unsafeCSharpPath
+        if ($unsafeCSharpReport.Violations.Count -eq 0) {
+            throw 'The guard self-test did not reject an uncontained C# ProcessStartInfo/Process.Start launch.'
+        }
+
         $fixturePath = Join-Path $repositoryRoot 'tests/KeelMatrix.ResilienceSpec.Tests/ExternalCommandFixture.ps1'
         if (-not (Test-Path -LiteralPath $fixturePath -PathType Leaf)) {
             throw "The nested PowerShell launch guard fixture is missing: $fixturePath"
@@ -187,6 +323,21 @@ $scriptFiles = Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter
 $violations = @($scriptFiles | ForEach-Object { Get-LaunchViolations $_.FullName })
 if ($violations.Count -gt 0) {
     throw "Visible child process launch sites must use the shared containment helper."
+}
+
+$csharpFiles = Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter '*.cs' |
+    Where-Object {
+        $_.FullName -notmatch '[\\/]((\.git)|(bin)|(obj)|(artifacts)|_probe[\\/]corpus)([\\/]|$)'
+    }
+$csharpReports = @($csharpFiles | ForEach-Object { Get-CSharpLaunchReport $_.FullName })
+$csharpProcessStartInfoCount = ($csharpReports | Measure-Object -Property ProcessStartInfoCount -Sum).Sum
+$csharpProcessStartCount = ($csharpReports | Measure-Object -Property ProcessStartCount -Sum).Sum
+if ($csharpProcessStartInfoCount -lt 1 -or $csharpProcessStartCount -lt 1) {
+    throw 'The C# launch guard scan was vacuous: no ProcessStartInfo/Process.Start sites were inspected.'
+}
+$csharpViolations = @($csharpReports | ForEach-Object { $_.Violations })
+if ($csharpViolations.Count -gt 0) {
+    throw "C# child process launch sites must use contained ProcessStartInfo instances: $($csharpViolations -join '; ')"
 }
 
 Write-Output 'Nested PowerShell launch guard passed.'
