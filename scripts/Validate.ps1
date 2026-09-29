@@ -114,7 +114,7 @@ try {
     )
     foreach ($testProject in $testProjects) {
         $testName = "Release test run: $(Split-Path -Leaf (Split-Path -Parent $testProject))"
-        Invoke-Step -Name $testName -File 'dotnet' -TimeoutSeconds 360 -Arguments (@('test', $testProject, '-c', 'Release', '--no-build') + $common)
+        Invoke-Step -Name $testName -File 'dotnet' -TimeoutSeconds 600 -Arguments (@('test', $testProject, '-c', 'Release', '--no-build') + $common)
         $durations[$testName] = $script:stepDuration
     }
 

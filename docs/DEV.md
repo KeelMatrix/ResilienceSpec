@@ -222,7 +222,7 @@ A timeout names the blocked operation and fails closed. All validation-script ga
 inspection, restore, the final consumer, the sample run, and the direct integration endpoints, use the same runner;
 stdout is printed before stderr, so the runner does not promise cross-stream chronology. Full validation also applies
 per-step watchdogs:
-60 seconds for repository guards, 180 seconds for restore, 300 seconds for formatting/build/sample, 360 seconds for
+60 seconds for repository guards, 180 seconds for restore, 300 seconds for formatting/build/sample, 600 seconds for
 each test project, 600 seconds for package smoke, and 180 seconds for the audit step. Audit evidence is valid only
 for the exact candidate and hosted run that produced it, so use the current candidate's CI conclusion rather than a
 dated statement in this document.
