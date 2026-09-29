@@ -443,20 +443,9 @@ namespace KeelMatrix
         [DllImport("libc", SetLastError = true)]
         private static extern int kill(int processId, int signal);
 
-        public static int ProbeProcessGroup(int processGroupId)
+        public static int KillProcess(int processId)
         {
-            if (kill(-processGroupId, 0) == 0)
-            {
-                return 1;
-            }
-
-            var error = Marshal.GetLastWin32Error();
-            return error == NoSuchProcess ? 0 : -error;
-        }
-
-        public static int KillProcessGroup(int processGroupId)
-        {
-            if (kill(-processGroupId, 9) == 0)
+            if (kill(processId, 9) == 0)
             {
                 return 1;
             }
@@ -481,18 +470,28 @@ function New-ExternalCommandResult {
         [string]$ContainmentError,
         [string]$DescendantError,
         [string]$KillError,
-        [string]$StartError
+        [string]$StartError,
+        [string]$CleanupError
     )
 
     $reasons = [System.Collections.Generic.List[string]]::new()
     if ($StartError) { [void]$reasons.Add($StartError) }
-    if (-not $ContainmentEstablished) { [void]$reasons.Add($ContainmentError ?? 'Process containment was not established.') }
+    if ($ContainmentError) { [void]$reasons.Add($ContainmentError) }
+    elseif (-not $ContainmentEstablished) { [void]$reasons.Add('Process containment was not established.') }
     if ($TimedOut) { [void]$reasons.Add('The command exceeded its deadline.') }
     if ($KillError) { [void]$reasons.Add("Process-tree termination failed: $KillError") }
     if (-not $CaptureComplete) { [void]$reasons.Add($CaptureError ?? 'Standard output or error was not fully captured.') }
     if ($DescendantError) { [void]$reasons.Add($DescendantError) }
+    if ($CleanupError) { [void]$reasons.Add("Process containment cleanup failed: $CleanupError") }
     if ($null -eq $ExitCode -and -not $StartError) { [void]$reasons.Add('The command did not produce a final exit code.') }
     if ($null -ne $ExitCode -and $ExitCode -ne 0) { [void]$reasons.Add("The command exited with code $ExitCode.") }
+
+    $containmentProven = $ContainmentEstablished -and
+        [string]::IsNullOrWhiteSpace($ContainmentError) -and
+        [string]::IsNullOrWhiteSpace($DescendantError) -and
+        [string]::IsNullOrWhiteSpace($KillError) -and
+        [string]::IsNullOrWhiteSpace($CleanupError) -and
+        [string]::IsNullOrWhiteSpace($StartError)
 
     [pscustomobject]@{
         ExitCode = $ExitCode
@@ -501,12 +500,13 @@ function New-ExternalCommandResult {
         Error = $Error
         CaptureComplete = $CaptureComplete
         ContainmentEstablished = $ContainmentEstablished
-        DescendantsContained = [string]::IsNullOrWhiteSpace($DescendantError)
+        DescendantsContained = $containmentProven
         KillError = $KillError
         CaptureError = $CaptureError
         ContainmentError = $ContainmentError
         DescendantError = $DescendantError
         StartError = $StartError
+        CleanupError = $CleanupError
         FailureReason = ($reasons -join ' ')
         Succeeded = ($reasons.Count -eq 0)
     }
@@ -536,24 +536,84 @@ function Resolve-ExternalExecutable {
     return $command.Source
 }
 
-function Wait-ForUnixProcessGroupExit {
-    param([Parameter(Mandatory = $true)][int]$ProcessGroupId)
+function New-UnixProcessCgroup {
+    if ($IsWindows) {
+        return $null
+    }
+
+    $root = '/sys/fs/cgroup'
+    $controllers = Join-Path $root 'cgroup.controllers'
+    if (-not (Test-Path -LiteralPath $controllers -PathType Leaf)) {
+        throw 'Unix process-tree containment requires an available cgroup v2 hierarchy.'
+    }
+
+    $name = "keelmatrix-external-$PID-$([Guid]::NewGuid().ToString('N'))"
+    $path = Join-Path $root $name
+    try {
+        [IO.Directory]::CreateDirectory($path) | Out-Null
+        foreach ($required in @('cgroup.procs', 'cgroup.events')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $path $required) -PathType Leaf)) {
+                throw "The cgroup v2 containment directory did not expose '$required'."
+            }
+        }
+
+        return $path
+    }
+    catch {
+        if (Test-Path -LiteralPath $path -PathType Container) {
+            try { [IO.Directory]::Delete($path) } catch { }
+        }
+
+        throw "Unable to establish Unix cgroup v2 containment: $($_.Exception.Message)"
+    }
+}
+
+function Add-UnixProcessToCgroup {
+    param(
+        [Parameter(Mandatory = $true)][string]$CgroupPath,
+        [Parameter(Mandatory = $true)][int]$ProcessId
+    )
+
+    [IO.File]::WriteAllText((Join-Path $CgroupPath 'cgroup.procs'), "$ProcessId`n")
+}
+
+function Get-UnixCgroupProcessIds {
+    param([Parameter(Mandatory = $true)][string]$CgroupPath)
+
+    $contents = [IO.File]::ReadAllText((Join-Path $CgroupPath 'cgroup.procs'))
+    return @($contents -split '\s+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+}
+
+function Wait-ForUnixCgroupExit {
+    param([Parameter(Mandatory = $true)][string]$CgroupPath)
 
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $state = [KeelMatrix.UnixExternalCommandNative]::ProbeProcessGroup($ProcessGroupId)
-        if ($state -eq 0) {
+        if (@(Get-UnixCgroupProcessIds -CgroupPath $CgroupPath).Count -eq 0) {
             return $true
-        }
-
-        if ($state -lt 0) {
-            throw "Unable to inspect process group $ProcessGroupId (errno $(-$state))."
         }
 
         Start-Sleep -Milliseconds 50
     }
 
     return $false
+}
+
+function Stop-UnixCgroup {
+    param([Parameter(Mandatory = $true)][string]$CgroupPath)
+
+    $killFile = Join-Path $CgroupPath 'cgroup.kill'
+    if (Test-Path -LiteralPath $killFile -PathType Leaf) {
+        [IO.File]::WriteAllText($killFile, "1`n")
+        return
+    }
+
+    foreach ($processId in @(Get-UnixCgroupProcessIds -CgroupPath $CgroupPath)) {
+        $state = [KeelMatrix.UnixExternalCommandNative]::KillProcess($processId)
+        if ($state -lt 0) {
+            throw "Unable to terminate Unix cgroup process $processId (errno $(-$state))."
+        }
+    }
 }
 
 function Invoke-ExternalCommand {
@@ -572,6 +632,7 @@ function Invoke-ExternalCommand {
     $descendantError = $null
     $killError = $null
     $startError = $null
+    $cleanupError = $null
     $exitCode = $null
     $timedOut = $false
     $completed = $false
@@ -584,6 +645,8 @@ function Invoke-ExternalCommand {
     $stdoutTask = $null
     $stderrTask = $null
     $stdoutMarkerTask = $null
+    $unixCgroupPath = $null
+    $unixGatePath = $null
     $savedBuildServerReuse = [Environment]::GetEnvironmentVariable('MSBUILDDISABLENODEREUSE', 'Process')
     $savedDotnetBuildServerDisable = [Environment]::GetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', 'Process')
     $savedSharedCompilation = [Environment]::GetEnvironmentVariable('UseSharedCompilation', 'Process')
@@ -602,6 +665,7 @@ function Invoke-ExternalCommand {
         if ($IsWindows) {
             $native = [KeelMatrix.ExternalCommandNative]::StartWindows($resolvedFilePath, $ArgumentList, $WorkingDirectory)
             $containmentEstablished = $true
+            [void][KeelMatrix.ExternalCommandNative]::GetActiveProcessCount($native.JobHandle)
             $stdoutHandle = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($native.StandardOutputReadHandle, $true)
             $stderrHandle = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($native.StandardErrorReadHandle, $true)
             $stdoutReader = [IO.StreamReader]::new([IO.FileStream]::new($stdoutHandle, [IO.FileAccess]::Read, 4096, $false), [Text.Encoding]::UTF8, $false, 4096, $true)
@@ -612,6 +676,8 @@ function Invoke-ExternalCommand {
             $timedOut = -not $completed
         }
         else {
+            $unixCgroupPath = New-UnixProcessCgroup
+            $unixGatePath = Join-Path ([IO.Path]::GetTempPath()) "keelmatrix-external-gate-$([Guid]::NewGuid().ToString('N'))"
             $pwshPath = Resolve-ExternalExecutable -FilePath ([string]::Join('', @('p', 'w', 's', 'h')))
             $payload = [ordered]@{
                 FilePath  = $resolvedFilePath
@@ -620,18 +686,21 @@ function Invoke-ExternalCommand {
             $payloadBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
             $sessionSource = 'using System.Runtime.InteropServices; public static class ExternalCommandSession { [DllImport("libc")] public static extern int setsid(); }'
             $sessionSourceBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sessionSource))
+            $gatePathBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($unixGatePath))
             $wrapperCommand = @'
 $source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__SESSION_SOURCE__'))
 Add-Type -TypeDefinition $source
 if ([ExternalCommandSession]::setsid() -lt 0) { exit 125 }
-[Console]::WriteLine('__KEELMATRIX_EXTERNAL_COMMAND_CONTAINED__')
+[Console]::WriteLine(('__KEELMATRIX_EXTERNAL_COMMAND_PID__' + [Environment]::ProcessId))
+$gatePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__GATE_PATH__'))
+while (-not [IO.File]::Exists($gatePath)) { Start-Sleep -Milliseconds 10 }
 $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ARGUMENT_PAYLOAD__'))
 $invocation = $payload | ConvertFrom-Json
 $target = [string]$invocation.FilePath
 $arguments = @($invocation.Arguments | ForEach-Object { [string]$_ })
 & $target @arguments
 exit $LASTEXITCODE
-'@.Replace('__SESSION_SOURCE__', $sessionSourceBase64).Replace('__ARGUMENT_PAYLOAD__', $payloadBase64)
+'@.Replace('__SESSION_SOURCE__', $sessionSourceBase64).Replace('__ARGUMENT_PAYLOAD__', $payloadBase64).Replace('__GATE_PATH__', $gatePathBase64)
             $startInfo = [Diagnostics.ProcessStartInfo]::new()
             $startInfo.FileName = $pwshPath
             $startInfo.WorkingDirectory = $WorkingDirectory
@@ -652,13 +721,17 @@ exit $LASTEXITCODE
             $stdoutMarkerTask = $process.StandardOutput.ReadLineAsync()
             $stderrTask = $process.StandardError.ReadToEndAsync()
             if (-not $stdoutMarkerTask.Wait(5000)) {
-                throw 'The Unix process-group containment marker was not published.'
+                throw 'The Unix cgroup containment marker was not published.'
             }
-            if ($stdoutMarkerTask.GetAwaiter().GetResult() -cne '__KEELMATRIX_EXTERNAL_COMMAND_CONTAINED__') {
-                throw 'The Unix process-group containment marker was invalid.'
+            $marker = $stdoutMarkerTask.GetAwaiter().GetResult()
+            $markerMatch = [regex]::Match($marker, '^__KEELMATRIX_EXTERNAL_COMMAND_PID__(?<pid>\d+)$')
+            if (-not $markerMatch.Success) {
+                throw 'The Unix cgroup containment marker was invalid.'
             }
 
+            Add-UnixProcessToCgroup -CgroupPath $unixCgroupPath -ProcessId ([int]$markerMatch.Groups['pid'].Value)
             $containmentEstablished = $true
+            [IO.File]::WriteAllText($unixGatePath, "ready`n")
             $stdoutTask = $process.StandardOutput.ReadToEndAsync()
             $completed = $process.WaitForExit([int]([int64]$TimeoutSeconds * 1000))
             $timedOut = -not $completed
@@ -676,17 +749,14 @@ exit $LASTEXITCODE
                 [void][KeelMatrix.ExternalCommandNative]::WaitForExit($native.ProcessHandle, 5000)
             }
             else {
-                $killState = [KeelMatrix.UnixExternalCommandNative]::KillProcessGroup($process.Id)
-                if ($killState -lt 0) {
-                    $killError = "kill(process-group) failed with errno $(-$killState)."
+                try {
+                    Stop-UnixCgroup -CgroupPath $unixCgroupPath
+                    if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
+                        $killError = 'The Unix cgroup remained populated after termination.'
+                    }
                 }
-
-                if (-not $process.HasExited) {
-                    [void]$process.WaitForExit(5000)
-                }
-
-                if (-not (Wait-ForUnixProcessGroupExit -ProcessGroupId $process.Id)) {
-                    $killError = if ($killError) { $killError } else { 'The process group remained alive after termination.' }
+                catch {
+                    $killError = $_.Exception.Message
                 }
             }
         }
@@ -711,15 +781,16 @@ exit $LASTEXITCODE
                 }
             }
             else {
-                if (-not (Wait-ForUnixProcessGroupExit -ProcessGroupId $process.Id)) {
-                    $descendantError = 'The command exited but its process group still contained a running descendant.'
-                    $killState = [KeelMatrix.UnixExternalCommandNative]::KillProcessGroup($process.Id)
-                    if ($killState -lt 0) {
-                        $killError = "kill(process-group) failed with errno $(-$killState)."
+                if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
+                    $descendantError = 'The command exited but its Unix containment cgroup still contained a running descendant.'
+                    try {
+                        Stop-UnixCgroup -CgroupPath $unixCgroupPath
+                        if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
+                            $killError = 'The Unix cgroup remained populated after descendant cleanup.'
+                        }
                     }
-
-                    if (-not (Wait-ForUnixProcessGroupExit -ProcessGroupId $process.Id)) {
-                        $killError = if ($killError) { $killError } else { 'The process group remained alive after descendant cleanup.' }
+                    catch {
+                        $killError = $_.Exception.Message
                     }
                 }
             }
@@ -739,14 +810,16 @@ exit $LASTEXITCODE
 
         if ($containmentEstablished -and $null -ne $native) {
             if (-not [KeelMatrix.ExternalCommandNative]::TerminateJob($native.JobHandle, 1)) {
-                $killError = $_.Exception.Message
+                $killError = 'TerminateJobObject returned failure while handling another containment error.'
             }
         }
         elseif ($null -ne $process) {
             if ($containmentEstablished) {
-                $killState = [KeelMatrix.UnixExternalCommandNative]::KillProcessGroup($process.Id)
-                if ($killState -lt 0) {
-                    $killError = "kill(process-group) failed with errno $(-$killState)."
+                try {
+                    Stop-UnixCgroup -CgroupPath $unixCgroupPath
+                }
+                catch {
+                    $killError = $_.Exception.Message
                 }
             }
             else {
@@ -783,6 +856,24 @@ exit $LASTEXITCODE
 
         $captureComplete = $null -eq $captureError
 
+        if ($null -ne $unixGatePath -and (Test-Path -LiteralPath $unixGatePath -PathType Leaf)) {
+            try { Remove-Item -LiteralPath $unixGatePath -Force -ErrorAction Stop } catch { $cleanupError = $_.Exception.Message }
+        }
+
+        if ($null -ne $unixCgroupPath) {
+            try {
+                if (-not (Wait-ForUnixCgroupExit -CgroupPath $unixCgroupPath)) {
+                    $cleanupError = if ($cleanupError) { "$cleanupError The Unix cgroup remained populated." } else { 'The Unix cgroup remained populated during cleanup.' }
+                }
+                if (Test-Path -LiteralPath $unixCgroupPath -PathType Container) {
+                    [IO.Directory]::Delete($unixCgroupPath)
+                }
+            }
+            catch {
+                $cleanupError = if ($cleanupError) { "$cleanupError $($_.Exception.Message)" } else { $_.Exception.Message }
+            }
+        }
+
         if ($null -ne $stdoutReader) { $stdoutReader.Dispose() }
         if ($null -ne $stderrReader) { $stderrReader.Dispose() }
         if ($null -ne $native) {
@@ -800,5 +891,5 @@ exit $LASTEXITCODE
     New-ExternalCommandResult -ExitCode $exitCode -TimedOut $timedOut -Output $output -Error $errorText `
         -CaptureComplete $captureComplete -ContainmentEstablished $containmentEstablished `
         -CaptureError $captureError -ContainmentError $containmentError -DescendantError $descendantError `
-        -KillError $killError -StartError $startError
+        -KillError $killError -StartError $startError -CleanupError $cleanupError
 }

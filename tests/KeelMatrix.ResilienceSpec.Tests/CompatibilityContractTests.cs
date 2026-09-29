@@ -125,7 +125,7 @@ public sealed class CompatibilityContractTests
 
         var workflow = File.ReadAllText(Path.Combine(repository, ".github", "workflows", "validate.yml"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
-        Assert.Contains("      - name: Run full repository validation on Windows and macOS\n        if: runner.os != 'Linux'\n        timeout-minutes: 15", workflow, StringComparison.Ordinal);
+        Assert.Contains("      - name: Run full repository validation on Windows\n        if: runner.os == 'Windows'\n        timeout-minutes: 15", workflow, StringComparison.Ordinal);
         Assert.Contains("      - name: Run integration endpoint 9.8.0\n        timeout-minutes: 5", workflow, StringComparison.Ordinal);
         Assert.Contains("      - name: Run integration endpoint 10.10.0\n        timeout-minutes: 5", workflow, StringComparison.Ordinal);
     }

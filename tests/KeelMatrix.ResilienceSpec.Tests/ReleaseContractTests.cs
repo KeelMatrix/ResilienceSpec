@@ -197,35 +197,73 @@ public sealed class ReleaseContractTests
     public void ReleaseWorkflowPublishesTheSymbolArtifactExactlyOnce()
     {
         var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "release.yml"));
-        var packageStart = workflow.IndexOf("name: Publish package", StringComparison.Ordinal);
-        var symbolsStart = workflow.IndexOf("name: Publish symbols", StringComparison.Ordinal);
+        var releaseScript = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "scripts", "Invoke-ReleaseWorkflow.ps1"));
 
-        Assert.True(packageStart >= 0 && symbolsStart > packageStart, "The release workflow publish steps were not found.");
-        var packageStep = workflow[packageStart..symbolsStart];
-        var symbolsStep = workflow[symbolsStart..];
-
-        Assert.Contains("--no-symbols", packageStep, StringComparison.Ordinal);
-        Assert.DoesNotContain(".snupkg", packageStep, StringComparison.Ordinal);
-        Assert.Equal(1, CountOccurrences(symbolsStep, ".snupkg"));
+        Assert.Contains("Publish package and symbols through the bounded runner", workflow, StringComparison.Ordinal);
+        Assert.Contains("-Mode Publish", workflow, StringComparison.Ordinal);
+        Assert.Contains("'--no-symbols'", releaseScript, StringComparison.Ordinal);
+        Assert.Equal(2, CountOccurrences(releaseScript, "'nuget', 'push'"));
+        Assert.Contains(".snupkg", releaseScript, StringComparison.Ordinal);
     }
 
     [Fact]
     public void ReleaseWorkflowRequiresMainProvenanceAndAllApplicableGatesBeforePublication()
     {
         var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "release.yml"));
+        var releaseScript = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "scripts", "Invoke-ReleaseWorkflow.ps1"));
 
-        Assert.Contains("Validate-ReleaseProvenance.ps1", workflow, StringComparison.Ordinal);
-        Assert.Contains("refs/remotes/origin/main", workflow, StringComparison.Ordinal);
-        Assert.Contains("dotnet format", workflow, StringComparison.Ordinal);
-        Assert.Contains("dotnet build KeelMatrix.ResilienceSpec.slnx", workflow, StringComparison.Ordinal);
-        Assert.Contains("-ResilienceVersion 9.8.0", workflow, StringComparison.Ordinal);
-        Assert.Contains("-ResilienceVersion 10.10.0", workflow, StringComparison.Ordinal);
-        Assert.Contains("Invoke-PackageSmoke.ps1", workflow, StringComparison.Ordinal);
-        Assert.Contains("Invoke-DependencyAudit.ps1 -Mode Required", workflow, StringComparison.Ordinal);
+        Assert.Contains("Invoke-ReleaseWorkflow.ps1", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet restore", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet build", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet test", workflow, StringComparison.Ordinal);
+        Assert.Contains("Validate-ReleaseProvenance.ps1", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("refs/remotes/origin/main", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("'format'", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("'build'", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("'test'", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-ResilienceVersion', '9.8.0", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-ResilienceVersion', '10.10.0", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Invoke-PackageSmoke.ps1", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Invoke-DependencyAudit.ps1", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Invoke-ExternalCommand", releaseScript, StringComparison.Ordinal);
         Assert.True(
-            workflow.IndexOf("Audit direct and transitive dependencies", StringComparison.Ordinal) <
-                workflow.IndexOf("name: Publish package", StringComparison.Ordinal),
-            "The required audit must complete before package publication.");
+            releaseScript.IndexOf("Invoke-PackageSmoke.ps1", StringComparison.Ordinal) <
+            releaseScript.IndexOf("Invoke-DependencyAudit.ps1", StringComparison.Ordinal),
+            "The required audit must complete after package inspection and before the release script returns.");
+    }
+
+    [Fact]
+    public void WorkflowExternalCommandGuardPassesAndRejectsDirectGates()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var guard = Path.Combine(repositoryRoot, "build", "Test-ExternalCommandWorkflow.ps1");
+        var result = RunProcess("pwsh", ["-NoProfile", "-File", guard], repositoryRoot);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("contract passed", result.Output, StringComparison.OrdinalIgnoreCase);
+
+        var temporaryRoot = Directory.CreateTempSubdirectory("resilience-workflow-guard-");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(temporaryRoot.FullName, ".github", "workflows"));
+            Directory.CreateDirectory(Path.Combine(temporaryRoot.FullName, "build"));
+            File.WriteAllText(
+                Path.Combine(temporaryRoot.FullName, ".github", "workflows", "validate.yml"),
+                "name: Validate\n\njobs:\n  validate:\n    steps:\n      - run: pwsh -NoProfile -File build/Test-ExternalCommandWorkflow.ps1\n");
+            File.WriteAllText(
+                Path.Combine(temporaryRoot.FullName, "build", "Test-ExternalCommandWorkflow.ps1"),
+                "Invoke-ExternalCommand");
+            File.WriteAllText(
+                Path.Combine(temporaryRoot.FullName, ".github", "workflows", "release.yml"),
+                "name: Release\n\njobs:\n  verify:\n    steps:\n      - run: dotnet build KeelMatrix.ResilienceSpec.slnx\n");
+
+            var rejected = RunProcess("pwsh", ["-NoProfile", "-File", guard, "-RepositoryPath", temporaryRoot.FullName], temporaryRoot.FullName);
+            Assert.NotEqual(0, rejected.ExitCode);
+            Assert.Contains("direct", rejected.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            temporaryRoot.Delete(true);
+        }
     }
 
     [Fact]
@@ -244,7 +282,7 @@ public sealed class ReleaseContractTests
         {
             Path.Combine("scripts", "Invoke-PackageSmoke.ps1"),
             Path.Combine("scripts", "Run-Sample.ps1"),
-            Path.Combine(".github", "workflows", "release.yml")
+            Path.Combine("scripts", "Invoke-ReleaseWorkflow.ps1")
         })
         {
             var packPath = File.ReadAllText(Path.Combine(repositoryRoot, relativePath));

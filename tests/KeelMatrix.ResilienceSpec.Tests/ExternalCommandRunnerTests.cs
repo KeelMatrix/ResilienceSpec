@@ -118,6 +118,91 @@ public sealed class ExternalCommandRunnerTests
         Assert.Contains("termination failed", value.GetProperty("FailureReason").GetString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void EveryContainmentErrorCombinationFailsClosed()
+    {
+        var fixture = Path.Combine(FindRepositoryRoot(), "build", "Invoke-ExternalCommand.ps1");
+        var command = $@"
+. '{fixture.Replace("'", "''")}';
+ $results = foreach ($mask in 1..31) {{
+    $containment = if (($mask -band 1) -ne 0) {{ 'containment' }} else {{ $null }}
+    $descendant = if (($mask -band 2) -ne 0) {{ 'descendant' }} else {{ $null }}
+    $termination = if (($mask -band 4) -ne 0) {{ 'termination' }} else {{ $null }}
+    $start = if (($mask -band 8) -ne 0) {{ 'start' }} else {{ $null }}
+    $cleanup = if (($mask -band 16) -ne 0) {{ 'cleanup' }} else {{ $null }}
+    New-ExternalCommandResult -ExitCode 0 -TimedOut $false -Output 'complete' -Error '' -CaptureComplete $true `
+        -ContainmentEstablished $true -CaptureError $null -ContainmentError $containment `
+        -DescendantError $descendant -KillError $termination -StartError $start -CleanupError $cleanup
+}}
+$results | ConvertTo-Json -Compress
+";
+
+        var result = RunPowerShell(command);
+        Assert.True(result.ExitCode == 0, result.Error);
+        using var document = JsonDocument.Parse(result.Output);
+        foreach (var value in document.RootElement.EnumerateArray())
+        {
+            Assert.False(value.GetProperty("Succeeded").GetBoolean());
+            Assert.False(value.GetProperty("DescendantsContained").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(value.GetProperty("FailureReason").GetString()));
+        }
+    }
+
+    [Fact]
+    public void PostStartContainmentProbeFailureCannotBeReportedAsSuccess()
+    {
+        var fixture = Path.Combine(FindRepositoryRoot(), "build", "Invoke-ExternalCommand.ps1");
+        var result = RunPowerShell(
+            $". '{fixture.Replace("'", "''")}'; New-ExternalCommandResult -ExitCode 0 -TimedOut $false -Output 'complete' -Error '' -CaptureComplete $true -ContainmentEstablished $true -CaptureError $null -ContainmentError 'post-start probe failed' -DescendantError $null -KillError $null -StartError $null -CleanupError $null | ConvertTo-Json -Compress");
+
+        using var document = JsonDocument.Parse(result.Output);
+        var value = document.RootElement;
+        Assert.False(value.GetProperty("Succeeded").GetBoolean());
+        Assert.False(value.GetProperty("DescendantsContained").GetBoolean());
+        Assert.Contains("post-start probe failed", value.GetProperty("FailureReason").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnixDetachedDescendantIsContainedOrFailsClosed()
+    {
+        var result = RunFixture("Detached");
+        var output = result.GetProperty("Output").GetString() ?? string.Empty;
+        var match = Regex.Match(output, "child=(\\d+)", RegexOptions.CultureInvariant);
+
+        Assert.True(match.Success, output);
+        Assert.False(result.GetProperty("Succeeded").GetBoolean());
+        Assert.False(result.GetProperty("DescendantsContained").GetBoolean());
+        Assert.Contains("descendant", result.GetProperty("FailureReason").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.True(WaitForProcessExit(int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)));
+    }
+
+    [Theory]
+    [InlineData("Launcher", "child=")]
+    [InlineData("Grandchild", "grandchild=")]
+    [InlineData("ClosedHandles", "child=")]
+    public void ProcessTreeLauncherGrandchildAndClosedHandleVariantsFailClosed(string scenario, string marker)
+    {
+        var result = RunFixture(scenario);
+        var output = result.GetProperty("Output").GetString() ?? string.Empty;
+        var match = Regex.Match(output, $"{Regex.Escape(marker)}(\\d+)", RegexOptions.CultureInvariant);
+
+        Assert.True(match.Success, output);
+        Assert.False(result.GetProperty("Succeeded").GetBoolean());
+        Assert.False(result.GetProperty("DescendantsContained").GetBoolean());
+        Assert.Contains("descendant", result.GetProperty("FailureReason").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.True(WaitForProcessExit(int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)));
+    }
+
+    [Fact]
+    public void WindowsRunnerDoesNotAllowJobBreakawayAndQueriesContainment()
+    {
+        var runner = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "build", "Invoke-ExternalCommand.ps1"));
+        Assert.DoesNotContain("CREATE_BREAKAWAY_FROM_JOB", runner, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("JobObjectLimitKillOnJobClose", runner, StringComparison.Ordinal);
+        Assert.Contains("GetDescendantProcessCount", runner, StringComparison.Ordinal);
+        Assert.Contains("ContainmentError", runner, StringComparison.Ordinal);
+    }
+
     private static JsonElement RunFixture(string scenario, int timeoutSeconds = 5)
     {
         var fixture = Path.Combine(FindRepositoryRoot(), "tests", "KeelMatrix.ResilienceSpec.Tests", "ExternalCommandFixture.ps1");

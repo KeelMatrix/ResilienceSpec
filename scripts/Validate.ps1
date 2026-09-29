@@ -50,6 +50,9 @@ function Invoke-Step {
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
+$workflowGuard = Join-Path $repo 'build/Test-ExternalCommandWorkflow.ps1'
+Invoke-Step -Name 'External-command workflow routing guard' -File $pwshExecutable -TimeoutSeconds 60 -Arguments @(
+    '-NoProfile', '-File', $workflowGuard)
 $launchGuard = Join-Path $repo 'build/Test-NestedPwshLaunch.ps1'
 Invoke-Step -Name 'Nested PowerShell launch guard self-test' -File $pwshExecutable -TimeoutSeconds 60 -Arguments @(
     '-NoProfile', '-File', $launchGuard, '-SelfTest')

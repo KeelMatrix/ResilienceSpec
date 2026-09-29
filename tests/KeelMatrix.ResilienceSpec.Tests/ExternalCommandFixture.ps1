@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Streams', 'StdoutOnly', 'StderrOnly', 'NonZero', 'Timeout', 'Descendant')]
+    [ValidateSet('Streams', 'StdoutOnly', 'StderrOnly', 'NonZero', 'Timeout', 'Descendant', 'Detached', 'Launcher', 'Grandchild', 'ClosedHandles')]
     [string]$Scenario,
 
     [int]$TimeoutSeconds = 5
@@ -40,6 +40,73 @@ $childStartInfo = [Diagnostics.ProcessStartInfo]::new()
 $childStartInfo.FileName = $pwsh
 $childStartInfo.UseShellExecute = $false
 $childStartInfo.CreateNoWindow = $true
+[void]$childStartInfo.ArgumentList.Add('-NoProfile')
+[void]$childStartInfo.ArgumentList.Add('-Command')
+[void]$childStartInfo.ArgumentList.Add('Start-Sleep -Seconds 30')
+$child = [Diagnostics.Process]::Start($childStartInfo)
+[Console]::WriteLine(('child=' + $child.Id))
+$child.Dispose()
+exit 0
+'@.Replace('__PWSH_PATH__', $pwshBase64)
+    }
+    'Detached' {
+        $pwshBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pwsh))
+        $arguments += @'
+$pwsh = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PWSH_PATH__'))
+if (-not $IsWindows) {
+    Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class ResilienceSpecDetached { [DllImport("libc")] public static extern int setsid(); }'
+}
+$childStartInfo = [Diagnostics.ProcessStartInfo]::new()
+$childStartInfo.FileName = $pwsh
+$childStartInfo.UseShellExecute = $false
+$childStartInfo.CreateNoWindow = $true
+[void]$childStartInfo.ArgumentList.Add('-NoProfile')
+[void]$childStartInfo.ArgumentList.Add('-Command')
+$childCommand = if ($IsWindows) { 'Start-Sleep -Seconds 30' } else { '[ResilienceSpecDetached]::setsid(); [Console]::In.Close(); [Console]::Out.Close(); [Console]::Error.Close(); Start-Sleep -Seconds 30' }
+[void]$childStartInfo.ArgumentList.Add($childCommand)
+$child = [Diagnostics.Process]::Start($childStartInfo)
+[Console]::WriteLine(('child=' + $child.Id))
+$child.Dispose()
+exit 0
+'@.Replace('__PWSH_PATH__', $pwshBase64)
+    }
+    'Launcher' {
+        $pwshBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pwsh))
+        $arguments += @'
+$pwsh = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PWSH_BASE64__'))
+$childStartInfo = [Diagnostics.ProcessStartInfo]::new()
+$childStartInfo.FileName = $pwsh
+$childStartInfo.UseShellExecute = $false
+$childStartInfo.CreateNoWindow = $true
+[void]$childStartInfo.ArgumentList.Add('-NoProfile')
+[void]$childStartInfo.ArgumentList.Add('-Command')
+[void]$childStartInfo.ArgumentList.Add('$grandchild = Start-Process -FilePath "__PWSH_PATH__" -ArgumentList @("-NoProfile", "-Command", "Start-Sleep -Seconds 30") -PassThru; [Console]::WriteLine(("grandchild=" + $grandchild.Id)); Start-Sleep -Seconds 30')
+$child = [Diagnostics.Process]::Start($childStartInfo)
+[Console]::WriteLine(('child=' + $child.Id))
+$child.Dispose()
+exit 0
+'@.Replace('__PWSH_BASE64__', $pwshBase64).Replace('__PWSH_PATH__', $pwsh)
+    }
+    'Grandchild' {
+        $pwshBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pwsh))
+        $arguments += @'
+$pwsh = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PWSH_PATH__'))
+$grandchild = Start-Process -FilePath $pwsh -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru
+[Console]::WriteLine(('grandchild=' + $grandchild.Id))
+exit 0
+'@.Replace('__PWSH_PATH__', $pwshBase64)
+    }
+    'ClosedHandles' {
+        $pwshBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pwsh))
+        $arguments += @'
+$pwsh = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PWSH_PATH__'))
+$childStartInfo = [Diagnostics.ProcessStartInfo]::new()
+$childStartInfo.FileName = $pwsh
+$childStartInfo.UseShellExecute = $false
+$childStartInfo.CreateNoWindow = $true
+$childStartInfo.RedirectStandardInput = $false
+$childStartInfo.RedirectStandardOutput = $false
+$childStartInfo.RedirectStandardError = $false
 [void]$childStartInfo.ArgumentList.Add('-NoProfile')
 [void]$childStartInfo.ArgumentList.Add('-Command')
 [void]$childStartInfo.ArgumentList.Add('Start-Sleep -Seconds 30')

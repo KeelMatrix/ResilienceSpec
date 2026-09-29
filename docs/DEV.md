@@ -90,17 +90,18 @@ bash ./scripts/validate-linux.sh
 
 The script delegates to `scripts/Validate.ps1 -Mode Full -ResilienceVersion 10.10.0`, so Linux executes the same
 reachable-history, compatibility, restore, formatting, Release build and test, package smoke, sample, and required
-dependency-audit gates as Windows and macOS. The package smoke includes pack, package inspection, and an isolated
+dependency-audit gates as Windows. The package smoke includes pack, package inspection, and an isolated
 clean-consumer restore.
 
 ## Hosted CI status
 
 The repository contains `.github/workflows/validate.yml`, which runs on pushes to `main` and on manual dispatch with
-Windows, Ubuntu, and macOS hosted runners. Every runner invokes Full validation against `10.10.0` and then runs
-explicit integration jobs for both `9.8.0` and `10.10.0`. Only `net8.0` is exercised; a hosted result is evidence from
-the specific runner, not physical hardware. The Windows and macOS Full-validation step is bounded to 15 minutes, and
-each direct integration step is bounded to 5 minutes; a timeout fails the named step rather than waiting for the
-matrix job's outer limit.
+Windows and Ubuntu hosted runners. Every runner invokes Full validation against `10.10.0` and then runs explicit
+integration jobs for both `9.8.0` and `10.10.0`. Only `net8.0` is exercised; a hosted result is evidence from the
+specific runner, not physical hardware. The Windows Full-validation step is bounded to 15 minutes, and each direct
+integration step is bounded to 5 minutes; a timeout fails the named step rather than waiting for the matrix job's
+outer limit. macOS package use remains a runtime claim, but this repository gate does not claim successful external
+process-tree proof there because the required cgroup v2 containment boundary is unavailable.
 
 Useful narrower variants:
 
@@ -207,19 +208,33 @@ the wait runs on the injected clock, so it is deliberately not exposed.
 
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required` fails closed unless direct and transitive advisory data is
 available and every project reports no vulnerable packages from `https://api.nuget.org/v3/index.json`. Full validation
-runs this audit on Windows, Linux, and macOS. The audit's `dotnet list package --vulnerable --include-transitive`
+runs this audit on Windows and Linux. The audit's `dotnet list package --vulnerable --include-transitive`
 child command has a 120-second deadline, captures both output streams, and runs inside the shared bounded external-command
-runner. The runner establishes a Windows Job Object or Unix `setsid` process group before execution, owns the whole
-process tree for the command lifetime, and fails closed when containment, capture, termination, or exit status cannot be
-proven. A timeout names the blocked operation and fails closed. All validation-script gate commands, including package
-smoke, inspection, restore, the final consumer, the sample run, and the direct integration endpoints, use the same
-runner; stdout is printed before stderr, so the runner does not promise cross-stream chronology. Full validation also
-applies per-step watchdogs:
+runner. The runner establishes a Windows Job Object or a Unix cgroup v2 sub-cgroup before execution, owns the whole
+process tree for the command lifetime (including descendants that create a new session or process group), and fails
+closed when containment, capture, inspection, termination, cleanup, or exit status cannot be proven. Windows uses a
+kill-on-close Job Object without the breakaway creation flag and treats Job Object queries as required evidence. On
+Unix, a writable cgroup v2 hierarchy is required; platforms without that capability do not report successful gates.
+A timeout names the blocked operation and fails closed. All validation-script gate commands, including package smoke,
+inspection, restore, the final consumer, the sample run, and the direct integration endpoints, use the same runner;
+stdout is printed before stderr, so the runner does not promise cross-stream chronology. Full validation also applies
+per-step watchdogs:
 60 seconds for repository guards, 180 seconds for restore, 300 seconds for formatting/build/sample, 360 seconds for
 each test project, 600 seconds for package smoke, and 180 seconds for the audit step. Audit evidence is valid only
 for the exact candidate and hosted run that produced it, so use the current candidate's CI conclusion rather than a
 dated statement in this document.
 Treat a non-zero result as a release blocker. No release action is authorized by a passing audit.
+
+## Release workflow command boundary
+
+`build/Test-ExternalCommandWorkflow.ps1` is the contract guard for both `.github/workflows/validate.yml` and
+`.github/workflows/release.yml`. Workflow YAML may select actions and invoke repository PowerShell/Bash entry scripts,
+but it must not run direct `git`, `dotnet`, or shell validation commands. `scripts/Invoke-ReleaseWorkflow.ps1` is the
+release gate entry point: provenance fetch/revision checks, restore, format, build, test, integration, pack,
+normalization, package inspection, isolated consumer smoke, dependency audit, and NuGet publication all execute
+through `build/Invoke-ExternalCommand.ps1`. Workflow/job/step timeouts remain secondary limits. The publish action's
+OIDC authentication is an action boundary; only the resulting package push is an external command and it is routed
+through the runner.
 
 ## Release preparation
 

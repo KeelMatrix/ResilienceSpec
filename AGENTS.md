@@ -12,7 +12,7 @@
 - `tests/PackageSmoke` is a clean consumer that restores the packed package from an isolated local feed. It is
   deliberately outside the solution.
 - `samples/KeelMatrix.ResilienceSpec.Sample` is a runnable walkthrough of the documented quick start.
-- `scripts` contains the repository gates: `Validate.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`,
+- `scripts` contains the repository gates: `Validate.ps1`, `Invoke-ReleaseWorkflow.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`,
   `Invoke-IntegrationTests.ps1`, `Invoke-DependencyAudit.ps1`, `Validate-History.ps1`, `Validate-DocumentationHygiene.ps1`,
   `Validate-ReleaseProvenance.ps1`, and `Validate-ReleaseContract.ps1`.
 - `docs/DEV.md` explains the local validation path; `README.md` and `src/KeelMatrix.ResilienceSpec/README.md` are the
@@ -75,9 +75,14 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is
   allowed on the validation path.
 - Every external validation gate runs through `build/Invoke-ExternalCommand.ps1`. The runner must establish Windows
-  Job Object or Unix process-group containment before starting the command, capture both streams completely, report
+  Job Object or Unix cgroup v2 containment before starting the command, capture both streams completely, report
   exit/timeout/termination/descendant state explicitly, and fail closed unless the whole process tree is owned and
-  drained. It prints stdout before stderr; cross-stream chronology is not part of the contract.
+  drained. On Unix without a writable cgroup v2 hierarchy, successful completion is not claimed. Any containment,
+  inspection, probe, termination, or cleanup error forces failure and `DescendantsContained=false`. It prints stdout
+  before stderr; cross-stream chronology is not part of the contract.
+- `.github/workflows/validate.yml` and `.github/workflows/release.yml` may invoke repository scripts, but may not
+  contain direct Git, .NET, or shell validation gates. `build/Test-ExternalCommandWorkflow.ps1` is the source of
+  truth for this workflow routing guard; release verification and publication use `scripts/Invoke-ReleaseWorkflow.ps1`.
 - Set `KEELMATRIX_NO_TELEMETRY=1` for local validation. Repository validation must never emit production telemetry.
 - Release-tag validation requires `[Unreleased]` to contain only its heading and blank lines. Reachable commit history
   is also checked for non-product provenance or authorship metadata, prohibited trailers, and non-conforming

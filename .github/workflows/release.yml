@@ -28,184 +28,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require the exact remote-main candidate
-        shell: pwsh
-        run: |
-          git fetch origin main --force --prune
-          if ($LASTEXITCODE -ne 0) {
-            throw "Unable to refresh the remote-main reference."
-          }
-          $remoteMainRevision = (git rev-parse refs/remotes/origin/main).Trim()
-          if ($LASTEXITCODE -ne 0) {
-            throw "Unable to resolve the remote-main candidate."
-          }
-          pwsh -NoProfile -File scripts/Validate-ReleaseProvenance.ps1 `
-            -TagRevision $env:GITHUB_SHA `
-            -RemoteMainRevision $remoteMainRevision
-
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
-      - name: Validate reachable commit history
-        shell: pwsh
-        run: pwsh -NoProfile -File scripts/Validate-History.ps1 -Revision HEAD -RepositoryPath $env:GITHUB_WORKSPACE
-
-      - name: Validate release-facing documentation hygiene
-        shell: pwsh
-        run: pwsh -NoProfile -File scripts/Validate-DocumentationHygiene.ps1 -RepositoryPath $env:GITHUB_WORKSPACE
-
-      - name: Validate release tag
+      - name: Verify, test, pack, inspect, and smoke the release candidate
         id: release-version
-        shell: pwsh
-        run: |
-          $validation = @(./scripts/Validate-ReleaseContract.ps1 -Tag $env:GITHUB_REF_NAME -PackageProject ./src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj -ChangelogPath ./CHANGELOG.md)
-          if ($LASTEXITCODE -ne 0) {
-            throw "Release contract validation failed."
-          }
-          $passed = $validation | Where-Object { $_ -match '^Release contract passed:' } | Select-Object -First 1
-          if ($passed -notmatch 'version=(?<version>\S+)') {
-            throw "Release contract validator did not return a canonical package version."
-          }
-          "version=$($Matches.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Restore
-        run: >-
-          dotnet restore KeelMatrix.ResilienceSpec.slnx
-          --configfile NuGet.config
-          --no-cache
-          --force
-          -p:NuGetAudit=false
-
-      - name: Verify formatting and analyzers
-        run: >-
-          dotnet format KeelMatrix.ResilienceSpec.slnx
-          --verify-no-changes
-          --no-restore
-          --verbosity quiet
-
-      - name: Build
-        run: >-
-          dotnet build KeelMatrix.ResilienceSpec.slnx
-          --configuration Release
-          --no-restore
-          -p:Version=${{ steps.release-version.outputs.version }}
-          -p:SourceRevisionId=${{ github.sha }}
-          -p:RepositoryCommit=${{ github.sha }}
-          -p:RepositoryBranch=refs/heads/main
-          -p:RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec
-          -p:PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec
-          -p:ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec
-          -p:GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git
-          -p:GitRepositoryRemoteName=origin
-          -p:PublishRepositoryUrl=true
-          -p:NuGetAudit=false
-
-      - name: Test
-        shell: bash
-        run: |
-          dotnet test tests/KeelMatrix.ResilienceSpec.Tests/KeelMatrix.ResilienceSpec.Tests.csproj \
-            --configuration Release \
-            --no-build \
-            --no-restore \
-            -p:Version=${{ steps.release-version.outputs.version }} \
-            -p:NuGetAudit=false
-
-      - name: Run integration endpoint 9.8.0
-        shell: pwsh
-        run: pwsh -NoProfile -File scripts/Invoke-IntegrationTests.ps1 -ResilienceVersion 9.8.0
-
-      - name: Run integration endpoint 10.10.0
-        shell: pwsh
-        run: pwsh -NoProfile -File scripts/Invoke-IntegrationTests.ps1 -ResilienceVersion 10.10.0
-
-      - name: Run package smoke and sample
-        timeout-minutes: 15
-        shell: pwsh
-        run: |
-          pwsh -NoProfile -File scripts/Invoke-PackageSmoke.ps1
-          if ($LASTEXITCODE -ne 0) {
-            throw "Package smoke failed with exit code $LASTEXITCODE."
-          }
-          pwsh -NoProfile -File scripts/Run-Sample.ps1
-          if ($LASTEXITCODE -ne 0) {
-            throw "Sample verification failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Audit direct and transitive dependencies
-        shell: pwsh
-        run: pwsh -NoProfile -File scripts/Invoke-DependencyAudit.ps1 -Mode Required
-
-      - name: Pack shipping project
-        shell: pwsh
-        run: |
-          $packageDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts/packages'
-          if (Test-Path -LiteralPath $packageDirectory) {
-            Remove-Item -LiteralPath $packageDirectory -Recurse -Force
-          }
-          New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
-          dotnet pack ./src/KeelMatrix.ResilienceSpec/KeelMatrix.ResilienceSpec.csproj `
-            --configuration Release `
-            --no-build `
-            --no-restore `
-            --include-symbols `
-            -p:SymbolPackageFormat=snupkg `
-            -p:Version=${{ steps.release-version.outputs.version }} `
-            -p:PackageVersion=${{ steps.release-version.outputs.version }} `
-            -p:SourceRevisionId=$env:GITHUB_SHA `
-            -p:RepositoryCommit=$env:GITHUB_SHA `
-            -p:RepositoryBranch=refs/heads/main `
-            -p:RepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec `
-            -p:PrivateRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec `
-            -p:ScmRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec `
-            -p:GitRepositoryUrl=https://github.com/KeelMatrix/ResilienceSpec.git `
-            -p:GitRepositoryRemoteName=origin `
-            -p:PublishRepositoryUrl=true `
-            -p:NuGetAudit=false `
-            --output $packageDirectory
-          if ($LASTEXITCODE -ne 0) {
-            throw "Packing failed with exit code $LASTEXITCODE."
-          }
-          $normalizationScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Normalize-PackageArchive.ps1'
-          foreach ($archive in @(
-              (Join-Path $packageDirectory "KeelMatrix.ResilienceSpec.${{ steps.release-version.outputs.version }}.nupkg"),
-              (Join-Path $packageDirectory "KeelMatrix.ResilienceSpec.${{ steps.release-version.outputs.version }}.snupkg")
-          )) {
-            pwsh -NoProfile -File $normalizationScript -PackagePath $archive
-            if ($LASTEXITCODE -ne 0) {
-              throw "Package normalization failed with exit code $LASTEXITCODE."
-            }
-          }
-
-      - name: Validate exact release artifact set
-        shell: pwsh
-        run: |
-          $packageDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts/packages'
-          $version = '${{ steps.release-version.outputs.version }}'
-          $expected = @(
-            "KeelMatrix.ResilienceSpec.$version.nupkg",
-            "KeelMatrix.ResilienceSpec.$version.snupkg"
-          ) | Sort-Object
-          $actual = @(Get-ChildItem -LiteralPath $packageDirectory -File | Select-Object -ExpandProperty Name | Sort-Object)
-          if (($actual -join "`n") -cne ($expected -join "`n")) {
-            throw "Unexpected release artifact set. Expected: $($expected -join ', '). Actual: $($actual -join ', ')."
-          }
-
-      - name: Inspect package contents
+        timeout-minutes: 19
         shell: pwsh
         run: >-
-          ./scripts/Inspect-Package.ps1
-          -PackagePath ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ steps.release-version.outputs.version }}.nupkg
-          -SymbolsPath ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ steps.release-version.outputs.version }}.snupkg
-          -ExpectedVersion ${{ steps.release-version.outputs.version }}
-          -ExpectedRepositoryCommit $env:GITHUB_SHA
+          pwsh -NoProfile -File scripts/Invoke-ReleaseWorkflow.ps1
+          -Mode Verify
+          -Tag $env:GITHUB_REF_NAME
+          -TagRevision $env:GITHUB_SHA
 
       - name: Upload validated packages
         uses: actions/upload-artifact@v4
         with:
           name: release-packages
-          path: artifacts/packages
+          path: artifacts/packages/feed
           if-no-files-found: error
           retention-days: 7
 
@@ -235,19 +77,12 @@ jobs:
         with:
           user: dmitriyzen
 
-      - name: Publish package
+      - name: Publish package and symbols through the bounded runner
+        timeout-minutes: 8
         shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: >-
-          dotnet nuget push
-          ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ needs.verify.outputs.version }}.nupkg
-          --no-symbols
-          --source https://api.nuget.org/v3/index.json
-          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
-
-      - name: Publish symbols
-        shell: pwsh
-        run: >-
-          dotnet nuget push
-          ./artifacts/packages/KeelMatrix.ResilienceSpec.${{ needs.verify.outputs.version }}.snupkg
-          --source https://api.nuget.org/v3/index.json
-          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
+          pwsh -NoProfile -File scripts/Invoke-ReleaseWorkflow.ps1
+          -Mode Publish
+          -PackageVersion ${{ needs.verify.outputs.version }}

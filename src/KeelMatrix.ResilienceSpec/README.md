@@ -137,9 +137,9 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   judging a partial timeline; result-level assertions remain evaluable. When overflowed, `LastAttempt` is the last
   recorded attempt rather than necessarily the final served attempt. A sufficiently long runaway retry loop may still
   return `Pending` when its observation window ends, with the exact served count and overflow state preserved.
-- The package targets `net8.0`. Hosted validation runs the package gate on Windows, Linux, and macOS, then runs explicit
-  integration checks against both `9.8.0` and `10.10.0`. The macOS evidence comes from a hosted, virtualized
-  `macos-latest` runner, not physical macOS hardware.
+- The package targets `net8.0`. Hosted validation runs the package gate on Windows and Linux, then runs explicit
+  integration checks against both `9.8.0` and `10.10.0`. macOS package use remains a runtime claim; the repository
+  gate does not claim external process-tree containment proof there because the required cgroup v2 boundary is unavailable.
 - The package gate packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, stores entries
   without compression, emits LF-only UTF-8 package text payloads, compares the `.nupkg` and `.snupkg` SHA256 values, and
   inspects the normalized artifacts before the clean consumer restore. This makes the
