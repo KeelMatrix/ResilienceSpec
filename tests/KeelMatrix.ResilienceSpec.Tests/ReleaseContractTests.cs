@@ -581,7 +581,7 @@ public sealed class ReleaseContractTests
 
         var packArguments = new List<string>
         {
-            "pack", project, "-c", "Release", "-warnaserror", "--no-restore",
+            "pack", project, "-c", "Release", "-warnaserror", "--no-restore", "--disable-build-servers",
             "-p:PackageVersion=0.1.0",
             $"-p:SourceRevisionId={expectedCommit}",
             $"-p:RepositoryCommit={expectedCommit}",
@@ -628,7 +628,7 @@ public sealed class ReleaseContractTests
     private static List<string> StrictPackArguments(string project, string revision, string packageDirectory) =>
         new()
         {
-            "pack", project, "-c", "Release", "-warnaserror", "--no-restore",
+            "pack", project, "-c", "Release", "-warnaserror", "--no-restore", "--disable-build-servers",
             "-p:PackageVersion=0.1.0",
             $"-p:SourceRevisionId={revision}",
             $"-p:RepositoryCommit={revision}",

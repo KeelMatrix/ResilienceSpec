@@ -33,11 +33,15 @@ still explicit.
 
 The optional `KeelMatrix.Telemetry` integration requests only the shared activation and weekly heartbeat contract. An
 activation is requested after a scripted scenario has settled, an executed attempt has published at least one injected
-failure, and an assertion was evaluated at or after the settlement boundary. The response and exception categories
-describe only published attempt outcomes; unused later script steps are not reported. Constructing a script, handler,
-or scenario, canceling a delay before its wrapped failure starts, running a scenario that only succeeds, and evaluating
-an assertion against an interim live or observation-cleanup report do not activate telemetry. Identifier, storage,
-retention, and delivery details belong to the maintained shared policy linked below.
+failure or an executed injected timeout has been classified as a timeout by the settled client or resilience strategy,
+and an assertion was evaluated at or after the settlement boundary. The response and network-exception categories
+describe published attempt outcomes. An injected timeout contributes the exception category when the settled client or
+resilience strategy classifies that outcome as a timeout, even though the terminal attempt records
+`Abandoned` after its cancellation wait; plain caller cancellation of the same timeout step does not contribute that
+category. Unused later script steps are not reported. Constructing a script, handler, or scenario, canceling a delay
+before its wrapped failure starts, running a scenario that only succeeds, and evaluating an assertion against an
+interim live or observation-cleanup report do not activate telemetry. Identifier, storage, retention, and delivery
+details belong to the maintained shared policy linked below.
 
 Telemetry is best-effort and opt-out. A telemetry failure cannot change a scenario result, fail a test, or affect the
 host application.

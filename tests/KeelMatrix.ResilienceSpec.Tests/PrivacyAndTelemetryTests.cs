@@ -183,6 +183,39 @@ public sealed class TelemetryTests
     }
 
     [Fact]
+    public async Task CallerCancellationOfAnInjectedTimeoutDoesNotActivateExceptionTelemetry()
+    {
+        var clock = Chains.CreateClock();
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            clock,
+            new ResilienceScenarioOptions
+            {
+                AdvanceClock = false,
+                PendingObservation = TimeSpan.FromMilliseconds(200),
+                CleanupTimeout = TimeSpan.FromMilliseconds(200),
+                TelemetrySink = sink,
+            });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider));
+        using var caller = new CancellationTokenSource();
+        using var request = Chains.Request(HttpMethod.Get);
+
+        var run = scenario.SendAsync(client, request, caller.Token);
+        await scenario.Handler.Observer.WaitForFirstAttemptAsync();
+        await caller.CancelAsync();
+
+        using var result = await run;
+
+        result.ShouldHaveKind(ResilienceResultKind.Canceled);
+        scenario.Report.ShouldHaveAttempts(1);
+        Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(scenario.Report.Attempts).Outcome);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
     public async Task AnInjectedFailureWithAnEvaluatedAssertionActivatesExactlyOnce()
     {
         var clock = Chains.CreateClock();
@@ -357,7 +390,52 @@ public sealed class TelemetryTests
 
         result.ShouldHaveKind(ResilienceResultKind.Timeout);
         scenario.Report.ShouldHaveAttempts(1);
+        Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(scenario.Report.Attempts).Outcome);
 
+        var signal = Assert.Single(sink.Signals);
+        Assert.False(signal.ResponseFault);
+        Assert.True(signal.ExceptionFault);
+    }
+
+    [Fact]
+    public async Task CallerCancellationWinsTheStrategyTimeoutRaceWithoutExceptionTelemetry()
+    {
+        var clock = Chains.CreateClock();
+        var sink = new RecordingTelemetrySink();
+        using var caller = new CancellationTokenSource();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            clock,
+            Options(sink));
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new AttemptTimeoutHandler(TimeSpan.FromSeconds(1), clock.TimeProvider, caller));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request, caller.Token);
+
+        result.ShouldHaveKind(ResilienceResultKind.Canceled);
+        scenario.Report.ShouldHaveAttempts(1);
+        Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(scenario.Report.Attempts).Outcome);
+        Assert.Empty(sink.Signals);
+    }
+
+    [Fact]
+    public async Task NativeHttpClientTimeoutActivatesExceptionTelemetry()
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Timeout()),
+            options: Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler);
+        client.Timeout = TimeSpan.FromMilliseconds(100);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        scenario.Report.ShouldHaveAttempts(1);
+        Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(scenario.Report.Attempts).Outcome);
         var signal = Assert.Single(sink.Signals);
         Assert.False(signal.ResponseFault);
         Assert.True(signal.ExceptionFault);

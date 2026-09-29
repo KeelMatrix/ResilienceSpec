@@ -50,7 +50,10 @@ internal enum IntegrationPath
 /// <param name="PackageVersion">The package version that produced the activation.</param>
 /// <param name="TargetFramework">The target framework of the package.</param>
 /// <param name="ResponseFault">Whether an executed attempt published a failing response.</param>
-/// <param name="ExceptionFault">Whether an executed attempt published a network or timeout failure.</param>
+/// <param name="ExceptionFault">
+/// Whether an executed attempt published a network failure, or the settled client/strategy outcome classified an
+/// injected timeout as a timeout. Plain caller cancellation is not reported as an exception fault.
+/// </param>
 /// <param name="TimingAssertion">Whether a controllable clock took part in the scenario.</param>
 /// <param name="AttemptBucket">The coarse attempt-count bucket.</param>
 /// <param name="Assertion">Whether the evaluated assertion held.</param>
@@ -114,9 +117,13 @@ internal static class TelemetryHost
 
 /// <summary>
 /// Decides whether one scenario counts as an activation: the scripted downstream must have published at least one
-/// injected failure, the scenario must have settled, and at least one resilience assertion must have been evaluated
-/// at or after the settlement boundary. Fault categories are accumulated from attempt publication events rather than
-/// from unused planned script steps. Constructing a handler, a script, or a scenario is never an activation on its own.
+/// injected failure, or an executed injected timeout must have been classified as a timeout by the settled
+/// client/strategy result; the scenario must have settled; and at least one resilience assertion must have been
+/// evaluated at or after the settlement boundary. Response and network categories are accumulated from attempt
+/// publication events; an injected timeout also contributes an exception category when the settled client/strategy
+/// result is classified as a timeout. Plain caller cancellation, unused planned script steps, and observation cleanup
+/// never contribute a timeout category. Constructing a handler, a script, or a scenario is never an activation on its
+/// own.
 /// </summary>
 internal sealed class ScenarioTelemetry
 {

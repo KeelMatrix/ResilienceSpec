@@ -82,6 +82,9 @@ public sealed class ResilienceResult : IDisposable
     internal static ResilienceResult ForException(Exception exception, bool callerCanceled, TimeSpan virtualElapsed, HttpAttemptReport report) =>
         new(Classify(exception, callerCanceled), null, exception, virtualElapsed, report);
 
+    internal static bool IsTimeout(Exception exception, bool callerCanceled) =>
+        Classify(exception, callerCanceled) == ResilienceResultKind.Timeout;
+
     internal static ResilienceResult Pending(TimeSpan virtualElapsed, HttpAttemptReport report) =>
         new(ResilienceResultKind.Pending, null, null, virtualElapsed, report);
 

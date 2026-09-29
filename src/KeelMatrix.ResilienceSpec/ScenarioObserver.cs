@@ -113,8 +113,6 @@ internal sealed class AttemptEntry
         _publicationSeam?.Observe(AttemptPublicationPoint.AfterCompletionPublication);
     }
 
-    internal void MarkExceptionFaultObserved() => Volatile.Write(ref _exceptionFaultObserved, 1);
-
     internal (bool ResponseFault, bool ExceptionFault) FailureCategories =>
         (Volatile.Read(ref _responseFaultObserved) == 1, Volatile.Read(ref _exceptionFaultObserved) == 1);
 
@@ -175,8 +173,6 @@ internal sealed class AttemptScope : IDisposable
 
     internal void Complete(HttpAttemptOutcome outcome, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null) =>
         Entry.Complete(outcome, statusCode, retryAfter);
-
-    internal void MarkExceptionFaultObserved() => Entry.MarkExceptionFaultObserved();
 
     public void Dispose()
     {
@@ -402,7 +398,7 @@ internal sealed class ScenarioObserver
         }
     }
 
-    internal TimeSpan? MarkSettled()
+    internal TimeSpan? MarkSettled(bool timeoutOutcome = false)
     {
         var virtualElapsed = Elapsed();
         var virtualElapsedIsExact = HasExactTimingEvidence();
@@ -415,6 +411,14 @@ internal sealed class ScenarioObserver
         }
 
         SignalProgress();
+        if (timeoutOutcome)
+        {
+            // A timeout step itself only waits for cancellation. Record an exception category only when the
+            // settled caller-visible result proves that a client/strategy timeout, rather than caller cancellation,
+            // classified the run as a timeout.
+            Telemetry.RecordFailure(responseFault: false, exceptionFault: true);
+        }
+
         Telemetry.MarkScenarioCompleted(AttemptCount);
         return virtualElapsed;
     }
