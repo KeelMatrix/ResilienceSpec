@@ -89,6 +89,35 @@ public sealed class ExternalCommandRunnerTests
         Assert.Contains("not found", value.GetProperty("FailureReason").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void IncompleteCaptureCannotBeReportedAsSuccess()
+    {
+        var fixture = Path.Combine(FindRepositoryRoot(), "build", "Invoke-ExternalCommand.ps1");
+        var result = RunPowerShell(
+            $". '{fixture.Replace("'", "''")}'; New-ExternalCommandResult -ExitCode 0 -TimedOut $false -Output 'partial' -Error '' -CaptureComplete $false -ContainmentEstablished $true -CaptureError 'capture failed' -ContainmentError $null -DescendantError $null -KillError $null -StartError $null | ConvertTo-Json -Compress");
+
+        using var document = JsonDocument.Parse(result.Output);
+        var value = document.RootElement;
+        Assert.False(value.GetProperty("Succeeded").GetBoolean());
+        Assert.Equal(0, value.GetProperty("ExitCode").GetInt32());
+        Assert.False(value.GetProperty("CaptureComplete").GetBoolean());
+        Assert.Contains("capture failed", value.GetProperty("FailureReason").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TerminationFailureCannotBeReportedAsSuccess()
+    {
+        var fixture = Path.Combine(FindRepositoryRoot(), "build", "Invoke-ExternalCommand.ps1");
+        var result = RunPowerShell(
+            $". '{fixture.Replace("'", "''")}'; New-ExternalCommandResult -ExitCode $null -TimedOut $true -Output '' -Error '' -CaptureComplete $true -ContainmentEstablished $true -CaptureError $null -ContainmentError $null -DescendantError $null -KillError 'termination failed' -StartError $null | ConvertTo-Json -Compress");
+
+        using var document = JsonDocument.Parse(result.Output);
+        var value = document.RootElement;
+        Assert.False(value.GetProperty("Succeeded").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, value.GetProperty("ExitCode").ValueKind);
+        Assert.Contains("termination failed", value.GetProperty("FailureReason").GetString(), StringComparison.Ordinal);
+    }
+
     private static JsonElement RunFixture(string scenario, int timeoutSeconds = 5)
     {
         var fixture = Path.Combine(FindRepositoryRoot(), "tests", "KeelMatrix.ResilienceSpec.Tests", "ExternalCommandFixture.ps1");
