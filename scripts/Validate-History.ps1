@@ -15,7 +15,7 @@ function Fail-History {
     throw "History contract failed: $Message"
 }
 
-function Invoke-GitText {
+function Invoke-GitOutput {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments
     )
@@ -25,43 +25,41 @@ function Invoke-GitText {
         Fail-History "Git command failed closed: git -C '$RepositoryPath' $($Arguments -join ' ')`n$($result.FailureReason)`n$($result.Output)`n$($result.Error)"
     }
 
-    return @($result.Output -split "`r?`n")
+    return $result.Output
+}
+
+function Invoke-GitText {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    return @((Invoke-GitOutput -Arguments $Arguments) -split "`r?`n")
 }
 
 function Get-CommitData {
-    param([Parameter(Mandatory = $true)][string]$Commit)
+    param([Parameter(Mandatory = $true)][string]$Revision)
 
-    $lines = @(Invoke-GitText -Arguments @('cat-file', 'commit', $Commit))
-    $separatorIndex = [Array]::IndexOf($lines, '')
-    if ($separatorIndex -lt 0) {
-        Fail-History "Commit $Commit has no header/message separator."
-    }
+    $format = '%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x00'
+    $serialized = Invoke-GitOutput -Arguments @('log', '--topo-order', "--format=$format", $Revision)
+    $fields = $serialized -split ([char]0)
+    $commits = [System.Collections.Generic.List[object]]::new()
+    for ($index = 0; $index + 5 -lt $fields.Count; $index += 6) {
+        $commit = $fields[$index]
+        if ([string]::IsNullOrWhiteSpace($commit)) {
+            continue
+        }
 
-    $headers = @($lines[0..($separatorIndex - 1)])
-    $message = if ($separatorIndex + 1 -lt $lines.Count) {
-        ($lines[($separatorIndex + 1)..($lines.Count - 1)] -join "`n")
-    }
-    else {
-        ''
-    }
-
-    $authorLine = $headers | Where-Object { $_ -like 'author *' } | Select-Object -First 1
-    $committerLine = $headers | Where-Object { $_ -like 'committer *' } | Select-Object -First 1
-    $identityPattern = '^(?:author|committer) (?<name>.+) <(?<email>[^>]+)> \d+ [+-]\d{4}$'
-    $author = [regex]::Match($authorLine, $identityPattern)
-    $committer = [regex]::Match($committerLine, $identityPattern)
-    if (-not $author.Success -or -not $committer.Success) {
-        Fail-History "Commit $Commit has an invalid author or committer header."
+        [void]$commits.Add([pscustomobject]@{
+            Commit = $commit
+            AuthorName = $fields[$index + 1]
+            AuthorEmail = $fields[$index + 2]
+            CommitterName = $fields[$index + 3]
+            CommitterEmail = $fields[$index + 4]
+            Message = $fields[$index + 5]
+        })
     }
 
-    return [pscustomobject]@{
-        Commit = $Commit
-        AuthorName = $author.Groups['name'].Value
-        AuthorEmail = $author.Groups['email'].Value
-        CommitterName = $committer.Groups['name'].Value
-        CommitterEmail = $committer.Groups['email'].Value
-        Message = $message
-    }
+    return $commits.ToArray()
 }
 
 function Test-KeelMatrixAuthor {
@@ -120,7 +118,7 @@ try {
     }
 
     [void](Invoke-GitText -Arguments @('rev-parse', '--verify', "$Revision^{commit}"))
-    $commits = @(Invoke-GitText -Arguments @('rev-list', '--topo-order', $Revision) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $commits = @(Get-CommitData -Revision $Revision)
     if ($commits.Count -eq 0) {
         Fail-History "Revision '$Revision' did not resolve to any reachable commit."
     }
@@ -133,7 +131,7 @@ try {
     )
 
     foreach ($commitId in $commits) {
-        $commit = Get-CommitData -Commit $commitId.Trim()
+        $commit = $commitId
         $keelMatrixAuthor = Test-KeelMatrixAuthor -Name $commit.AuthorName -Email $commit.AuthorEmail
         $dependabotAuthor = Test-DependabotAuthor -Name $commit.AuthorName -Email $commit.AuthorEmail
         if (-not $keelMatrixAuthor -and -not $dependabotAuthor) {
