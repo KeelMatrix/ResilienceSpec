@@ -58,21 +58,21 @@ executables after the shim directory is removed from `PATH`, verifies every requ
 permission), and then prepends the repository shim directory to the process `PATH`. Missing, malformed,
 non-executable, or unresolvable shim state fails closed.
 
-The `dotnet` and `git` shims reject every direct call, PowerShell alias, and shell wrapper, using exit code 86 and an
-actionable routing diagnostic. The `pwsh` shim rejects unauthorised calls and accepts only a runner-authorised
-`-NoProfile -File` invocation for an existing script; that process remains a descendant of the runner's already
-established containment. The runner resolves the shim, selects the verified real executable, and launches that
-executable directly inside its existing Windows Job Object or Unix containment boundary. The containment, timeout,
-capture, termination, and cleanup proof is unchanged. `build/Test-ExternalCommandRouting.ps1` exercises the direct,
-alias, wrapper, and positive runner controls.
+The shims reject calls that do not carry the runner's per-child authorization marker, using exit code 86 and an
+actionable routing diagnostic. The runner verifies the real target paths, launches the requested executable directly,
+and passes that authorization only into the already-contained process tree; descendants therefore remain under the
+same Windows Job Object or Unix containment boundary. The `pwsh` shim additionally requires `-NoProfile -File` for
+an existing script. The containment, timeout, capture, termination, and cleanup proof is unchanged.
+`build/Test-ExternalCommandRouting.ps1` clears authorization for its direct, alias, and wrapper negative controls and
+exercises the positive bounded-runner path.
 
 The Linux shell entrypoint establishes the repository shim directory after resolving the real PowerShell executable,
 then uses that already-resolved executable only for the outer PowerShell bootstrap. Its integration scripts are
 started by `build/Invoke-ExternalScript.ps1`, which routes them through the bounded runner. Once the repository
 scripts are running, the `pwsh` PATH shim rejects unauthorised calls just like the `dotnet` and `git` shims. Absolute
-executable paths, or commands launched in a separate shell/environment that does not inherit the repository `PATH`,
-remain outside the shim's guarantee; the static workflow and nested-launch guards remain defence-in-depth for those
-residual forms.
+executable paths, forged authorization variables, or commands launched in a separate shell/environment that does not
+inherit the repository `PATH` remain outside the shim's guarantee; the static workflow and nested-launch guards remain
+defence-in-depth for those residual forms.
 
 The documentation hygiene contract is defined here. The step scans every tracked relative path and file name, then applies
 strict decoding and content validation rather than guessing from an extension, a magic prefix, a NUL, or a byte count. It

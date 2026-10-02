@@ -1,5 +1,16 @@
 #!/usr/bin/env sh
 set -eu
 
-printf '%s\n' "External-command routing violation: 'dotnet' reached the repository PATH shim; run validation gates through build/Invoke-ExternalCommand.ps1." >&2
-exit 86
+if [ -z "${KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION:-}" ] ||
+   [ -z "${KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_DOTNET:-}" ]; then
+    printf '%s\n' "External-command routing violation: 'dotnet' was not launched by build/Invoke-ExternalCommand.ps1; run validation gates through the bounded runner." >&2
+    exit 86
+fi
+
+real_path="$KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_DOTNET"
+if [ "$real_path" = "$0" ] || [ ! -x "$real_path" ]; then
+    printf '%s\n' "External-command routing failed closed: the authorized dotnet target is missing or points at its shim." >&2
+    exit 86
+fi
+
+exec "$real_path" "$@"

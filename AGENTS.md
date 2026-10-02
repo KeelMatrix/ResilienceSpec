@@ -90,8 +90,8 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   truth for this workflow routing guard; the runtime shim plus bounded runner is the source of truth for process-level
   routing. Release verification and publication use `scripts/Invoke-ReleaseWorkflow.ps1`. The Linux shell entrypoint
   has only an outer PowerShell bootstrap using the executable resolved before the shim is installed; subsequent
-  integration scripts use `build/Invoke-ExternalScript.ps1`. The `pwsh` shim permits only runner-authorized existing
-  script launches within the already-contained process tree. Absolute paths and separate environments remain
+  integration scripts use `build/Invoke-ExternalScript.ps1`. Runner-authorized descendants inherit the verified real
+  target paths only inside the already-contained process tree. Absolute paths, forged authorization, and separate environments remain
   residual forms covered by the static guards rather than the PATH shim.
 - Set `KEELMATRIX_NO_TELEMETRY=1` for local validation. Repository validation must never emit production telemetry.
 - Release-tag validation requires `[Unreleased]` to contain only its heading and blank lines. Reachable commit history
