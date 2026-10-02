@@ -22,6 +22,7 @@
 
 ```text
 pwsh -NoProfile -File scripts/Validate.ps1
+pwsh -NoProfile -File build/Test-ExternalCommandRouting.ps1
 pwsh -NoProfile -File scripts/Validate.ps1 -Mode Focused -SkipPackage
 dotnet test tests/KeelMatrix.ResilienceSpec.Tests -c Release
 dotnet test tests/KeelMatrix.ResilienceSpec.IntegrationTests -c Release -p:ResilienceVersion=9.8.0
@@ -74,7 +75,8 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   `PublicAPI.Unshipped.txt` and is promoted to `PublicAPI.Shipped.txt` during release preparation.
 - The package must keep building and testing offline: no listener, socket, DNS lookup, container, or hosted service is
   allowed on the validation path.
-- Every external validation gate runs through `build/Invoke-ExternalCommand.ps1`. Windows Job Objects and Linux cgroup
+- Every external validation gate runs through `build/Invoke-ExternalCommand.ps1` and its verified runtime shims in
+  `build/command-shims`. Windows Job Objects and Linux cgroup
   v2/child-subreaper process-tree inspection claim provable whole-tree containment. macOS uses a session/process-group
   boundary plus descendant inspection and reports that containment kind and limitation explicitly: a process that
   deliberately creates a new session can escape that boundary. It captures both streams completely, reports
@@ -85,7 +87,11 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   the scan fails closed when no C# launch sites are found.
 - `.github/workflows/validate.yml` and `.github/workflows/release.yml` may invoke repository scripts, but may not
   contain direct Git, .NET, or shell validation gates. `build/Test-ExternalCommandWorkflow.ps1` is the source of
-  truth for this workflow routing guard; release verification and publication use `scripts/Invoke-ReleaseWorkflow.ps1`.
+  truth for this workflow routing guard; the runtime shim plus bounded runner is the source of truth for process-level
+  routing. Release verification and publication use `scripts/Invoke-ReleaseWorkflow.ps1`. The Linux shell entrypoint
+  has only an outer PowerShell bootstrap using the executable resolved before the shim is installed; subsequent
+  integration scripts use `build/Invoke-ExternalScript.ps1`. Absolute paths and separate environments remain
+  residual forms covered by the static guards rather than the PATH shim.
 - Set `KEELMATRIX_NO_TELEMETRY=1` for local validation. Repository validation must never emit production telemetry.
 - Release-tag validation requires `[Unreleased]` to contain only its heading and blank lines. Reachable commit history
   is also checked for non-product provenance or authorship metadata, prohibited trailers, and non-conforming

@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $helperPath = Join-Path $PSScriptRoot 'Invoke-NestedPwsh.ps1'
+$routingHelperPath = Join-Path $PSScriptRoot 'Invoke-ExternalScript.ps1'
 $guardPath = $PSCommandPath
 
 function Get-ParsedCommandRecords(
@@ -317,7 +318,7 @@ if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf)) {
 
 $scriptFiles = Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter '*.ps1' |
     Where-Object {
-        $_.FullName -notin @($helperPath, $guardPath) -and
+        $_.FullName -notin @($helperPath, $routingHelperPath, $guardPath) -and
         $_.FullName -notmatch '[\\/]((\.git)|(bin)|(obj)|(artifacts)|_probe[\\/]corpus)([\\/]|$)'
     }
 $violations = @($scriptFiles | ForEach-Object { Get-LaunchViolations $_.FullName })

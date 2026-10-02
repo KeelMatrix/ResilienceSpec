@@ -77,6 +77,8 @@ function Write-ReleaseOutput {
 }
 
 try {
+    Invoke-Script -ScriptPath (Join-Path $repo 'build/Test-ExternalCommandRouting.ps1') -TimeoutSeconds 60 | Out-Null
+
     if ($Mode -eq 'Publish') {
         Assert-Contract (-not [string]::IsNullOrWhiteSpace($PackageVersion)) 'PackageVersion is required for publication.'
         Assert-Contract (-not [string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) 'NuGet trusted-publishing output is unavailable.'

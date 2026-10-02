@@ -631,6 +631,144 @@ function New-ExternalCommandResult {
     }
 }
 
+$script:ExternalCommandRouting = $null
+
+function Enable-ExternalCommandRouting {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryPath
+    )
+
+    $resolvedRepository = (Resolve-Path -LiteralPath $RepositoryPath -ErrorAction Stop).Path
+    $shimDirectory = Join-Path $resolvedRepository 'build/command-shims'
+    if (-not (Test-Path -LiteralPath $shimDirectory -PathType Container)) {
+        throw "External-command routing failed closed: required shim directory '$shimDirectory' is missing."
+    }
+
+    $commandNames = @('dotnet', 'git', 'pwsh')
+    $pathSeparator = [IO.Path]::PathSeparator
+    $currentPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
+    if ([string]::IsNullOrWhiteSpace($currentPath)) {
+        throw 'External-command routing failed closed: the process PATH is empty.'
+    }
+
+    $pathEntries = @($currentPath -split [regex]::Escape([string]$pathSeparator))
+    $filteredEntries = [System.Collections.Generic.List[string]]::new()
+    foreach ($entry in $pathEntries) {
+        $normalizedEntry = $entry
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($entry)) {
+                $normalizedEntry = [IO.Path]::GetFullPath($entry).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+            }
+        }
+        catch {
+            throw "External-command routing failed closed: PATH entry '$entry' could not be normalized."
+        }
+
+        $normalizedShim = [IO.Path]::GetFullPath($shimDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+        if ($normalizedEntry.Equals($normalizedShim, $comparison)) {
+            continue
+        }
+
+        [void]$filteredEntries.Add($entry)
+    }
+
+    if ($filteredEntries.Count -eq 0) {
+        throw 'External-command routing failed closed: removing the shim directory would leave PATH empty.'
+    }
+
+    $filteredPath = $filteredEntries -join [string]$pathSeparator
+    $realPaths = @{}
+    $shimPaths = @{}
+    $originalPath = $currentPath
+    $env:PATH = $filteredPath
+    try {
+        foreach ($commandName in $commandNames) {
+            $realCommand = Get-Command -Name $commandName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -eq $realCommand -or [string]::IsNullOrWhiteSpace($realCommand.Source)) {
+                throw "External-command routing failed closed: the real '$commandName' executable was not found after removing the shim directory from PATH."
+            }
+
+            $realPath = (Resolve-Path -LiteralPath $realCommand.Source -ErrorAction Stop).Path
+            if (-not (Test-Path -LiteralPath $realPath -PathType Leaf)) {
+                throw "External-command routing failed closed: the real '$commandName' executable '$realPath' is not a file."
+            }
+            $realPaths[$commandName] = $realPath
+
+            $shimName = if ($IsWindows) { "$commandName.cmd" } else { $commandName }
+            $shimPath = Join-Path $shimDirectory $shimName
+            if (-not (Test-Path -LiteralPath $shimPath -PathType Leaf)) {
+                throw "External-command routing failed closed: required '$commandName' shim '$shimPath' is missing."
+            }
+
+            $shimItem = Get-Item -LiteralPath $shimPath -Force
+            if (-not [string]::IsNullOrWhiteSpace([string]$shimItem.LinkType)) {
+                throw "External-command routing failed closed: shim '$shimPath' must be a regular repository file."
+            }
+
+            $shimText = [IO.File]::ReadAllText($shimPath)
+            if ($shimText -notmatch 'External-command routing violation') {
+                throw "External-command routing failed closed: shim '$shimPath' is malformed."
+            }
+
+            if (-not $IsWindows) {
+                try {
+                    $unixMode = [IO.File]::GetUnixFileMode($shimPath)
+                    if ([string]$unixMode -notmatch 'Execute') {
+                        throw "Shim '$shimPath' is not executable."
+                    }
+                }
+                catch {
+                    throw "External-command routing failed closed: shim '$shimPath' is not executable. $($_.Exception.Message)"
+                }
+            }
+
+            $shimPaths[$commandName] = (Resolve-Path -LiteralPath $shimPath -ErrorAction Stop).Path
+        }
+    }
+    catch {
+        [Environment]::SetEnvironmentVariable('PATH', $originalPath, 'Process')
+        throw
+    }
+
+    $env:PATH = "$shimDirectory$pathSeparator$filteredPath"
+    foreach ($commandName in $commandNames) {
+        $resolvedShim = Get-Command -Name $commandName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -eq $resolvedShim -or
+            -not $resolvedShim.Source.Equals($shimPaths[$commandName], $comparison)) {
+            [Environment]::SetEnvironmentVariable('PATH', $originalPath, 'Process')
+            throw "External-command routing failed closed: PATH did not resolve '$commandName' to its repository shim."
+        }
+    }
+
+    $script:ExternalCommandRouting = [pscustomobject]@{
+        RepositoryPath = $resolvedRepository
+        ShimDirectory = $shimDirectory
+        OriginalPath = $originalPath
+        RealPaths = $realPaths
+        ShimPaths = $shimPaths
+    }
+}
+
+function Get-ExternalCommandRoutingShimName {
+    param([Parameter(Mandatory = $true)][string]$ResolvedPath)
+
+    if ($null -eq $script:ExternalCommandRouting) {
+        return $null
+    }
+
+    foreach ($entry in $script:ExternalCommandRouting.ShimPaths.GetEnumerator()) {
+        $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+        $entryPath = [string]$entry.Value
+        if ($entryPath.Equals($ResolvedPath, $comparison)) {
+            return [string]$entry.Key
+        }
+    }
+
+    return $null
+}
+
 function Resolve-ExternalExecutable {
     param([Parameter(Mandatory = $true)][string]$FilePath)
 
@@ -653,6 +791,13 @@ function Resolve-ExternalExecutable {
     }
 
     return $command.Source
+}
+
+try {
+    Enable-ExternalCommandRouting -RepositoryPath (Split-Path -Parent $PSScriptRoot)
+}
+catch {
+    throw $_
 }
 
 function New-UnixProcessCgroup {
@@ -1116,8 +1261,14 @@ function Invoke-ExternalCommand {
         }
 
         $resolvedFilePath = Resolve-ExternalExecutable -FilePath $FilePath
+        $routingShimName = Get-ExternalCommandRoutingShimName -ResolvedPath $resolvedFilePath
+        $launchFilePath = $resolvedFilePath
+        if ($null -ne $routingShimName) {
+            $launchFilePath = [string]$script:ExternalCommandRouting.RealPaths[$routingShimName]
+        }
+
         if ($IsWindows) {
-            $native = [KeelMatrix.ExternalCommandNative]::StartWindows($resolvedFilePath, $ArgumentList, $WorkingDirectory)
+            $native = [KeelMatrix.ExternalCommandNative]::StartWindows($launchFilePath, $ArgumentList, $WorkingDirectory)
             $containmentEstablished = $true
             $containmentKind = 'windows-job-object-whole-tree'
             [void][KeelMatrix.ExternalCommandNative]::GetActiveProcessCount($native.JobHandle)
@@ -1156,8 +1307,12 @@ function Invoke-ExternalCommand {
             $unixExitPath = Join-Path ([IO.Path]::GetTempPath()) "keelmatrix-external-exit-$([Guid]::NewGuid().ToString('N'))"
             $unixReleasePath = Join-Path ([IO.Path]::GetTempPath()) "keelmatrix-external-release-$([Guid]::NewGuid().ToString('N'))"
             $pwshPath = Resolve-ExternalExecutable -FilePath ([string]::Join('', @('p', 'w', 's', 'h')))
+            $pwshShimName = Get-ExternalCommandRoutingShimName -ResolvedPath $pwshPath
+            if ($null -ne $pwshShimName) {
+                $pwshPath = [string]$script:ExternalCommandRouting.RealPaths[$pwshShimName]
+            }
             $payload = [ordered]@{
-                FilePath  = $resolvedFilePath
+                FilePath  = $launchFilePath
                 Arguments = @($ArgumentList | ForEach-Object { [string]$_ })
             } | ConvertTo-Json -Compress
             $payloadBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))

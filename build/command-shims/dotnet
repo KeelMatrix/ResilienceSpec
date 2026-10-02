@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+printf '%s\n' "External-command routing violation: 'dotnet' reached the repository PATH shim; run validation gates through build/Invoke-ExternalCommand.ps1." >&2
+exit 86

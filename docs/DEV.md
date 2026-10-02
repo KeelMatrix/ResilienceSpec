@@ -50,6 +50,29 @@ The gate performs, in order: reachable-history hygiene, restore from `NuGet.conf
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
 restores the shipping package from its own temporary local feed.
 
+### Runtime external-command routing
+
+The routing contract has one source of truth: `build/Invoke-ExternalCommand.ps1` together with the regular files in
+`build/command-shims`. When the runner is loaded, it verifies that `dotnet`, `git`, and `pwsh` resolve to real
+executables after the shim directory is removed from `PATH`, verifies every required shim (including Unix execute
+permission), and then prepends the repository shim directory to the process `PATH`. Missing, malformed,
+non-executable, or unresolvable shim state fails closed.
+
+The shims reject every direct call, PowerShell alias, and shell wrapper that resolves `dotnet`, `git`, or `pwsh`, using
+exit code 86 and an actionable routing diagnostic. The runner resolves the shim, selects the verified real executable,
+and launches that executable directly inside its existing Windows Job Object or Unix containment boundary; a child
+cannot inherit an authorization marker that would make a direct shim call succeed. The containment, timeout, capture,
+termination, and cleanup proof is unchanged. `build/Test-ExternalCommandRouting.ps1` exercises the direct, alias,
+wrapper, and positive runner controls.
+
+The Linux shell entrypoint establishes the repository shim directory after resolving the real PowerShell executable,
+then uses that already-resolved executable only for the outer PowerShell bootstrap. Its integration scripts are
+started by `build/Invoke-ExternalScript.ps1`, which routes them through the bounded runner. Once the repository
+scripts are running, the `pwsh` PATH shim rejects direct calls just like the `dotnet` and `git` shims. Absolute
+executable paths, or commands launched in a separate shell/environment that does not inherit the repository `PATH`,
+remain outside the shim's guarantee; the static workflow and nested-launch guards remain defence-in-depth for those
+residual forms.
+
 The documentation hygiene contract is defined here. The step scans every tracked relative path and file name, then applies
 strict decoding and content validation rather than guessing from an extension, a magic prefix, a NUL, or a byte count. It
 attempts UTF-8 (including a UTF-8 BOM), ASCII, BOM-aware UTF 16 LE/BE and UTF 32 LE/BE, and bounded BOM-less UTF 16/UTF 32
@@ -239,7 +262,7 @@ may select actions and invoke approved repository PowerShell/Bash entry scripts,
 `dotnet`, or shell validation commands. `scripts/Invoke-ReleaseWorkflow.ps1` is the
 release gate entry point: provenance fetch/revision checks, restore, format, build, test, integration, pack,
 normalization, package inspection, isolated consumer smoke, dependency audit, and NuGet publication all execute
-through `build/Invoke-ExternalCommand.ps1`. Workflow/job/step timeouts remain secondary limits. The publish action's
+through `build/Invoke-ExternalCommand.ps1` and its runtime shims. Workflow/job/step timeouts remain secondary limits. The publish action's
 OIDC authentication is an action boundary; only the resulting package push is an external command and it is routed
 through the runner.
 
