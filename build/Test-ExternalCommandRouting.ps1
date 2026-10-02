@@ -34,6 +34,7 @@ function Invoke-UnauthorizedAlias {
     )
 
     $aliasCommand = @"
+Set-Alias -Name '$AliasName' -Value Start-Process -Scope Local -Force
 `$stdoutPath = [IO.Path]::GetTempFileName()
 `$stderrPath = [IO.Path]::GetTempFileName()
 try {
