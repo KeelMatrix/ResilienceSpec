@@ -1250,6 +1250,12 @@ function Invoke-ExternalCommand {
     $savedDotnetBuildServerDisable = [Environment]::GetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', 'Process')
     $savedSharedCompilation = [Environment]::GetEnvironmentVariable('UseSharedCompilation', 'Process')
     $savedMsBuildNodeReuse = [Environment]::GetEnvironmentVariable('MSBuildNodeReuse', 'Process')
+    $savedRoutingAuthorization = [Environment]::GetEnvironmentVariable('KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION', 'Process')
+    $savedRoutingRealPaths = @{}
+    foreach ($commandName in @('dotnet', 'git', 'pwsh')) {
+        $savedRoutingRealPaths[$commandName] = [Environment]::GetEnvironmentVariable("KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_$($commandName.ToUpperInvariant())", 'Process')
+    }
+    $routingEnvironmentSet = $false
     [Environment]::SetEnvironmentVariable('MSBUILDDISABLENODEREUSE', '1', 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_CLI_DISABLE_BUILD_SERVERS', '1', 'Process')
     [Environment]::SetEnvironmentVariable('UseSharedCompilation', 'false', 'Process')
@@ -1265,6 +1271,14 @@ function Invoke-ExternalCommand {
         $launchFilePath = $resolvedFilePath
         if ($null -ne $routingShimName) {
             $launchFilePath = [string]$script:ExternalCommandRouting.RealPaths[$routingShimName]
+            [Environment]::SetEnvironmentVariable('KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION', [Guid]::NewGuid().ToString('N'), 'Process')
+            foreach ($commandName in @('dotnet', 'git', 'pwsh')) {
+                [Environment]::SetEnvironmentVariable(
+                    "KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_$($commandName.ToUpperInvariant())",
+                    [string]$script:ExternalCommandRouting.RealPaths[$commandName],
+                    'Process')
+            }
+            $routingEnvironmentSet = $true
         }
 
         if ($IsWindows) {
@@ -1662,6 +1676,16 @@ exit $commandExitCode
         }
         if ($null -ne $process) {
             try { $process.Dispose() } catch { $cleanupError = Add-CleanupErrorText -Existing $cleanupError -NewError "Unix process cleanup failed: $($_.Exception.Message)" }
+        }
+
+        if ($routingEnvironmentSet) {
+            [Environment]::SetEnvironmentVariable('KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION', $savedRoutingAuthorization, 'Process')
+            foreach ($commandName in @('dotnet', 'git', 'pwsh')) {
+                [Environment]::SetEnvironmentVariable(
+                    "KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_$($commandName.ToUpperInvariant())",
+                    $savedRoutingRealPaths[$commandName],
+                    'Process')
+            }
         }
 
         [Environment]::SetEnvironmentVariable('MSBUILDDISABLENODEREUSE', $savedBuildServerReuse, 'Process')

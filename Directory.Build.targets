@@ -34,6 +34,8 @@
       <_GeneratedSourceFile Include="$(IntermediateOutputPath)**\*.AssemblyAttributes.cs" />
     </ItemGroup>
 
+    <!-- This approved script launch occurs inside the bounded dotnet child; the repository pwsh shim permits it only
+         with the runner's child authorization and keeps it in the existing process-tree containment. -->
     <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildThisFileDirectory)scripts/Normalize-GeneratedSources.ps1&quot; -Path &quot;%(_GeneratedSourceFile.Identity)&quot;" />
   </Target>
 
@@ -63,6 +65,8 @@
       <_PackArchiveToRemove Include="$([System.IO.Path]::Combine('$(PackageOutputPath)', '$(PackageId).$(PackageVersion).nupkg'))" />
       <_PackArchiveToRemove Include="$([System.IO.Path]::Combine('$(PackageOutputPath)', '$(PackageId).$(PackageVersion).snupkg'))" />
     </ItemGroup>
+    <!-- This approved revision probe likewise runs inside the bounded pack child; its git work remains in the
+         PowerShell runner used by the probe. -->
     <Exec Condition="'$(_HasRepositoryGitMetadata)' == 'true'"
           Command="pwsh -NoProfile -File &quot;$(MSBuildThisFileDirectory)scripts/Resolve-SourceRootGitRevision.ps1&quot; -SourceRoot &quot;$(_RepositoryGitSourceRoot)&quot;"
           IgnoreExitCode="true"

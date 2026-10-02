@@ -1,5 +1,17 @@
 #!/usr/bin/env sh
 set -eu
 
-printf '%s\n' "External-command routing violation: 'pwsh' reached the repository PATH shim; run validation gates through build/Invoke-ExternalCommand.ps1." >&2
-exit 86
+if [ -z "${KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION:-}" ] ||
+   [ -z "${KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_PWSH:-}" ] ||
+   [ "${1:-}" != '-NoProfile' ] || [ "${2:-}" != '-File' ] || [ -z "${3:-}" ] || [ ! -f "$3" ]; then
+    printf '%s\n' "External-command routing violation: 'pwsh' was not launched by build/Invoke-ExternalCommand.ps1 for an existing script; run validation gates through the bounded runner." >&2
+    exit 86
+fi
+
+real_path="$KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_PWSH"
+if [ "$real_path" = "$0" ] || [ ! -x "$real_path" ]; then
+    printf '%s\n' "External-command routing failed closed: the authorized pwsh target is missing or points at its shim." >&2
+    exit 86
+fi
+
+exec "$real_path" "$@"

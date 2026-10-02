@@ -9,8 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ### Fixed
 
-- Validation now installs and verifies repository-owned `dotnet`, `git`, and `pwsh` PATH shims so direct calls,
-  aliases, and shell wrappers fail closed unless the bounded external-command runner launches the verified executable.
+- Validation now installs and verifies repository-owned `dotnet`, `git`, and `pwsh` PATH shims so unauthorized direct
+  calls, aliases, and shell wrappers fail closed unless the bounded external-command runner launches the verified executable.
 - The bounded external-command runner now establishes Windows Job Object or Unix cgroup v2 containment before
   execution, uses a Linux child-subreaper process-tree proof when cgroup delegation is unavailable, rejects every
   containment-error state, contains detached Unix descendants, and fails closed when that proof is unavailable.
