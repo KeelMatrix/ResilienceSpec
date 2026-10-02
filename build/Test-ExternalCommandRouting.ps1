@@ -37,8 +37,19 @@ function Invoke-UnauthorizedProcess {
     $errorPath = Join-Path ([IO.Path]::GetTempPath()) "resilience-routing-$([Guid]::NewGuid().ToString('N')).err"
     try {
         Invoke-UnauthorizedText -Name $Name -Action {
-            $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -WorkingDirectory $RepositoryPath `
-                -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -WindowStyle Hidden -Wait -PassThru
+            $startParameters = @{
+                FilePath = $FilePath
+                ArgumentList = $Arguments
+                WorkingDirectory = $RepositoryPath
+                RedirectStandardOutput = $outputPath
+                RedirectStandardError = $errorPath
+                Wait = $true
+                PassThru = $true
+            }
+            if ($IsWindows) {
+                $startParameters.WindowStyle = 'Hidden'
+            }
+            $process = Start-Process @startParameters
             $stdout = if (Test-Path -LiteralPath $outputPath) { [IO.File]::ReadAllText($outputPath) } else { '' }
             $stderr = if (Test-Path -LiteralPath $errorPath) { [IO.File]::ReadAllText($errorPath) } else { '' }
             Write-Output ($stdout + $stderr)
