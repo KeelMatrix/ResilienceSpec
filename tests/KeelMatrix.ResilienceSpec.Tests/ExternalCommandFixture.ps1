@@ -13,7 +13,10 @@ Set-StrictMode -Version Latest
 
 $repository = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $workingDirectory = $repository
-$pwsh = (Get-Command ([string]::Join('', @('p', 'w', 's', 'h'))) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$pwsh = [Environment]::GetEnvironmentVariable('KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_PWSH', 'Process')
+if ([string]::IsNullOrWhiteSpace($pwsh) -or -not (Test-Path -LiteralPath $pwsh -PathType Leaf)) {
+    $pwsh = (Get-Command ([string]::Join('', @('p', 'w', 's', 'h'))) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+}
 $arguments = @('-NoProfile', '-Command')
 
 switch ($Scenario) {
