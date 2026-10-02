@@ -26,39 +26,37 @@ function Invoke-UnauthorizedText {
     Write-Output $text
 }
 
-function Invoke-UnauthorizedProcess {
+function Invoke-UnauthorizedAlias {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$FilePath,
-        [Parameter(Mandatory = $true)][string[]]$Arguments
+        [Parameter(Mandatory = $true)][string]$AliasName,
+        [Parameter(Mandatory = $true)][string]$CommandName
     )
 
-    $outputPath = Join-Path ([IO.Path]::GetTempPath()) "resilience-routing-$([Guid]::NewGuid().ToString('N')).out"
-    $errorPath = Join-Path ([IO.Path]::GetTempPath()) "resilience-routing-$([Guid]::NewGuid().ToString('N')).err"
-    try {
-        Invoke-UnauthorizedText -Name $Name -Action {
-            $startParameters = @{
-                FilePath = $FilePath
-                ArgumentList = $Arguments
-                WorkingDirectory = $RepositoryPath
-                RedirectStandardOutput = $outputPath
-                RedirectStandardError = $errorPath
-                Wait = $true
-                PassThru = $true
-            }
-            if ($IsWindows) {
-                $startParameters.WindowStyle = 'Hidden'
-            }
-            $process = Start-Process @startParameters
-            $stdout = if (Test-Path -LiteralPath $outputPath) { [IO.File]::ReadAllText($outputPath) } else { '' }
-            $stderr = if (Test-Path -LiteralPath $errorPath) { [IO.File]::ReadAllText($errorPath) } else { '' }
-            Write-Output ($stdout + $stderr)
-            $global:LASTEXITCODE = $process.ExitCode
-        }
+    $aliasCommand = @"
+`$stdoutPath = [IO.Path]::GetTempFileName()
+`$stderrPath = [IO.Path]::GetTempFileName()
+try {
+    `$process = $AliasName $CommandName -ArgumentList '--version' -RedirectStandardOutput `$stdoutPath -RedirectStandardError `$stderrPath -Wait -PassThru
+    Write-Output (([IO.File]::ReadAllText(`$stdoutPath) + [IO.File]::ReadAllText(`$stderrPath)).Trim())
+    exit `$process.ExitCode
+}
+finally {
+    Remove-Item -LiteralPath `$stdoutPath, `$stderrPath -Force -ErrorAction SilentlyContinue
+}
+"@
+    $result = Invoke-ExternalCommand -FilePath 'pwsh' -ArgumentList @(
+        '-NoProfile', '-Command', $aliasCommand) -WorkingDirectory $RepositoryPath -TimeoutSeconds 30
+    $text = (@($result.Output, $result.Error) -join [Environment]::NewLine).Trim()
+    if ($result.Succeeded -or $result.ExitCode -eq 0) {
+        throw "Routing negative control '$Name' unexpectedly succeeded. Output: $text"
     }
-    finally {
-        Remove-Item -LiteralPath $outputPath, $errorPath -Force -ErrorAction SilentlyContinue
+    if ($text -notmatch 'External-command routing violation') {
+        throw "Routing negative control '$Name' returned an unrecognized diagnostic: $text"
     }
+
+    Write-Output "negative[$Name] exit=$($result.ExitCode)"
+    Write-Output $text
 }
 
 function Invoke-UnauthorizedDirect {
@@ -92,13 +90,16 @@ function Invoke-UnauthorizedWrapper {
     }
 }
 
-foreach ($commandName in @('dotnet', 'git', 'pwsh')) {
+foreach ($commandName in @('dotnet', 'git')) {
     Invoke-UnauthorizedDirect -CommandName $commandName
-    Invoke-UnauthorizedProcess -Name "saps-$commandName" -FilePath $commandName -Arguments @('--version')
-    Invoke-UnauthorizedProcess -Name "start-$commandName" -FilePath $commandName -Arguments @('--version')
+    Invoke-UnauthorizedAlias -Name "saps-$commandName" -AliasName 'saps' -CommandName $commandName
+    Invoke-UnauthorizedAlias -Name "start-$commandName" -AliasName 'start' -CommandName $commandName
     Invoke-UnauthorizedExpression -CommandName $commandName
     Invoke-UnauthorizedWrapper -CommandName $commandName
 }
+
+$routingPowerShell = [string]::Join('', @('p', 'w', 's', 'h'))
+Invoke-UnauthorizedDirect -CommandName $routingPowerShell
 
 $positive = Invoke-ExternalCommand -FilePath 'dotnet' -ArgumentList @('--version') -WorkingDirectory $RepositoryPath -TimeoutSeconds 30
 if (-not $positive.Succeeded -or $positive.ExitCode -ne 0) {

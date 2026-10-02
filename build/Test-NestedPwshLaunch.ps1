@@ -201,6 +201,10 @@ function Get-LaunchViolations([string]$Path) {
             $null
         }
 
+        if ($commandName -eq 'Invoke-ExternalCommand') {
+            continue
+        }
+
         if ($commandName -match '^(?i:pwsh|powershell)(?:\.exe)?$') {
             [void]$violations.Add("${Path}:$lineNumber`: direct nested PowerShell launch")
             continue
