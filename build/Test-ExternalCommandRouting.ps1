@@ -7,23 +7,51 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'Invoke-ExternalCommand.ps1')
 
+function Set-ProcessEnvironmentValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()][string]$Value
+    )
+
+    [Environment]::SetEnvironmentVariable($Name, $Value, 'Process')
+}
+
 function Invoke-UnauthorizedText {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][scriptblock]$Action
     )
 
-    $text = (& $Action 2>&1 | Out-String).Trim()
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -eq 0) {
-        throw "Routing negative control '$Name' unexpectedly succeeded. Output: $text"
-    }
-    if ($text -notmatch 'External-command routing violation') {
-        throw "Routing negative control '$Name' returned an unrecognized diagnostic: $text"
+    $savedAuthorization = [Environment]::GetEnvironmentVariable('KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION', 'Process')
+    $savedRealPaths = @{}
+    foreach ($routingName in @('dotnet', 'git', 'pwsh')) {
+        $savedRealPaths[$routingName] = [Environment]::GetEnvironmentVariable("KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_$($routingName.ToUpperInvariant())", 'Process')
     }
 
-    Write-Output "negative[$Name] exit=$exitCode"
-    Write-Output $text
+    try {
+        Set-ProcessEnvironmentValue -Name 'KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION' -Value $null
+        foreach ($routingName in @('dotnet', 'git', 'pwsh')) {
+            Set-ProcessEnvironmentValue -Name "KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_$($routingName.ToUpperInvariant())" -Value $null
+        }
+
+        $text = (& $Action 2>&1 | Out-String).Trim()
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {
+            throw "Routing negative control '$Name' unexpectedly succeeded. Output: $text"
+        }
+        if ($text -notmatch 'External-command routing violation') {
+            throw "Routing negative control '$Name' returned an unrecognized diagnostic: $text"
+        }
+
+        Write-Output "negative[$Name] exit=$exitCode"
+        Write-Output $text
+    }
+    finally {
+        Set-ProcessEnvironmentValue -Name 'KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION' -Value $savedAuthorization
+        foreach ($routingName in @('dotnet', 'git', 'pwsh')) {
+            Set-ProcessEnvironmentValue -Name "KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_$($routingName.ToUpperInvariant())" -Value $savedRealPaths[$routingName]
+        }
+    }
 }
 
 function Invoke-UnauthorizedAlias {
