@@ -123,11 +123,19 @@ public sealed class ReleaseContractTests
     [Fact]
     public void FinalizedChangelogWithSubstantiveUnreleasedContentFailsClosed()
     {
-        var changelog = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "CHANGELOG.md"));
-        changelog = changelog.Replace(
-            "## [0.1.0] - Planned",
+        var changelog = string.Join(
+            Environment.NewLine,
+            "# Changelog",
+            "",
+            "## [Unreleased]",
+            "",
+            "### Added",
+            "- A deliberately invalid unreleased capability.",
+            "",
             "## [0.1.0] - 2026-09-16",
-            StringComparison.Ordinal);
+            "",
+            "### Added",
+            "- Provides the initial package contract.");
 
         var result = RunContractWithChangelog("v0.1.0", "0.1.0", changelog);
 
@@ -230,6 +238,92 @@ public sealed class ReleaseContractTests
             releaseScript.IndexOf("Invoke-PackageSmoke.ps1", StringComparison.Ordinal) <
             releaseScript.IndexOf("Invoke-DependencyAudit.ps1", StringComparison.Ordinal),
             "The required audit must complete after package inspection and before the release script returns.");
+    }
+
+    [Fact]
+    public void PublishJobChecksOutTheVerifiedCommitBeforeDownloadingArtifacts()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "release.yml"));
+        var publish = workflow[workflow.IndexOf("  publish:", StringComparison.Ordinal)..];
+
+        Assert.Contains("contents: read", publish, StringComparison.Ordinal);
+        Assert.Contains("id-token: write", publish, StringComparison.Ordinal);
+        Assert.Contains("ref: ${{ github.sha }}", publish, StringComparison.Ordinal);
+        var checkoutIndex = publish.IndexOf("Check out exact verified release commit", StringComparison.Ordinal);
+        var artifactIndex = publish.IndexOf("Download validated packages", StringComparison.Ordinal);
+        Assert.True(checkoutIndex >= 0 && checkoutIndex < artifactIndex, publish);
+        Assert.DoesNotContain("dotnet pack", publish, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("dotnet build", publish, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PublishEntryPointRunsFromDeclaredCheckoutInputsAndStopsBeforePublicationWhenRunnerToolingIsMissing()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var temporaryRoot = Directory.CreateTempSubdirectory("resilience-publish-inputs-");
+        try
+        {
+            var checkout = CopyPublishInputs(repositoryRoot, Path.Combine(temporaryRoot.FullName, "checkout"));
+            var packageDirectory = Path.Combine(checkout, "artifacts", "packages");
+            Directory.CreateDirectory(packageDirectory);
+            CreateNuGetArchive(
+                Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.nupkg"),
+                "KeelMatrix.ResilienceSpec",
+                "0.1.0");
+            CreateNuGetArchive(
+                Path.Combine(packageDirectory, "KeelMatrix.ResilienceSpec.0.1.0.snupkg"),
+                "KeelMatrix.ResilienceSpec",
+                "0.1.0");
+
+            var localFeed = Path.Combine(temporaryRoot.FullName, "local-feed");
+            Directory.CreateDirectory(localFeed);
+            var publishScript = Path.Combine(checkout, "scripts", "Invoke-ReleaseWorkflow.ps1");
+            var published = RunProcess(
+                "pwsh",
+                [
+                    "-NoProfile", "-File", publishScript,
+                    "-Mode", "Publish",
+                    "-PackageVersion", "0.1.0",
+                    "-NuGetSource", localFeed
+                ],
+                checkout,
+                new Dictionary<string, string?>
+                {
+                    ["NUGET_API_KEY"] = "local-test-key",
+                    ["KEELMATRIX_NO_TELEMETRY"] = "1"
+                });
+
+            Assert.Equal(0, published.ExitCode);
+            Assert.True(File.Exists(Path.Combine(localFeed, "KeelMatrix.ResilienceSpec.0.1.0.nupkg")), published.Output);
+            Assert.Contains("Release package publication gate passed", published.Output, StringComparison.Ordinal);
+            Assert.Contains("Release symbol publication gate passed", published.Output, StringComparison.Ordinal);
+
+            Directory.Delete(Path.Combine(checkout, "build", "command-shims"), recursive: true);
+            var blockedFeed = Path.Combine(temporaryRoot.FullName, "blocked-feed");
+            Directory.CreateDirectory(blockedFeed);
+            var blocked = RunProcess(
+                "pwsh",
+                [
+                    "-NoProfile", "-File", publishScript,
+                    "-Mode", "Publish",
+                    "-PackageVersion", "0.1.0",
+                    "-NuGetSource", blockedFeed
+                ],
+                checkout,
+                new Dictionary<string, string?>
+                {
+                    ["NUGET_API_KEY"] = "local-test-key",
+                    ["KEELMATRIX_NO_TELEMETRY"] = "1"
+                });
+
+            Assert.NotEqual(0, blocked.ExitCode);
+            Assert.Empty(Directory.EnumerateFiles(blockedFeed));
+        }
+        finally
+        {
+            DeleteTemporaryTree(temporaryRoot);
+        }
     }
 
     [Fact]
@@ -831,6 +925,46 @@ public sealed class ReleaseContractTests
         Directory.CreateDirectory(destination);
         SyncTrackedFiles(repositoryRoot, destination);
         return destination;
+    }
+
+    private static string CopyPublishInputs(string repositoryRoot, string destination)
+    {
+        foreach (var relativePath in new[]
+        {
+            Path.Combine("scripts", "Invoke-ReleaseWorkflow.ps1"),
+            Path.Combine("build", "Invoke-ExternalCommand.ps1"),
+            Path.Combine("build", "Test-ExternalCommandRouting.ps1")
+        })
+        {
+            var destinationPath = Path.Combine(destination, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(Path.Combine(repositoryRoot, relativePath), destinationPath);
+        }
+
+        var shimDirectory = Path.Combine(destination, "build", "command-shims");
+        Directory.CreateDirectory(shimDirectory);
+        foreach (var shim in Directory.EnumerateFiles(Path.Combine(repositoryRoot, "build", "command-shims")))
+        {
+            File.Copy(shim, Path.Combine(shimDirectory, Path.GetFileName(shim)));
+        }
+
+        return destination;
+    }
+
+    private static void CreateNuGetArchive(string path, string packageId, string packageVersion)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        if (path.EndsWith(".snupkg", StringComparison.OrdinalIgnoreCase))
+        {
+            var symbol = archive.CreateEntry($"lib/net8.0/{packageId}.pdb");
+            using var symbolStream = symbol.Open();
+            symbolStream.Write([0x50, 0x44, 0x42]);
+            return;
+        }
+
+        var nuspec = archive.CreateEntry($"{packageId}.nuspec");
+        using var writer = new StreamWriter(nuspec.Open(), Encoding.UTF8);
+        writer.Write($"<package><metadata><id>{packageId}</id><version>{packageVersion}</version><authors>KeelMatrix</authors><description>Local test package.</description></metadata></package>");
     }
 
     private static void SyncTrackedFiles(string repositoryRoot, string destination)

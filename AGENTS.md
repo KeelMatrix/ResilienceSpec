@@ -45,7 +45,8 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   silent fallback that makes a timing claim true. Public timestamp evidence rejects non-exact movement and reentrant
   timer-callback mutation. The public `TimeProvider` contract cannot identify an external exact-sum mutation during an
   advance, so callers must keep exclusive ownership of the underlying provider and that sharing pattern is not a
-  proven timing result.
+  proven timing result. A known timer deadline at or below the remaining virtual budget is targeted directly; a
+  deadline above it remains an honest observation cutoff.
 - Scripted delays use whole-millisecond precision and reject values above the controlled timer's `int.MaxValue`
   millisecond limit. `Retry-After` uses integer whole-second HTTP wire values, rejects fractional or sub-second
   values, and keeps its HTTP delta-seconds limit separate from the timer limit; observation, pending, and cleanup

@@ -143,6 +143,43 @@ await RunAsync("GET 503 -> 200 through the standard resilience handler", async (
     Console.WriteLine($"    {scenario.Report.Timeline[1]}");
 });
 
+await RunAsync("A package-consumer timer exactly at the virtual budget remains exact", async () =>
+{
+    var (underlyingClock, advance) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    var clock = new ResilienceScenarioClock(underlyingClock, advance);
+    using var scenario = new ResilienceScenario(
+        HttpFaultScript.Sequence(
+            HttpFault.Response(HttpStatusCode.ServiceUnavailable),
+            HttpFault.Success()),
+        clock,
+        new ResilienceScenarioOptions
+        {
+            AdvanceStep = TimeSpan.FromMilliseconds(100),
+            VirtualBudget = TimeSpan.FromSeconds(2)
+        });
+
+    using var provider = BuildProvider(
+        "budget-boundary",
+        scenario,
+        options =>
+        {
+            options.Retry.MaxRetryAttempts = 1;
+            options.Retry.Delay = TimeSpan.FromSeconds(2);
+            options.Retry.BackoffType = DelayBackoffType.Constant;
+            options.Retry.UseJitter = false;
+        });
+    var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("budget-boundary");
+    using var request = new HttpRequestMessage(HttpMethod.Get, "https://budget-boundary.invalid");
+    using var result = await scenario.SendAsync(client, request);
+
+    result.ShouldHaveStatus(HttpStatusCode.OK);
+    scenario.Report
+        .ShouldHaveAttempts(2)
+        .ShouldHaveRetryDelay(TimeSpan.FromSeconds(2))
+        .ShouldHaveSettledAtVirtualTime(TimeSpan.FromSeconds(2));
+    inMemoryAttempts += scenario.Report.AttemptCount;
+});
+
 await RunAsync("POST is not retried when unsafe retries are disabled", async () =>
 {
     var (underlyingClock, advance) = CreateRealTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
@@ -232,9 +269,9 @@ if (observer.TotalEvents != 0)
     failures.Add($"the smoke run observed {observer.TotalEvents} runtime transport event(s)");
 }
 
-if (inMemoryAttempts != 6)
+if (inMemoryAttempts != 8)
 {
-    failures.Add($"expected 6 attempts answered in memory, observed {inMemoryAttempts}");
+    failures.Add($"expected 8 attempts answered in memory, observed {inMemoryAttempts}");
 }
 
 if (Environment.GetEnvironmentVariable("KEELMATRIX_NO_TELEMETRY") != "1")

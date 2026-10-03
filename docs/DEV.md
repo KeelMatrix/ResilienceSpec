@@ -195,9 +195,11 @@ verified advance operation itself. The wrapper compares public `GetTimestamp`/`G
 non-exact net movement; movement from a tracked timer callback is also rejected. The public `TimeProvider` contract
 cannot identify an external exact-sum mutation during the same advance, so callers must keep exclusive ownership of
 the underlying provider and must not treat that sharing pattern as proven timing evidence. `TimeProvider.System`
-remains unsupported. The scenario advances directly to the next tracked provider timer when available and uses `AdvanceStep`
-only when no timer deadline is available. Exact assertions compare injected-clock values for equality and reject the
-specific observation if fallback sampling affected it; `AdvanceStep` is not a tolerance. It waits for
+remains unsupported. The scenario advances directly to the next tracked provider timer when available, including when
+the deadline exactly equals the remaining `VirtualBudget`, and uses `AdvanceStep` only when no timer deadline is
+available. A deadline beyond the remaining budget remains an honest cutoff. Exact assertions compare injected-clock
+values for equality and reject the specific observation if fallback sampling affected it; `AdvanceStep` is not a
+tolerance. It waits for
 scripted-downstream progress only after a timer fires. A continuation that schedules another legitimate timer may reach
 that next deadline; a completed or disabled one-shot timer does not leave a phantom deadline. If no progress and no real
 tracked deadline remain within `ObservationWindow`, the scenario returns `Pending` without another virtual advance. The
@@ -257,7 +259,9 @@ Treat a non-zero result as a release blocker. No release action is authorized by
 ## Release workflow command boundary
 
 `build/Test-ExternalCommandWorkflow.ps1` is the contract guard for both `.github/workflows/validate.yml` and
-`.github/workflows/release.yml`. The guard parses `run` block scalars and shell command structure, including call
+`.github/workflows/release.yml`. The publish job checks out `${{ github.sha }}` with `contents: read` before downloading
+the validated package artifacts, so its scripts, bounded runner, routing controls, and executable shims are present in
+the separate publish workspace. The guard parses `run` block scalars and shell command structure, including call
 operators, separators, pipelines, conditionals/loops, `Start-Process`, and nested PowerShell commands. Workflow YAML
 may select actions and invoke approved repository PowerShell/Bash entry scripts, but it must not run direct `git`,
 `dotnet`, or shell validation commands. `scripts/Invoke-ReleaseWorkflow.ps1` is the

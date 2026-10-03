@@ -676,6 +676,83 @@ public sealed class DeterministicTimingTests
         Assert.False(scenario.Report.IsObservationCutoff);
     }
 
+    [Theory]
+    [InlineData(900, 100, 1000, true)]
+    [InlineData(1000, 100, 1000, true)]
+    [InlineData(1100, 100, 1000, false)]
+    [InlineData(1000, 1000, 1000, true)]
+    [InlineData(1000, 1500, 1000, true)]
+    public async Task TimerAndBudgetBoundariesKeepExactEvidenceFailClosed(
+        int waitMilliseconds,
+        int advanceStepMilliseconds,
+        int budgetMilliseconds,
+        bool shouldSettleExactly)
+    {
+        var wait = TimeSpan.FromMilliseconds(waitMilliseconds);
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Delay(wait, HttpFault.Success())),
+            clock,
+            new ResilienceScenarioOptions
+            {
+                AdvanceStep = TimeSpan.FromMilliseconds(advanceStepMilliseconds),
+                VirtualBudget = TimeSpan.FromMilliseconds(budgetMilliseconds)
+            });
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        if (shouldSettleExactly)
+        {
+            result.ShouldHaveStatus(HttpStatusCode.OK);
+            scenario.Report
+                .ShouldHaveAttemptDuration(1, wait)
+                .ShouldHaveSettledAtVirtualTime(wait);
+        }
+        else
+        {
+            result.ShouldBePending();
+            Assert.True(scenario.Report.IsObservationCutoff);
+            Assert.Throws<ResilienceAssertionException>(
+                () => scenario.Report.ShouldHaveSettledAtVirtualTime(TimeSpan.FromMilliseconds(budgetMilliseconds)));
+        }
+    }
+
+    [Fact]
+    public async Task TimerAtRemainingBudgetAfterEarlierWorkKeepsRetryTimingExact()
+    {
+        const int delayMilliseconds = 500;
+        var delay = TimeSpan.FromMilliseconds(delayMilliseconds);
+        var clock = Chains.CreateClock();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(
+                HttpFault.Delay(delay, HttpFault.Response(HttpStatusCode.ServiceUnavailable)),
+                HttpFault.Success()),
+            clock,
+            new ResilienceScenarioOptions
+            {
+                AdvanceStep = TimeSpan.FromMilliseconds(100),
+                VirtualBudget = TimeSpan.FromSeconds(1)
+            });
+        using var client = Chains.CreateClient(
+            scenario.Handler,
+            new RetryHandler(
+                maximumRetries: 1,
+                delay,
+                clock.TimeProvider,
+                Chains.IsRetryableStatus));
+        using var request = Chains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(client, request);
+
+        result.ShouldHaveStatus(HttpStatusCode.OK);
+        scenario.Report
+            .ShouldHaveAttempts(2)
+            .ShouldHaveRetryDelay(delay)
+            .ShouldHaveSettledAtVirtualTime(TimeSpan.FromSeconds(1));
+    }
+
     [Fact]
     public async Task PerAttemptTimeoutFiresOnTheInjectedClock()
     {

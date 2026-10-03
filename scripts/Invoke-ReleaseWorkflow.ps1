@@ -10,7 +10,9 @@ param(
 
     [string]$TagRevision = $env:GITHUB_SHA,
 
-    [string]$ArtifactsDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts/packages')
+    [string]$ArtifactsDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts/packages'),
+
+    [string]$NuGetSource = 'https://api.nuget.org/v3/index.json'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,10 +93,12 @@ try {
 
         Invoke-Checked -File 'dotnet' -Arguments @(
             'nuget', 'push', $packagePath, '--no-symbols',
-            '--source', 'https://api.nuget.org/v3/index.json', '--api-key', $env:NUGET_API_KEY) -TimeoutSeconds 300 | Out-Null
+            '--source', $NuGetSource, '--api-key', $env:NUGET_API_KEY) -TimeoutSeconds 300 | Out-Null
+        Write-Output "Release package publication gate passed: $packagePath"
         Invoke-Checked -File 'dotnet' -Arguments @(
             'nuget', 'push', $symbolsPath,
-            '--source', 'https://api.nuget.org/v3/index.json', '--api-key', $env:NUGET_API_KEY) -TimeoutSeconds 300 | Out-Null
+            '--source', $NuGetSource, '--api-key', $env:NUGET_API_KEY) -TimeoutSeconds 300 | Out-Null
+        Write-Output "Release symbol publication gate passed: $symbolsPath"
         Write-Output "Release publication gates passed: version=$PackageVersion package-and-symbol artifacts pushed through the bounded runner."
         exit 0
     }

@@ -105,8 +105,9 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
   above the controlled timer limit can be inspected without being used as a virtual-time wait. Invalid values fail
   during script construction instead of being rounded, dropped, or reported differently.
 - Timing observations use `ResilienceScenarioOptions.AdvanceStep` only as a fallback when no provider timer deadline
-  is available. When the supported tracking clock exposes a timer deadline, the scenario advances directly to that
-  deadline; `ResilienceScenarioClock` records provider timers that fire. A continuation that schedules another
+  is available. When the supported tracking clock exposes a timer deadline, including one exactly at the remaining
+  virtual budget, the scenario advances directly to that deadline; a deadline beyond the remaining budget remains an
+  honest cutoff. `ResilienceScenarioClock` records provider timers that fire. A continuation that schedules another
   legitimate timer may reach that next deadline, while a completed or disabled one-shot timer does not leave a phantom
   deadline. If a fired timer's continuation neither progresses nor leaves a real tracked deadline within
   `ObservationWindow`, the scenario returns `Pending` at the current virtual time instead of allowing another advance.

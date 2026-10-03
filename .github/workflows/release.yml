@@ -57,9 +57,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      contents: read
       id-token: write
 
     steps:
+      - name: Check out exact verified release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
       - name: Set up .NET SDK for publishing
         uses: actions/setup-dotnet@v4
         with:

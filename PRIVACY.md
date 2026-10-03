@@ -29,6 +29,10 @@ the report is overflowed, `LastAttempt` is the last recorded attempt, not necess
 long runaway retry loop may remain `Pending` when the observation window ends; the served count and overflow state are
 still explicit.
 
+Injected timing remains local evidence: a known timer deadline at or below the remaining virtual budget is targeted
+directly, while a deadline beyond that budget remains an honest cutoff. No wall-clock tolerance or request-identifying
+data is added to timing reports.
+
 ## Optional telemetry
 
 The optional `KeelMatrix.Telemetry` integration requests only the shared activation and weekly heartbeat contract. Telemetry policy: An activation is

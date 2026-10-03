@@ -26,6 +26,7 @@ await RunAsync("GET 503 -> 200 with the standard resilience handler", async () =
 {
     var underlyingClock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     var clock = new ResilienceScenarioClock(underlyingClock, underlyingClock.Advance);
+    // Supported timer deadlines are targeted directly, including one exactly at the remaining virtual budget.
     using var scenario = new ResilienceScenario(
         HttpFaultScript.Sequence(
             HttpFault.Response(HttpStatusCode.ServiceUnavailable, retryAfter: TimeSpan.FromSeconds(2)),

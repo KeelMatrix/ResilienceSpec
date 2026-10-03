@@ -25,7 +25,9 @@ public sealed class ResilienceScenarioOptions
     /// scheduled timer to target. The value is reported by <see cref="HttpAttemptReport.ObservationStep"/> as the
     /// sampling interval. Exact timing assertions fail closed after fallback sampling; this value is never an implicit
     /// tolerance. It is an injected-clock duration and may use sub-millisecond precision. When a supported tracking
-    /// clock exposes a timer deadline, the scenario advances directly to that deadline. Defaults to 100 milliseconds.
+    /// clock exposes a timer deadline, including one exactly at the remaining virtual budget, the scenario advances
+    /// directly to that deadline. A deadline beyond the remaining budget is not targeted and produces an honest
+    /// observation cutoff. Defaults to 100 milliseconds.
     /// </summary>
     public TimeSpan AdvanceStep { get; init; } = TimeSpan.FromMilliseconds(100);
 

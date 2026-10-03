@@ -90,7 +90,9 @@ public sealed class ResilienceScenario : IDisposable
     /// <summary>
     /// Runs one request through the client under test while advancing the injected clock deterministically until the
     /// request settles or the virtual budget is exhausted. Legitimate timer-to-timer continuations are followed to
-    /// their next tracked deadline, while completed or disabled one-shot timers do not create phantom deadlines.
+    /// their next tracked deadline, including a deadline exactly at the remaining budget; a deadline beyond the
+    /// remaining budget remains an honest observation cutoff. Completed or disabled one-shot timers do not create
+    /// phantom deadlines.
     /// </summary>
     /// <param name="client">The configured client whose real handler chain must stay in place.</param>
     /// <param name="request">The request to send.</param>
@@ -239,7 +241,7 @@ public sealed class ResilienceScenario : IDisposable
                             continue;
                         }
 
-                        var advance = nextTimerDue is { } timer && timer < remainingBudget
+                        var advance = nextTimerDue is { } timer && timer <= remainingBudget
                             ? timer
                             : remainingBudget < Options.AdvanceStep ? remainingBudget : Options.AdvanceStep;
                         var targetsTimerDeadline = nextTimerDue is { } target && target == advance;

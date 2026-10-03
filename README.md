@@ -241,11 +241,13 @@ reached the scripted downstream. The adapter fails configuration with a `Missing
 scenario clock is missing or a different provider instance is registered.
 
 While a request is pending, `ResilienceScenario.SendAsync` advances to the next tracked provider timer when one is
-available and otherwise uses `AdvanceStep` as a fallback. It waits for scripted-downstream progress only after a timer
-fires, using `ObservationWindow` as a bounded watchdog. A continuation that schedules another legitimate timer is
-allowed to reach that next deadline; a completed or disabled one-shot timer does not create a phantom deadline, and a
-genuinely stalled continuation still returns `Pending` without another advance. This is the fail-closed quiescence
-boundary and keeps ordinary virtual delays wall-clock cheap.
+available, including when that deadline exactly equals the remaining `VirtualBudget`, and otherwise uses `AdvanceStep`
+as a fallback. A deadline beyond the remaining budget is not targeted: observation stops at the budget and returns an
+honest `Pending` result. It waits for scripted-downstream progress only after a timer fires, using
+`ObservationWindow` as a bounded watchdog. A continuation that schedules another legitimate timer is allowed to reach
+that next deadline; a completed or disabled one-shot timer does not create a phantom deadline, and a genuinely stalled
+continuation still returns `Pending` without another advance. This is the fail-closed quiescence boundary and keeps
+ordinary virtual delays wall-clock cheap.
 `ShouldHaveRetryDelay`, `ShouldHaveAttemptDuration`, and `ShouldHaveSettledAtVirtualTime` require exact equality on the
 injected clock. `HttpAttemptReport.ObservationStep` reports the fallback sampling interval; it is never an implicit
 tolerance. If the specific observation was available only through fallback sampling, the exact assertion fails with an
@@ -309,9 +311,10 @@ lease.
 - **Timing assertions need an injected clock.** Without one, attempt, method, outcome, and unsafe-method assertions
   still work, and timing assertions fail with an actionable configuration error.
 - **Exact timing observations require supported timer deadlines.** `ResilienceScenarioClock` lets the scenario advance
-  directly to the next provider timer, so supported retry/delay observations are not rounded up by the fallback
-  `AdvanceStep`. When no timer deadline is available, `AdvanceStep` is only a sampling interval; an exact assertion
-  over an observation affected by that sampling fails closed instead of treating the interval as tolerance.
+  directly to the next provider timer, including a timer exactly at the remaining virtual budget, so supported
+  retry/delay observations are not rounded up by the fallback `AdvanceStep`. When no timer deadline is available,
+  `AdvanceStep` is only a sampling interval; an exact assertion over an observation affected by that sampling fails
+  closed instead of treating the interval as tolerance. A timer beyond the remaining budget remains a cutoff.
 - **Timing scenarios require a controllable provider and exclusive ownership.** Wrap a provider whose public timestamp
   and timer APIs are controlled by the advance delegate, leave automatic advancement disabled, wrap it with
   `ResilienceScenarioClock`, and register `clock.TimeProvider`. Exact observed elapsed time is checked with public
