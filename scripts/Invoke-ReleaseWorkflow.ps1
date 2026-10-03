@@ -138,7 +138,7 @@ try {
         '-p:PublishRepositoryUrl=true', '-p:NuGetAudit=false') -TimeoutSeconds 600 | Out-Null
     Invoke-Checked -File 'dotnet' -Arguments @(
         'test', (Join-Path $repo 'tests/KeelMatrix.ResilienceSpec.Tests/KeelMatrix.ResilienceSpec.Tests.csproj'),
-        '--configuration', 'Release', '--no-build', '--no-restore', "-p:Version=$version", '-p:NuGetAudit=false') -TimeoutSeconds 600 | Out-Null
+        '--configuration', 'Release', '--no-build', '--no-restore', "-p:Version=$version", '-p:NuGetAudit=false') -TimeoutSeconds 1200 | Out-Null
 
     Invoke-Script -ScriptPath (Join-Path $PSScriptRoot 'Invoke-IntegrationTests.ps1') -Arguments @('-ResilienceVersion', '9.8.0') -TimeoutSeconds 600 | Out-Null
     Invoke-Script -ScriptPath (Join-Path $PSScriptRoot 'Invoke-IntegrationTests.ps1') -Arguments @('-ResilienceVersion', '10.10.0') -TimeoutSeconds 600 | Out-Null

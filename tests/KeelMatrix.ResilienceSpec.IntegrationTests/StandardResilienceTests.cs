@@ -223,6 +223,39 @@ public sealed class StandardResilienceTests
     }
 
     [Fact]
+    public async Task TotalRequestTimeoutAtTheVirtualBudgetBoundaryIsObservedExactly()
+    {
+        var clock = StandardResilienceChains.CreateClock();
+        var attemptTimeout = TimeSpan.FromMilliseconds(1_500);
+        var totalTimeout = TimeSpan.FromSeconds(2);
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Always(HttpFault.Timeout()),
+            clock,
+            new ResilienceScenarioOptions { VirtualBudget = totalTimeout });
+        using var chain = StandardResilienceChains.Create(
+            "orders",
+            scenario,
+            options =>
+            {
+                StandardResilienceChains.UseConstantRetry(options, TimeSpan.Zero);
+                options.AttemptTimeout.Timeout = attemptTimeout;
+                options.TotalRequestTimeout.Timeout = totalTimeout;
+            });
+        using var request = StandardResilienceChains.Request(HttpMethod.Get);
+
+        using var result = await scenario.SendAsync(chain.Client, request);
+
+        result.ShouldHaveKind(ResilienceResultKind.Timeout);
+        Assert.False(result.IsPending);
+        Assert.False(scenario.Report.IsObservationCutoff);
+        scenario.Report
+            .ShouldHaveAttempts(2)
+            .ShouldHaveAttemptDuration(1, attemptTimeout)
+            .ShouldHaveAttemptDuration(2, totalTimeout - attemptTimeout)
+            .ShouldHaveSettledAtVirtualTime(totalTimeout);
+    }
+
+    [Fact]
     public async Task PerAttemptTimeoutFiresOnTheInjectedClockRepeatedly()
     {
         for (var repetition = 0; repetition < 5; repetition++)
