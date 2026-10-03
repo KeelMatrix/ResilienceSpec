@@ -279,6 +279,9 @@ public sealed class ReleaseContractTests
             var localFeed = Path.Combine(temporaryRoot.FullName, "local-feed");
             Directory.CreateDirectory(localFeed);
             var publishScript = Path.Combine(checkout, "scripts", "Invoke-ReleaseWorkflow.ps1");
+            var publishEnvironment = CreateIsolatedPublishEnvironment(repositoryRoot);
+            publishEnvironment["NUGET_API_KEY"] = "local-test-key";
+            publishEnvironment["KEELMATRIX_NO_TELEMETRY"] = "1";
             var published = RunProcess(
                 "pwsh",
                 [
@@ -288,11 +291,7 @@ public sealed class ReleaseContractTests
                     "-NuGetSource", localFeed
                 ],
                 checkout,
-                new Dictionary<string, string?>
-                {
-                    ["NUGET_API_KEY"] = "local-test-key",
-                    ["KEELMATRIX_NO_TELEMETRY"] = "1"
-                });
+                publishEnvironment);
 
             Assert.Equal(0, published.ExitCode);
             Assert.True(File.Exists(Path.Combine(localFeed, "KeelMatrix.ResilienceSpec.0.1.0.nupkg")), published.Output);
@@ -311,11 +310,7 @@ public sealed class ReleaseContractTests
                     "-NuGetSource", blockedFeed
                 ],
                 checkout,
-                new Dictionary<string, string?>
-                {
-                    ["NUGET_API_KEY"] = "local-test-key",
-                    ["KEELMATRIX_NO_TELEMETRY"] = "1"
-                });
+                publishEnvironment);
 
             Assert.NotEqual(0, blocked.ExitCode);
             Assert.Empty(Directory.EnumerateFiles(blockedFeed));
@@ -945,10 +940,52 @@ public sealed class ReleaseContractTests
         Directory.CreateDirectory(shimDirectory);
         foreach (var shim in Directory.EnumerateFiles(Path.Combine(repositoryRoot, "build", "command-shims")))
         {
-            File.Copy(shim, Path.Combine(shimDirectory, Path.GetFileName(shim)));
+            var destinationPath = Path.Combine(shimDirectory, Path.GetFileName(shim));
+            File.Copy(shim, destinationPath);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(destinationPath, File.GetUnixFileMode(shim));
+            }
         }
 
         return destination;
+    }
+
+    private static Dictionary<string, string?> CreateIsolatedPublishEnvironment(string repositoryRoot)
+    {
+        var currentPath = Environment.GetEnvironmentVariable("PATH")
+            ?? throw new InvalidOperationException("The publish fixture requires a process PATH.");
+        var sourceShimDirectory = Path.GetFullPath(Path.Combine(repositoryRoot, "build", "command-shims"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var pathEntries = currentPath
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(entry => !PathsEqual(entry, sourceShimDirectory));
+
+        return new Dictionary<string, string?>
+        {
+            ["PATH"] = string.Join(Path.PathSeparator, pathEntries),
+            ["KEELMATRIX_EXTERNAL_COMMAND_AUTHORIZATION"] = null,
+            ["KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_DOTNET"] = null,
+            ["KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_GIT"] = null,
+            ["KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_PWSH"] = null,
+        };
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        try
+        {
+            var normalizedLeft = Path.GetFullPath(left)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            return normalizedLeft.Equals(right, comparison);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static void CreateNuGetArchive(string path, string packageId, string packageVersion)
@@ -1024,7 +1061,14 @@ public sealed class ReleaseContractTests
         {
             foreach (var variable in environmentVariables)
             {
-                startInfo.Environment[variable.Key] = variable.Value ?? string.Empty;
+                if (variable.Value is null)
+                {
+                    startInfo.Environment.Remove(variable.Key);
+                }
+                else
+                {
+                    startInfo.Environment[variable.Key] = variable.Value;
+                }
             }
         }
 
