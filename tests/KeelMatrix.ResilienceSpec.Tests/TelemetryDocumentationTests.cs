@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Xunit;
 
@@ -73,11 +74,12 @@ public sealed class TelemetryDocumentationTests
             Assert.Contains(policy, Normalize(text), StringComparison.Ordinal);
         }
 
-        var changelog = Normalize(File.ReadAllText(Path.Combine(repositoryRoot, "CHANGELOG.md")));
-        var plannedStart = changelog.IndexOf("## [0.1.0] - Planned", StringComparison.Ordinal);
-        Assert.True(plannedStart > 0);
-        Assert.Contains(policy, changelog[..plannedStart], StringComparison.Ordinal);
-        Assert.Contains(policy, changelog[plannedStart..], StringComparison.Ordinal);
+        var changelog = File.ReadAllText(Path.Combine(repositoryRoot, "CHANGELOG.md"));
+        var releaseHeading = Regex.Match(
+            changelog,
+            @"(?m)^## \[0\.1\.0\] - (?:Planned|\d{4}-\d{2}-\d{2})\s*$");
+        Assert.True(releaseHeading.Success, "The changelog must contain the planned or finalized first-release heading.");
+        Assert.Contains(policy, Normalize(changelog[releaseHeading.Index..]), StringComparison.Ordinal);
     }
 
     [Fact]

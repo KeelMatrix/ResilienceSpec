@@ -46,7 +46,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
   positively recognized native HttpClient.Timeout outcome whose cancellation token is the same token passed to an
   executed scripted attempt and is canceled. Plain caller cancellation, arbitrary upstream timeout exceptions
-  (including native-shaped exceptions without that token evidence), unused planned script steps, and observation
+  (including native-shaped exceptions without that token evidence), unexecuted script steps, and observation
   cleanup do not set ExceptionFault. Failure categories accumulate across executed attempts: any case with a
   published response or network category produces one signal containing the accumulated categories, while a case
   with no category produces zero sink signals.
@@ -89,6 +89,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ### Added
 
+- The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+
 - A scripted in-memory downstream (`HttpFault`, `HttpFaultScript`, `ScriptedHttpMessageHandler`) that replaces only the
   terminal network boundary of a configured `HttpClient`, so the verification path requires no listener, socket, DNS
   lookup, or hosted service.
@@ -120,7 +122,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
   classified as a timeout by the settled client or strategy, or a positively recognized native HttpClient.Timeout
   outcome whose cancellation token is the same token passed to an executed scripted attempt and is canceled. Plain
   caller cancellation, arbitrary upstream timeout exceptions (including native-shaped exceptions without that token
-  evidence), unused planned script steps, and observation cleanup do not set ExceptionFault. Failure categories
+  evidence), unexecuted script steps, and observation cleanup do not set ExceptionFault. Failure categories
   accumulate across executed attempts: any case with a published response or network category produces one signal
   containing the accumulated categories, while a case with no category produces zero sink signals. The opt-out remains
   `KEELMATRIX_NO_TELEMETRY=1`.
