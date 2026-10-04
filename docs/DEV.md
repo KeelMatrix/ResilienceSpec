@@ -208,19 +208,11 @@ is not reported as request settlement. Cancellation cleanup is separately bounde
 `ResilienceScenarioOptions.CleanupTimeout`; late cleanup releases retained resources, but a scenario remains consumed
 and cannot be reused after cleanup. The initial client invocation and each injected-clock advance execute behind the
 bounded observation watchdog, so a synchronous timer callback cannot block the observer indefinitely; late work remains
-observed until the logical-call lease can be released. Optional activation telemetry uses the same lifecycle boundary.
-Telemetry policy: An activation is requested only after a settled scenario has either observed an injected failure
-published by an executed attempt, an executed injected timeout classified as a timeout by the settled client or
-strategy, or a positively recognized native HttpClient.Timeout outcome with at least one executed attempt, and an
-assertion is evaluated at or after settlement. ResponseFault is true only for an HTTP response with status 400 or
-higher published by an executed attempt. ExceptionFault is true only for a network failure published by an
-executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
-positively recognized native HttpClient.Timeout outcome whose cancellation token is the same token passed to an
-executed scripted attempt and is canceled. Plain caller cancellation, arbitrary upstream timeout exceptions
-(including native-shaped exceptions without that token evidence), unexecuted script steps, and observation
-cleanup do not set ExceptionFault. Failure categories accumulate across executed attempts: any case with a
-published response or network category produces one signal containing the accumulated categories, while a case
-with no category produces zero sink signals.
+observed until the logical-call lease can be released. Optional activation telemetry uses the same lifecycle boundary:
+a settled scenario with an executed qualifying failure requests shared activation and heartbeat when an assertion is
+evaluated after settlement. No scenario or request data is passed. The shared client owns payload, opt-out, duplicate
+suppression, cadence, identity, delivery, and failure handling. Local development and validation set
+`KEELMATRIX_NO_TELEMETRY=1`; zero-socket package evidence therefore covers the verification path only.
 
 Scripted `HttpFault.Delay` durations accept whole milliseconds only and are capped at
 `TimeSpan.FromMilliseconds(int.MaxValue)`. `Retry-After` deltas use integer whole-second wire values and are bounded

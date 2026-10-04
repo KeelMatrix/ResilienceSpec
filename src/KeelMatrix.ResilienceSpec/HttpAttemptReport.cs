@@ -112,7 +112,7 @@ public sealed class HttpAttemptReport
     /// <returns>One line per attempt, or an empty string when no attempt was recorded.</returns>
     public string DescribeTimeline() => string.Join(Environment.NewLine, Timeline);
 
-    internal void RecordAssertion(bool passed) => Telemetry.RecordAssertionEvaluation(passed, AttemptCount);
+    internal void RecordAssertion() => Telemetry.RecordAssertionEvaluation();
 
     /// <summary>
     /// Rejects an assertion that would otherwise judge an incomplete timeline, so an overflowed run can never look
@@ -127,7 +127,7 @@ public sealed class HttpAttemptReport
             return;
         }
 
-        RecordAssertion(false);
+        RecordAssertion();
         throw new AttemptStateOverflowException(
             $"{assertion} cannot be evaluated: the scripted downstream served {AttemptCount} attempt(s), but the recorded " +
             $"timeline keeps at most {MaximumRecordedAttempts} attempts (HttpAttemptReport.MaximumRecordedAttempts), so the " +

@@ -98,11 +98,15 @@ Assert-Contract ($httpFault.Contains('HTTP-date form is deliberately not support
     'The HTTP-date exclusion must remain explicit in the public Retry-After contract.'
 
 $telemetry = Read-Text 'src/KeelMatrix.ResilienceSpec/ScenarioTelemetry.cs'
+Assert-Contract ($telemetry.Contains('Instance.TrackActivation();', [StringComparison]::Ordinal)) `
+    'Eligible scenarios must request the shared activation signal.'
 Assert-Contract ($telemetry.Contains('Instance.TrackHeartbeat();', [StringComparison]::Ordinal)) `
-    'The shared weekly heartbeat activation must remain wired through TelemetryHost.'
+    'Eligible scenarios must request the shared heartbeat signal.'
+Assert-Contract (-not $telemetry.Contains('ScenarioTelemetrySignal', [StringComparison]::Ordinal)) `
+    'The product integration must not define or pass a local telemetry payload.'
 
 $privacy = Read-Text 'PRIVACY.md'
-Assert-Contract ($privacy.Contains('weekly heartbeat', [StringComparison]::OrdinalIgnoreCase)) `
-    'PRIVACY.md must state the shared weekly heartbeat contract.'
+Assert-Contract ($privacy.Contains('Telemetry/blob/main/app/PRIVACY.md', [StringComparison]::Ordinal)) `
+    'PRIVACY.md must point to the maintained shared telemetry policy.'
 
 Write-Output "Compatibility contract passed: $($versions -join ', '); default $defaultVersion."

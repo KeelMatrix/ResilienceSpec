@@ -161,26 +161,14 @@ unverified. The implementation-neutral script, report, and assertion core does n
 
 ## Telemetry
 
-Telemetry policy: An activation is requested only after a settled scenario has either observed an injected failure
-published by an executed attempt, an executed injected timeout classified as a timeout by the settled client or
-strategy, or a positively recognized native HttpClient.Timeout outcome with at least one executed attempt, and an
-assertion is evaluated at or after settlement. ResponseFault is true only for an HTTP response with status 400 or
-higher published by an executed attempt. ExceptionFault is true only for a network failure published by an
-executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
-positively recognized native HttpClient.Timeout outcome whose cancellation token is the same token passed to an
-executed scripted attempt and is canceled. Plain caller cancellation, arbitrary upstream timeout exceptions
-(including native-shaped exceptions without that token evidence), unexecuted script steps, and observation
-cleanup do not set ExceptionFault. Failure categories accumulate across executed attempts: any case with a
-published response or network category produces one signal containing the accumulated categories, while a case
-with no category produces zero sink signals. Telemetry is best-effort, cannot break the host,
-and can be disabled with
-`KEELMATRIX_NO_TELEMETRY=1`. The package never transmits request data, client names, URLs, headers, bodies, or
-exception messages.
+ResilienceSpec requests the shared activation and heartbeat only after a scenario has settled, an executed qualifying
+failure has been observed, and a resilience assertion is evaluated after settlement. It passes no scenario or request
+data to the shared client's no-argument methods. The shared client owns payload, duplicate suppression, cadence, opt-out,
+identity, delivery, and failure behavior; see [PRIVACY.md](https://github.com/KeelMatrix/ResilienceSpec/blob/main/PRIVACY.md)
+and its links to the maintained shared policy.
 
-Telemetry is the one part of the package that is network behaviour rather than an in-memory verification: when it is
-enabled, an activation is posted over HTTPS to the shared KeelMatrix telemetry endpoint, which resolves a name and
-opens a socket. KeelMatrix validation sets `KEELMATRIX_NO_TELEMETRY=1`, and a consumer that needs a fully offline
-test process sets it too.
+When enabled, telemetry may make an outbound network request. The in-memory verification path itself needs no network;
+KeelMatrix validation sets `KEELMATRIX_NO_TELEMETRY=1`, and consumers can use the shared opt-out documented by KeelMatrix.Telemetry.
 
 ## Documentation
 

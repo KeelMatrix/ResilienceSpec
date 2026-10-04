@@ -23,18 +23,9 @@ namespace KeelMatrix.ResilienceSpec;
 /// Create one scenario per test case.
 /// </para>
 /// <para>
-/// Telemetry policy: An activation is requested only after a settled scenario has either observed an injected failure
-/// published by an executed attempt, an executed injected timeout classified as a timeout by the settled client or
-/// strategy, or a positively recognized native HttpClient.Timeout outcome with at least one executed attempt, and an
-/// assertion is evaluated at or after settlement. ResponseFault is true only for an HTTP response with status 400 or
-/// higher published by an executed attempt. ExceptionFault is true only for a network failure published by an
-/// executed attempt, an executed injected timeout classified as a timeout by the settled client or strategy, or a
-/// positively recognized native HttpClient.Timeout outcome whose cancellation token is the same token passed to an
-/// executed scripted attempt and is canceled. Plain caller cancellation, arbitrary upstream timeout exceptions
-/// (including native-shaped exceptions without that token evidence), unexecuted script steps, and observation
-/// cleanup do not set ExceptionFault. Failure categories accumulate across executed attempts: any case with a
-/// published response or network category produces one signal containing the accumulated categories, while a case
-/// with no category produces zero sink signals.
+/// A settled scenario requests the shared activation and heartbeat when an executed failure qualifies and a
+/// resilience assertion is evaluated after settlement. The requests carry no scenario data; the shared telemetry
+/// client owns emission policy.
 /// </para>
 /// </remarks>
 public sealed class ResilienceScenario : IDisposable
@@ -395,10 +386,6 @@ public sealed class ResilienceScenario : IDisposable
         _disposed = true;
         Handler.Dispose();
     }
-
-    /// <summary>Records that this scenario is consumed through the HttpClientFactory adapter.</summary>
-    internal void MarkHttpClientFactoryIntegration() =>
-        Handler.Observer.Telemetry.MarkIntegrationPath(IntegrationPath.HttpClientFactory);
 
     private static async Task<bool> CompleteWithinAsync(Task task, TimeSpan window)
     {

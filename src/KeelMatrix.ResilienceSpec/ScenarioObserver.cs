@@ -66,8 +66,7 @@ internal sealed class AttemptEntry
     private Completion? _completion;
     private TimeSpan? _duration;
     private bool _durationIsExact;
-    private int _responseFaultObserved;
-    private int _exceptionFaultObserved;
+    private int _qualifyingFailureObserved;
 
     internal AttemptEntry(
         int ordinal,
@@ -100,21 +99,17 @@ internal sealed class AttemptEntry
         // Publish all response metadata through one immutable reference. A live report can therefore observe either
         // the pre-completion Abandoned placeholder or the complete response record, never an outcome with missing
         // status or Retry-After metadata.
-        if (outcome == HttpAttemptOutcome.NetworkError)
+        if (outcome == HttpAttemptOutcome.NetworkError ||
+            (outcome == HttpAttemptOutcome.Response && statusCode is { } status && (int)status >= 400))
         {
-            Volatile.Write(ref _exceptionFaultObserved, 1);
-        }
-        else if (outcome == HttpAttemptOutcome.Response && statusCode is { } status && (int)status >= 400)
-        {
-            Volatile.Write(ref _responseFaultObserved, 1);
+            Volatile.Write(ref _qualifyingFailureObserved, 1);
         }
 
         Volatile.Write(ref _completion, new Completion(outcome, statusCode, retryAfter));
         _publicationSeam?.Observe(AttemptPublicationPoint.AfterCompletionPublication);
     }
 
-    internal (bool ResponseFault, bool ExceptionFault) FailureCategories =>
-        (Volatile.Read(ref _responseFaultObserved) == 1, Volatile.Read(ref _exceptionFaultObserved) == 1);
+    internal bool HasQualifyingFailure => Volatile.Read(ref _qualifyingFailureObserved) == 1;
 
     internal void Finish(TimeSpan? duration, bool durationIsExact)
     {
@@ -276,7 +271,7 @@ internal sealed class ScenarioObserver
         _clock = clock;
         _options = options;
         _startTimestamp = clock?.GetTimestamp() ?? 0;
-        Telemetry = new ScenarioTelemetry(options.TelemetrySink, clock is not null);
+        Telemetry = new ScenarioTelemetry(options.TelemetrySink);
     }
 
     internal ScenarioTelemetry Telemetry { get; }
@@ -375,7 +370,7 @@ internal sealed class ScenarioObserver
 
     internal void EndAttempt(AttemptEntry entry)
     {
-        (bool ResponseFault, bool ExceptionFault) failureCategories;
+        bool hasQualifyingFailure;
         lock (_gate)
         {
             var finished = Elapsed();
@@ -386,14 +381,14 @@ internal sealed class ScenarioObserver
                     : null,
                 !_observationCleanupActive && entry.StartedAfterIsExact && durationIsExact);
             _inFlight--;
-            failureCategories = entry.FailureCategories;
+            hasQualifyingFailure = entry.HasQualifyingFailure;
         }
 
         SignalProgress();
 
-        if (failureCategories.ResponseFault || failureCategories.ExceptionFault)
+        if (hasQualifyingFailure)
         {
-            Telemetry.RecordFailure(failureCategories.ResponseFault, failureCategories.ExceptionFault);
+            Telemetry.RecordFailure();
         }
     }
 
@@ -452,13 +447,13 @@ internal sealed class ScenarioObserver
         SignalProgress();
         if (timeoutEvidence)
         {
-            // A timeout step itself only waits for cancellation. Record an exception category only when an executed
+            // A timeout step itself only waits for cancellation. Record a qualifying failure only when an executed
             // injected timeout step, or a native HttpClient.Timeout outcome with positive cancellation-token lineage
             // evidence from an executed attempt, proves the settled caller-visible result is timeout evidence.
-            Telemetry.RecordFailure(responseFault: false, exceptionFault: true);
+            Telemetry.RecordFailure();
         }
 
-        Telemetry.MarkScenarioCompleted(AttemptCount);
+        Telemetry.MarkScenarioCompleted();
         return virtualElapsed;
     }
 

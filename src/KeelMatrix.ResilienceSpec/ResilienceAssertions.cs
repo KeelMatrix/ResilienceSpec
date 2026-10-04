@@ -35,7 +35,7 @@ public static class ResilienceAssertions
 
         var actual = report.AttemptCount;
         var passed = actual == expected;
-        report.RecordAssertion(passed);
+        report.RecordAssertion();
 
         return passed
             ? report
@@ -60,7 +60,7 @@ public static class ResilienceAssertions
 
         var actual = report.AttemptCount;
         var passed = actual <= maximum;
-        report.RecordAssertion(passed);
+        report.RecordAssertion();
 
         return passed
             ? report
@@ -102,7 +102,7 @@ public static class ResilienceAssertions
             }
         }
 
-        report.RecordAssertion(passed);
+        report.RecordAssertion();
 
         return passed
             ? report
@@ -134,7 +134,7 @@ public static class ResilienceAssertions
         }
 
         var passed = count <= 1;
-        report.RecordAssertion(passed);
+        report.RecordAssertion();
 
         return passed
             ? report
@@ -171,7 +171,7 @@ public static class ResilienceAssertions
             advertised = true;
             if (index + 1 >= report.AttemptCount)
             {
-                report.RecordAssertion(false);
+                report.RecordAssertion();
                 throw Fail(
                     report,
                     $"a retry attempt to follow the Retry-After of {TimeFormat.Describe(delay)} on attempt #{report.Attempts[index].Ordinal}",
@@ -188,7 +188,7 @@ public static class ResilienceAssertions
             var observed = Interval(report.Attempts[index], report.Attempts[index + 1]);
             if (observed < delay)
             {
-                report.RecordAssertion(false);
+                report.RecordAssertion();
                 throw Fail(
                     report,
                     $"the attempt after a Retry-After of {TimeFormat.Describe(delay)} to wait for it",
@@ -196,7 +196,7 @@ public static class ResilienceAssertions
             }
         }
 
-        report.RecordAssertion(advertised);
+        report.RecordAssertion();
 
         return advertised
             ? report
@@ -221,7 +221,7 @@ public static class ResilienceAssertions
 
         if (report.AttemptCount < 2)
         {
-            report.RecordAssertion(false);
+            report.RecordAssertion();
             throw Fail(
                 report,
                 "at least two attempts so that a retry delay can be observed",
@@ -244,7 +244,7 @@ public static class ResilienceAssertions
             passed &= observed == expected;
         }
 
-        report.RecordAssertion(passed);
+        report.RecordAssertion();
 
         return passed
             ? report
@@ -280,7 +280,7 @@ public static class ResilienceAssertions
 
         if (attempt is null)
         {
-            report.RecordAssertion(false);
+            report.RecordAssertion();
             throw Fail(
                 report,
                 $"attempt #{ordinal} to be recorded",
@@ -289,7 +289,7 @@ public static class ResilienceAssertions
 
         if (attempt.Duration is not { } observed)
         {
-            report.RecordAssertion(false);
+            report.RecordAssertion();
             throw Fail(
                 report,
                 $"attempt #{ordinal} to have complete timing evidence",
@@ -302,7 +302,7 @@ public static class ResilienceAssertions
             attempt.DurationIsExact,
             $"attempt #{ordinal}'s duration");
         var passed = observed == expected;
-        report.RecordAssertion(passed);
+        report.RecordAssertion();
 
         return passed
             ? report
@@ -327,7 +327,7 @@ public static class ResilienceAssertions
 
         if (!report.IsSettled || report.IsObservationCutoff || report.SettledVirtualElapsed is not { } observed)
         {
-            report.RecordAssertion(false);
+            report.RecordAssertion();
             throw Fail(
                 report,
                 "a finished scenario run before its total injected-clock time is asserted",
@@ -342,7 +342,7 @@ public static class ResilienceAssertions
             report.SettledVirtualElapsedIsExact,
             "the settlement observation");
         var passed = observed == expected;
-        report.RecordAssertion(passed);
+        report.RecordAssertion();
 
         return passed
             ? report
@@ -363,7 +363,7 @@ public static class ResilienceAssertions
 
         var actual = result.StatusCode;
         var passed = actual == expected;
-        result.RecordAssertion(passed);
+        result.RecordAssertion();
 
         return passed
             ? result
@@ -383,7 +383,7 @@ public static class ResilienceAssertions
         ArgumentNullException.ThrowIfNull(result);
 
         var passed = result.Kind == expected;
-        result.RecordAssertion(passed);
+        result.RecordAssertion();
 
         return passed
             ? result
@@ -399,7 +399,7 @@ public static class ResilienceAssertions
         ArgumentNullException.ThrowIfNull(result);
 
         var passed = result.IsPending;
-        result.RecordAssertion(passed);
+        result.RecordAssertion();
 
         return passed
             ? result
@@ -426,7 +426,7 @@ public static class ResilienceAssertions
             }
         }
 
-        result.RecordAssertion(passed);
+        result.RecordAssertion();
 
         return passed
             ? result
@@ -443,7 +443,7 @@ public static class ResilienceAssertions
             return;
         }
 
-        report.RecordAssertion(false);
+        report.RecordAssertion();
         throw new MissingTimeProviderException(
             $"{assertion} requires an injected clock and at least one timed attempt. Create a ResilienceScenarioClock around the " +
             "controllable provider, pass the clock object to the scenario, and let its TimeProvider drive the " +
@@ -460,7 +460,7 @@ public static class ResilienceAssertions
                 continue;
             }
 
-            report.RecordAssertion(false);
+            report.RecordAssertion();
             throw Fail(
                 report,
                 $"{assertion} to have complete timing evidence",
@@ -479,7 +479,7 @@ public static class ResilienceAssertions
             return;
         }
 
-        report.RecordAssertion(false);
+        report.RecordAssertion();
         throw Fail(
             report,
             $"{assertion} to have exact timing evidence",

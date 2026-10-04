@@ -35,40 +35,21 @@ data is added to timing reports.
 
 ## Optional telemetry
 
-The optional `KeelMatrix.Telemetry` integration requests only the shared activation and weekly heartbeat contract. Telemetry policy: An activation is
-requested only after a settled scenario has either observed an injected failure published by an executed attempt, an
-executed injected timeout classified as a timeout by the settled client or strategy, or a positively recognized native
-HttpClient.Timeout outcome with at least one executed attempt, and an assertion is evaluated at or after settlement.
-ResponseFault is true only for an HTTP response with status 400 or higher published by an executed attempt.
-ExceptionFault is true only for a network failure published by an executed attempt, an executed injected timeout
-classified as a timeout by the settled client or strategy, or a positively recognized native HttpClient.Timeout
-outcome whose cancellation token is the same token passed to an executed scripted attempt and is canceled. Plain
-caller cancellation, arbitrary upstream timeout exceptions (including native-shaped exceptions without that token
-evidence), unexecuted script steps, and observation cleanup do not set ExceptionFault. Failure categories
-accumulate across executed attempts: any case with a published response or network category produces one signal
-containing the accumulated categories, while a case with no category produces zero sink signals. Identifier, storage,
-retention, and delivery details belong to the maintained shared policy
-linked below.
+ResilienceSpec requests the shared activation and heartbeat only when all of these product conditions hold:
 
-Telemetry is best-effort and opt-out. A telemetry failure cannot change a scenario result, fail a test, or affect the
-host application.
+- the scenario has genuinely settled; an observation cutoff or pending result is not settlement;
+- an executed attempt produced an HTTP error response (status 400 or higher) or a network failure, or a supported timeout outcome is positively tied to an executed attempt; and
+- at least one resilience assertion is evaluated after settlement.
 
-Telemetry is the one part of the package that is network behaviour: when it is enabled, an activation is posted over
-HTTPS to the shared KeelMatrix telemetry endpoint, which resolves a name and opens a socket. That is why the
-verification path stays offline only while telemetry is disabled. KeelMatrix development and validation runs always
-set `KEELMATRIX_NO_TELEMETRY=1`, and any consumer that needs a fully offline test process sets it too.
+Plain caller cancellation, arbitrary upstream timeout exceptions, failures in unexecuted script steps, and observation
+cleanup do not qualify. This is the product-specific eligibility rule; ResilienceSpec sends no scenario, report, request,
+or assertion data. It calls the shared client's no-argument `TrackActivation()` and `TrackHeartbeat()` methods.
 
-## Local state and controls
+The shared `KeelMatrix.Telemetry` client owns event payload, duplicate suppression, heartbeat cadence, opt-out handling,
+anonymous identity, state, queueing, delivery, and failure behavior. ResilienceSpec has no local parser or telemetry
+state. See the [shared package README](https://github.com/KeelMatrix/Telemetry/blob/main/app/src/KeelMatrix.Telemetry/README.md)
+and [shared privacy policy](https://github.com/KeelMatrix/Telemetry/blob/main/app/PRIVACY.md) for those details.
 
-ResilienceSpec does not persist scenarios, attempt reports, or diagnostics. The shared telemetry dependency may create
-local marker or queue files to support delivery and opt-out; its maintained policy documents those details.
-
-Set `KEELMATRIX_NO_TELEMETRY=1` for local or CI validation. KeelMatrix development and validation runs suppress
-telemetry and are not demand measurements, and the repository's zero-socket package evidence is produced under that
-same setting, so it covers the verification path only. The shared telemetry package also honours its documented
-process-level and repository-local opt-out controls.
-
-## Shared telemetry policy
-
-See the [KeelMatrix.Telemetry privacy policy](https://github.com/KeelMatrix/Telemetry/blob/main/PRIVACY.md) for
-storage, retention, identifier, and opt-out details.
+When enabled, the shared client may make an outbound network request. The in-memory scenario verification itself
+requires no network. KeelMatrix tests, samples, package smoke, and validation suppress telemetry with
+`KEELMATRIX_NO_TELEMETRY=1`; that evidence covers the verification path, not the optional telemetry transport.

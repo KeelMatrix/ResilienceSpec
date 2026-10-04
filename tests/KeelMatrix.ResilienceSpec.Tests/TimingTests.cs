@@ -1244,9 +1244,7 @@ public sealed class DeterministicTimingTests
             settledVirtualElapsed,
             TimeSpan.FromMilliseconds(100),
             settledVirtualElapsedIsExact,
-            new ScenarioTelemetry(
-                new RecordingTelemetrySink(),
-                timingAssertionsAvailable: true));
+            new ScenarioTelemetry(new RecordingTelemetrySink()));
 
     [Fact]
     public async Task LongVirtualWaitsStayWallClockCheap()

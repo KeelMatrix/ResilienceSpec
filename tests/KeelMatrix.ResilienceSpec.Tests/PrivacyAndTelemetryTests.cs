@@ -7,24 +7,32 @@ namespace KeelMatrix.ResilienceSpec.Tests;
 
 internal sealed class RecordingTelemetrySink : ITelemetrySink
 {
-    private readonly List<ScenarioTelemetrySignal> _signals = new();
+    private readonly List<string> _requests = new();
     private readonly object _gate = new();
 
-    public void TrackActivation(ScenarioTelemetrySignal signal)
+    public void TrackActivation()
     {
         lock (_gate)
         {
-            _signals.Add(signal);
+            _requests.Add("activation");
         }
     }
 
-    internal IReadOnlyList<ScenarioTelemetrySignal> Signals
+    public void TrackHeartbeat()
+    {
+        lock (_gate)
+        {
+            _requests.Add("heartbeat");
+        }
+    }
+
+    internal IReadOnlyList<string> Requests
     {
         get
         {
             lock (_gate)
             {
-                return _signals.ToArray();
+                return _requests.ToArray();
             }
         }
     }
@@ -121,6 +129,9 @@ public sealed class PrivacyTests
 
 public sealed class TelemetryTests
 {
+    private static readonly string[] SharedSignalRequest = ["activation", "heartbeat"];
+    private static readonly string[] TelemetrySinkMethods = ["TrackActivation", "TrackHeartbeat"];
+
     [Fact]
     public void LocalValidationSuppressesTelemetry()
     {
@@ -139,7 +150,7 @@ public sealed class TelemetryTests
         using var request = Chains.Request(HttpMethod.Get);
         using var result = await scenario.SendAsync(client, request);
 
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
@@ -154,7 +165,7 @@ public sealed class TelemetryTests
         scenario.Report.ShouldHaveAttempts(1);
         result.ShouldHaveStatus(HttpStatusCode.OK);
 
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
@@ -174,7 +185,7 @@ public sealed class TelemetryTests
         Assert.Equal(0, result.Report.AttemptCount);
         Assert.True(result.Report.IsSettled);
         Assert.False(result.Report.IsObservationCutoff);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
@@ -200,12 +211,12 @@ public sealed class TelemetryTests
             result.ShouldHaveKind(ResilienceResultKind.Timeout);
             Assert.Equal(0, result.Report.AttemptCount);
             Assert.Empty(result.Report.Attempts);
-            Assert.Empty(sink.Signals);
+            Assert.Empty(sink.Requests);
         }
     }
 
     [Fact]
-    public async Task CustomTimeoutAfterAResponseAttemptDoesNotAddExceptionTelemetry()
+    public async Task CustomTimeoutAfterAResponseAttemptRetainsFailureEligibility()
     {
         var sink = new RecordingTelemetrySink();
         using var scenario = new ResilienceScenario(
@@ -219,13 +230,11 @@ public sealed class TelemetryTests
         result.ShouldHaveKind(ResilienceResultKind.Timeout);
         Assert.Equal(1, result.Report.AttemptCount);
         Assert.Equal(HttpAttemptOutcome.Response, Assert.Single(result.Report.Attempts).Outcome);
-        var signal = Assert.Single(sink.Signals);
-        Assert.True(signal.ResponseFault);
-        Assert.False(signal.ExceptionFault);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public async Task CustomTimeoutAfterADelayedSuccessDoesNotAddExceptionTelemetry()
+    public async Task CustomTimeoutAfterADelayedSuccessDoesNotQualify()
     {
         var clock = Chains.CreateClock();
         var sink = new RecordingTelemetrySink();
@@ -241,11 +250,11 @@ public sealed class TelemetryTests
         result.ShouldHaveKind(ResilienceResultKind.Timeout);
         Assert.Equal(1, result.Report.AttemptCount);
         Assert.Equal(HttpAttemptOutcome.Response, Assert.Single(result.Report.Attempts).Outcome);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
-    public async Task CustomTimeoutAfterANetworkErrorPublishesOnlyTheUnderlyingExceptionCategory()
+    public async Task CustomTimeoutAfterANetworkErrorRetainsFailureEligibility()
     {
         var sink = new RecordingTelemetrySink();
         using var scenario = new ResilienceScenario(
@@ -259,13 +268,11 @@ public sealed class TelemetryTests
         result.ShouldHaveKind(ResilienceResultKind.Timeout);
         Assert.Equal(1, result.Report.AttemptCount);
         Assert.Equal(HttpAttemptOutcome.NetworkError, Assert.Single(result.Report.Attempts).Outcome);
-        var signal = Assert.Single(sink.Signals);
-        Assert.False(signal.ResponseFault);
-        Assert.True(signal.ExceptionFault);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public async Task ForgedNativeShapedTimeoutAfterASuccessfulAttemptDoesNotAddExceptionTelemetry()
+    public async Task ForgedNativeShapedTimeoutAfterASuccessfulAttemptDoesNotQualify()
     {
         var sink = new RecordingTelemetrySink();
         using var scenario = new ResilienceScenario(
@@ -279,11 +286,11 @@ public sealed class TelemetryTests
         result.ShouldHaveKind(ResilienceResultKind.Timeout);
         Assert.Equal(1, result.Report.AttemptCount);
         Assert.Equal(HttpAttemptOutcome.Response, Assert.Single(result.Report.Attempts).Outcome);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
-    public async Task NativeShapedTimeoutWithoutAnAttemptDoesNotActivateTelemetry()
+    public async Task NativeShapedTimeoutWithoutAnAttemptDoesNotQualify()
     {
         var sink = new RecordingTelemetrySink();
         using var scenario = new ResilienceScenario(
@@ -296,7 +303,7 @@ public sealed class TelemetryTests
 
         result.ShouldHaveKind(ResilienceResultKind.Timeout);
         Assert.Equal(0, result.Report.AttemptCount);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
@@ -321,11 +328,11 @@ public sealed class TelemetryTests
 
         result.ShouldBePending();
         Assert.Equal(HttpAttemptOutcome.Abandoned, scenario.Report.Attempts[0].Outcome);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
-    public async Task CallerCancellationOfAnInjectedTimeoutDoesNotActivateExceptionTelemetry()
+    public async Task CallerCancellationOfAnInjectedTimeoutDoesNotQualify()
     {
         var clock = Chains.CreateClock();
         var sink = new RecordingTelemetrySink();
@@ -354,11 +361,11 @@ public sealed class TelemetryTests
         result.ShouldHaveKind(ResilienceResultKind.Canceled);
         scenario.Report.ShouldHaveAttempts(1);
         Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(scenario.Report.Attempts).Outcome);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
-    public async Task AnInjectedFailureWithAnEvaluatedAssertionActivatesExactlyOnce()
+    public async Task AnInjectedFailureWithAnEvaluatedAssertionRequestsSharedSignals()
     {
         var clock = Chains.CreateClock();
         var sink = new RecordingTelemetrySink();
@@ -374,22 +381,51 @@ public sealed class TelemetryTests
         using var request = Chains.Request(HttpMethod.Get);
         using var result = await scenario.SendAsync(client, request);
 
-        scenario.Report.ShouldHaveAttempts(2);
         result.ShouldHaveStatus(HttpStatusCode.OK);
 
-        var signal = Assert.Single(sink.Signals);
-        Assert.True(signal.ResponseFault);
-        Assert.False(signal.ExceptionFault);
-        Assert.True(signal.TimingAssertion);
-        Assert.Equal(AttemptCountBucket.TwoToThree, signal.AttemptBucket);
-        Assert.Equal(AssertionOutcome.Passed, signal.Assertion);
-        Assert.Equal(IntegrationPath.ScriptedDownstream, signal.Integration);
-        Assert.Equal(ScenarioTelemetry.SupportedTargetFramework, signal.TargetFramework);
-        Assert.Equal(typeof(TelemetryHost).Assembly.GetName().Version!.ToString(), signal.PackageVersion);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public async Task TelemetryCategoriesDescribeOnlyFailuresThatReachedTheDownstream()
+    public async Task RepeatedEligibleAssertionsAreForwardedToSharedSuppression()
+    {
+        var sink = new RecordingTelemetrySink();
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Response(HttpStatusCode.ServiceUnavailable)),
+            options: Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+        using var result = await scenario.SendAsync(client, request);
+
+        scenario.Report.ShouldHaveAttempts(1);
+        result.ShouldHaveStatus(HttpStatusCode.ServiceUnavailable);
+
+        AssertSharedSignalRequests(sink, 2);
+    }
+
+    [Theory]
+    [InlineData(399, 0)]
+    [InlineData(400, 1)]
+    [InlineData(599, 1)]
+    public async Task OnlyExecutedErrorResponsesQualifyForActivation(int statusCode, int expectedRequestPairs)
+    {
+        var sink = new RecordingTelemetrySink();
+        var status = (HttpStatusCode)statusCode;
+        using var scenario = new ResilienceScenario(
+            HttpFaultScript.Sequence(HttpFault.Response(status)),
+            options: Options(sink));
+        using var client = Chains.CreateClient(scenario.Handler);
+        using var request = Chains.Request(HttpMethod.Get);
+        using var result = await scenario.SendAsync(client, request);
+
+        Assert.Equal(1, result.Report.AttemptCount);
+        result.ShouldHaveStatus(status);
+
+        AssertSharedSignalRequests(sink, expectedRequestPairs);
+    }
+
+    [Fact]
+    public async Task AnExecutedResponseFailureKeepsTheScenarioEligible()
     {
         var sink = new RecordingTelemetrySink();
         using var scenario = new ResilienceScenario(
@@ -406,13 +442,11 @@ public sealed class TelemetryTests
         using var result = await scenario.SendAsync(client, request);
 
         result.ShouldHaveStatus(HttpStatusCode.OK);
-        var signal = Assert.Single(sink.Signals);
-        Assert.True(signal.ResponseFault);
-        Assert.False(signal.ExceptionFault);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public async Task UnusedLaterResponseAndTimeoutFaultsDoNotBecomeTelemetryCategories()
+    public async Task UnusedLaterResponseAndTimeoutFaultsDoNotChangeActivationEligibility()
     {
         var responseSink = new RecordingTelemetrySink();
         using (var responseScenario = new ResilienceScenario(
@@ -425,9 +459,7 @@ public sealed class TelemetryTests
         using (var responseResult = await responseScenario.SendAsync(responseClient, responseRequest))
         {
             responseResult.ShouldHaveException<HttpRequestException>();
-            var responseSignal = Assert.Single(responseSink.Signals);
-            Assert.False(responseSignal.ResponseFault);
-            Assert.True(responseSignal.ExceptionFault);
+            AssertSharedSignalRequests(responseSink, 1);
         }
 
         var timeoutSink = new RecordingTelemetrySink();
@@ -444,9 +476,7 @@ public sealed class TelemetryTests
         using var timeoutResult = await timeoutScenario.SendAsync(timeoutClient, timeoutRequest);
 
         timeoutResult.ShouldHaveStatus(HttpStatusCode.OK);
-        var timeoutSignal = Assert.Single(timeoutSink.Signals);
-        Assert.True(timeoutSignal.ResponseFault);
-        Assert.False(timeoutSignal.ExceptionFault);
+        AssertSharedSignalRequests(timeoutSink, 1);
     }
 
     [Fact]
@@ -474,13 +504,11 @@ public sealed class TelemetryTests
         using var result = await scenario.SendAsync(client, request);
 
         result.ShouldHaveStatus(HttpStatusCode.ServiceUnavailable);
-        var signal = Assert.Single(sink.Signals);
-        Assert.True(signal.ResponseFault);
-        Assert.False(signal.ExceptionFault);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public async Task ExecutedMixedFailureChainsAccumulateOnlyTheirPublishedCategories()
+    public async Task ExecutedMixedFailureChainsRequestSharedSignals()
     {
         var responseChain = await RunTelemetryScenarioAsync(
             HttpFaultScript.Sequence(
@@ -491,8 +519,7 @@ public sealed class TelemetryTests
             expectResponse: true,
             maximumRetries: 2,
             expectedStatus: HttpStatusCode.OK);
-        Assert.True(responseChain.ResponseFault);
-        Assert.False(responseChain.ExceptionFault);
+        Assert.Equal(SharedSignalRequest, responseChain);
 
         var responseThenException = await RunTelemetryScenarioAsync(
             HttpFaultScript.Sequence(
@@ -500,8 +527,7 @@ public sealed class TelemetryTests
                 HttpFault.NetworkError()),
             retryExceptions: true,
             expectResponse: false);
-        Assert.True(responseThenException.ResponseFault);
-        Assert.True(responseThenException.ExceptionFault);
+        Assert.Equal(SharedSignalRequest, responseThenException);
 
         var exceptionThenResponse = await RunTelemetryScenarioAsync(
             HttpFaultScript.Sequence(
@@ -510,8 +536,7 @@ public sealed class TelemetryTests
             retryExceptions: true,
             expectResponse: true,
             expectedStatus: HttpStatusCode.ServiceUnavailable);
-        Assert.True(exceptionThenResponse.ResponseFault);
-        Assert.True(exceptionThenResponse.ExceptionFault);
+        Assert.Equal(SharedSignalRequest, exceptionThenResponse);
     }
 
     [Fact]
@@ -531,16 +556,14 @@ public sealed class TelemetryTests
         using var result = await scenario.SendAsync(client, request);
 
         result.ShouldHaveKind(ResilienceResultKind.Timeout);
-        scenario.Report.ShouldHaveAttempts(1);
+        Assert.Equal(1, result.Report.AttemptCount);
         Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(scenario.Report.Attempts).Outcome);
 
-        var signal = Assert.Single(sink.Signals);
-        Assert.False(signal.ResponseFault);
-        Assert.True(signal.ExceptionFault);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public async Task CallerCancellationWinsTheStrategyTimeoutRaceWithoutExceptionTelemetry()
+    public async Task CallerCancellationWinsTheStrategyTimeoutRaceWithoutQualifying()
     {
         var clock = Chains.CreateClock();
         var sink = new RecordingTelemetrySink();
@@ -559,11 +582,11 @@ public sealed class TelemetryTests
         result.ShouldHaveKind(ResilienceResultKind.Canceled);
         scenario.Report.ShouldHaveAttempts(1);
         Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(scenario.Report.Attempts).Outcome);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
-    public async Task NativeHttpClientTimeoutActivatesExceptionTelemetry()
+    public async Task NativeHttpClientTimeoutQualifiesWhenLinkedToAnExecutedAttempt()
     {
         var sink = new RecordingTelemetrySink();
         using var scenario = new ResilienceScenario(
@@ -576,11 +599,9 @@ public sealed class TelemetryTests
         using var result = await scenario.SendAsync(client, request);
 
         result.ShouldHaveKind(ResilienceResultKind.Timeout);
-        scenario.Report.ShouldHaveAttempts(1);
+        Assert.Equal(1, result.Report.AttemptCount);
         Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(scenario.Report.Attempts).Outcome);
-        var signal = Assert.Single(sink.Signals);
-        Assert.False(signal.ResponseFault);
-        Assert.True(signal.ExceptionFault);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
@@ -608,7 +629,7 @@ public sealed class TelemetryTests
         Assert.Equal(2, result.Report.AttemptCount);
         Assert.Equal(HttpAttemptOutcome.Abandoned, result.Report.Attempts[0].Outcome);
         Assert.Equal(HttpAttemptOutcome.Response, result.Report.Attempts[1].Outcome);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
@@ -635,7 +656,7 @@ public sealed class TelemetryTests
         result.ShouldBePending();
         Assert.True(result.Report.IsObservationCutoff);
         Assert.Equal(HttpAttemptOutcome.Abandoned, Assert.Single(result.Report.Attempts).Outcome);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
 
         lateResponse.SetResult(new HttpResponseMessage(HttpStatusCode.OK));
     }
@@ -673,12 +694,12 @@ public sealed class TelemetryTests
         var run = scenario.SendAsync(client, request);
         await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
         scenario.Report.ShouldHaveAttempts(1);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
 
         retryRelease.TrySetResult();
         using var result = await run;
         result.ShouldBePending();
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
@@ -708,13 +729,13 @@ public sealed class TelemetryTests
         var run = scenario.SendAsync(client, request);
         await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
         scenario.Report.ShouldHaveAttempts(1);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
 
         retryRelease.TrySetResult();
         using var result = await run;
 
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
-        Assert.Empty(sink.Signals);
+        Assert.Empty(sink.Requests);
     }
 
     [Fact]
@@ -749,12 +770,12 @@ public sealed class TelemetryTests
         using var result = await run;
 
         result.ShouldHaveStatus(HttpStatusCode.OK);
-        scenario.Report.ShouldHaveAttempts(2);
-        Assert.Equal(AssertionOutcome.Passed, Assert.Single(sink.Signals).Assertion);
+        Assert.Equal(2, result.Report.AttemptCount);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public async Task AFailingAssertionIsStillAnActivation()
+    public async Task AFailingAssertionStillRequestsSharedSignals()
     {
         var sink = new RecordingTelemetrySink();
         using var scenario = new ResilienceScenario(
@@ -766,13 +787,11 @@ public sealed class TelemetryTests
 
         Assert.Throws<ResilienceAssertionException>(() => scenario.Report.ShouldHaveAttempts(2));
 
-        var signal = Assert.Single(sink.Signals);
-        Assert.Equal(AssertionOutcome.Failed, signal.Assertion);
-        Assert.Equal(AttemptCountBucket.Single, signal.AttemptBucket);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public async Task TheAdapterIsReportedAsTheIntegrationPath()
+    public async Task FactoryAdapterRequestsSharedSignalsForAnEligibleScenario()
     {
         var clock = Chains.CreateClock();
         var sink = new RecordingTelemetrySink();
@@ -794,57 +813,22 @@ public sealed class TelemetryTests
             Chains.Request(HttpMethod.Get));
 
         result.ShouldHaveStatus(HttpStatusCode.OK);
-        Assert.Equal(IntegrationPath.HttpClientFactory, Assert.Single(sink.Signals).Integration);
+        AssertSharedSignalRequests(sink, 1);
     }
 
     [Fact]
-    public void SignalFieldsAreAnExactCoarseAllowlist()
+    public void TelemetrySinkMethodsAcceptNoProductPayload()
     {
-        var expected = new[]
-        {
-            "PackageVersion",
-            "TargetFramework",
-            "ResponseFault",
-            "ExceptionFault",
-            "TimingAssertion",
-            "AttemptBucket",
-            "Assertion",
-            "Integration",
-        };
-
-        var properties = typeof(ScenarioTelemetrySignal).GetProperties();
+        var methods = typeof(ITelemetrySink).GetMethods();
         Assert.Equal(
-            expected.Order(StringComparer.Ordinal),
-            properties.Select(property => property.Name).Order(StringComparer.Ordinal));
-        Assert.All(properties, property => Assert.True(
-            property.PropertyType == typeof(string) || property.PropertyType == typeof(bool) || property.PropertyType.IsEnum,
-            $"{property.Name} must be a coarse scalar field"));
-    }
-
-    [Fact]
-    public async Task SignalTextCarriesNoRequestIdentifyingData()
-    {
-        var sink = new RecordingTelemetrySink();
-        using var scenario = new ResilienceScenario(
-            HttpFaultScript.Sequence(HttpFault.NetworkError()),
-            options: Options(sink));
-        using var client = Chains.CreateClient(scenario.Handler);
-        using var request = Chains.SecretRequest();
-        using var result = await scenario.SendAsync(client, request);
-
-        Assert.Throws<ResilienceAssertionException>(() => scenario.Report.ShouldHaveAttempts(2));
-
-        var signal = Assert.Single(sink.Signals);
-        var text = signal.Describe();
-        foreach (var marker in new[] { "super-secret", "orders.invalid", "Bearer", "session=" })
-        {
-            Assert.DoesNotContain(marker, text, StringComparison.Ordinal);
-        }
+            TelemetrySinkMethods,
+            methods.Select(method => method.Name).Order(StringComparer.Ordinal));
+        Assert.All(methods, method => Assert.Empty(method.GetParameters()));
     }
 
     private static ResilienceScenarioOptions Options(ITelemetrySink sink) => new() { TelemetrySink = sink };
 
-    private static async Task<ScenarioTelemetrySignal> RunTelemetryScenarioAsync(
+    private static async Task<IReadOnlyList<string>> RunTelemetryScenarioAsync(
         HttpFaultScript script,
         bool retryExceptions,
         bool expectResponse,
@@ -873,6 +857,13 @@ public sealed class TelemetryTests
             result.ShouldHaveException<HttpRequestException>();
         }
 
-        return Assert.Single(sink.Signals);
+        return sink.Requests;
+    }
+
+    private static void AssertSharedSignalRequests(RecordingTelemetrySink sink, int eligibleAssertions)
+    {
+        var expected = Enumerable.Range(0, eligibleAssertions)
+            .SelectMany(_ => SharedSignalRequest);
+        Assert.Equal(expected, sink.Requests);
     }
 }

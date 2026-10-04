@@ -74,7 +74,7 @@ public sealed class ResilienceResult : IDisposable
     /// <summary>Disposes the final response, when there is one.</summary>
     public void Dispose() => Response?.Dispose();
 
-    internal void RecordAssertion(bool passed) => Report.RecordAssertion(passed);
+    internal void RecordAssertion() => Report.RecordAssertion();
 
     internal static ResilienceResult ForResponse(HttpResponseMessage response, TimeSpan virtualElapsed, HttpAttemptReport report) =>
         new(ResilienceResultKind.Response, response, null, virtualElapsed, report);

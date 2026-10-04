@@ -35,7 +35,6 @@ public static class ResilienceSpecHttpClientBuilderExtensions
                 var resolvedTimeProvider = serviceProvider.GetService<TimeProvider>();
                 if (resolvedTimeProvider is not null && ReferenceEquals(resolvedTimeProvider, scenario.TimeProvider))
                 {
-                    scenario.MarkHttpClientFactoryIntegration();
                     return scenario.Handler;
                 }
 
@@ -46,7 +45,6 @@ public static class ResilienceSpecHttpClientBuilderExtensions
                     "ResilienceScenarioOptions.RequireRegisteredTimeProvider to false when the pipeline time source is configured another way.");
             }
 
-            scenario.MarkHttpClientFactoryIntegration();
             return scenario.Handler;
         });
 
