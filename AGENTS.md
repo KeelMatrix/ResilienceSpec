@@ -12,11 +12,13 @@
 - `tests/PackageSmoke` is a clean consumer that restores the packed package from an isolated local feed. It is
   deliberately outside the solution.
 - `samples/KeelMatrix.ResilienceSpec.Sample` is a runnable walkthrough of the documented quick start.
-- `scripts` contains the repository gates: `Validate.ps1`, `Invoke-ReleaseWorkflow.ps1`, `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`,
-  `Invoke-IntegrationTests.ps1`, `Invoke-DependencyAudit.ps1`, `Validate-History.ps1`, `Validate-DocumentationHygiene.ps1`,
+- `scripts` contains the repository gates: `Validate.ps1`, `Validate-IgnoreContract.ps1`, `Invoke-ReleaseWorkflow.ps1`,
+  `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`, `Invoke-IntegrationTests.ps1`, `Invoke-DependencyAudit.ps1`,
+  `Validate-History.ps1`, `Validate-DocumentationHygiene.ps1`,
   `Validate-ReleaseProvenance.ps1`, and `Validate-ReleaseContract.ps1`.
 - `docs/DEV.md` explains the local validation path; `README.md` and `src/KeelMatrix.ResilienceSpec/README.md` are the
   user-facing documentation.
+- `build/IgnoreContract.json` is the source of truth for required IDE/OS ignore entries and their applicability.
 
 ## Commands
 
@@ -88,6 +90,8 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
   target paths only inside the already-contained process tree. Absolute paths, forged authorization, and separate environments remain
   residual forms covered by the static guards rather than the PATH shim.
 - Set `KEELMATRIX_NO_TELEMETRY=1` for local validation. Repository validation must never emit production telemetry.
+- The root `.gitignore` must satisfy `build/IgnoreContract.json`; the normal/full and release validation paths run its
+  guard. ASP.NET `launchSettings.json` is excluded because no repository project uses the Web SDK.
 - Release-tag validation requires `[Unreleased]` to contain only its heading and blank lines. Reachable commit history
   is also checked for non-product provenance or authorship metadata, prohibited trailers, and non-conforming
   authorship; the GitHub web-flow `KeelMatrix` author / `GitHub` committer exception remains valid.

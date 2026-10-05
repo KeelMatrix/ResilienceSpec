@@ -24,6 +24,7 @@ $pwsh = 'pwsh'
 $solution = Join-Path $repo 'KeelMatrix.ResilienceSpec.slnx'
 $nugetConfig = Join-Path $repo 'NuGet.config'
 $workflowGuard = Join-Path $repo 'build/Test-ExternalCommandWorkflow.ps1'
+$ignoreContractScript = Join-Path $PSScriptRoot 'Validate-IgnoreContract.ps1'
 
 function Invoke-Checked {
     param(
@@ -80,6 +81,7 @@ function Write-ReleaseOutput {
 
 try {
     Invoke-Script -ScriptPath (Join-Path $repo 'build/Test-ExternalCommandRouting.ps1') -TimeoutSeconds 60 | Out-Null
+    Invoke-Script -ScriptPath $ignoreContractScript -Arguments @('-RepositoryPath', $repo) -TimeoutSeconds 60 | Out-Null
 
     if ($Mode -eq 'Publish') {
         Assert-Contract (-not [string]::IsNullOrWhiteSpace($PackageVersion)) 'PackageVersion is required for publication.'

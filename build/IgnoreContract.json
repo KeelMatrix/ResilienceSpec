@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "requiredPatterns": [
+    {
+      "pattern": ".vs/",
+      "reason": "Visual Studio creates per-workspace state when opening a repository."
+    },
+    {
+      "pattern": ".idea/",
+      "reason": "Rider and other JetBrains IDEs create per-workspace state."
+    },
+    {
+      "pattern": ".vscode/",
+      "reason": "VS Code creates workspace state and local editor settings."
+    },
+    {
+      "pattern": "*.user",
+      "reason": "Visual Studio stores user-specific project settings in these files."
+    },
+    {
+      "pattern": "*.suo",
+      "reason": "Visual Studio stores user-specific solution state in these files."
+    },
+    {
+      "pattern": "*.userprefs",
+      "reason": "MonoDevelop-compatible IDEs store user-specific project settings in these files."
+    },
+    {
+      "pattern": "TestResults/",
+      "reason": "The .NET test runner creates result directories in the repository."
+    },
+    {
+      "pattern": "*.log",
+      "reason": "Local tools may write logs beside their inputs."
+    },
+    {
+      "pattern": "*.cache",
+      "reason": "Local tools may write file caches beside their inputs."
+    },
+    {
+      "pattern": ".cache/",
+      "reason": "Local tools may create cache directories in the repository."
+    },
+    {
+      "pattern": "*.tmp",
+      "reason": "Editors and tools use temporary files while updating project files."
+    },
+    {
+      "pattern": "*.temp",
+      "reason": "Editors and tools use temporary files while updating project files."
+    },
+    {
+      "pattern": "*.bak",
+      "reason": "Editors and tools may leave backup copies of project files."
+    },
+    {
+      "pattern": "*.swp",
+      "reason": "Vim-compatible editors create swap files while editing."
+    },
+    {
+      "pattern": "*~",
+      "reason": "Unix editors may leave tilde-suffixed backup files."
+    },
+    {
+      "pattern": ".DS_Store",
+      "reason": "macOS Finder creates directory metadata files."
+    },
+    {
+      "pattern": "Thumbs.db",
+      "reason": "Windows Explorer creates thumbnail cache files."
+    },
+    {
+      "pattern": "Desktop.ini",
+      "reason": "Windows Explorer stores folder settings in these files."
+    },
+    {
+      "pattern": "ehthumbs.db",
+      "reason": "Windows Explorer may create legacy thumbnail cache files."
+    }
+  ],
+  "excludedPatterns": [
+    {
+      "pattern": "**/Properties/launchSettings.json",
+      "reason": "No project uses Microsoft.NET.Sdk.Web and no launchSettings.json exists in this library, test, or sample repository."
+    }
+  ]
+}

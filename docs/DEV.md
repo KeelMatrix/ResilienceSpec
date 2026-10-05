@@ -44,11 +44,20 @@ $env:KEELMATRIX_NO_TELEMETRY = '1'
 pwsh -NoProfile -File .\scripts\Validate.ps1
 ```
 
-The gate performs, in order: reachable-history hygiene, restore from `NuGet.config`, a formatting/analyzer check, a Release build of
-`KeelMatrix.ResilienceSpec.slnx`, sequential Release test runs of the core and integration projects, and the package gate
-(`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
+The gate performs, in order: external-command routing checks, the IDE/OS ignore contract and mutation controls,
+reachable-history hygiene, restore from `NuGet.config`, a formatting/analyzer check, a Release build of
+`KeelMatrix.ResilienceSpec.slnx`, sequential Release test runs of the core and integration projects, and the package
+gate (`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
 restores the shipping package from its own temporary local feed.
+
+The IDE/OS ignore requirements and applicability notes have one source of truth in `build/IgnoreContract.json`.
+`scripts/Validate-IgnoreContract.ps1` enforces each required entry in the root `.gitignore`; `scripts/Validate.ps1`
+runs its positive and per-entry removal controls in every mode, and release verification uses the same guard. The
+contract covers Visual Studio, Rider, and VS Code state, user-specific IDE files, test output, and common Windows,
+macOS, editor, log, cache, and temporary-file noise. The manifest excludes `**/Properties/launchSettings.json`:
+the repository's projects use `Microsoft.NET.Sdk`, none uses `Microsoft.NET.Sdk.Web`, and no launch-settings file
+exists, so the ASP.NET artifact is not applicable.
 
 ### Runtime external-command routing
 

@@ -8,6 +8,7 @@ obj/
 .vscode/
 *.user
 *.suo
+*.userprefs
 
 ## Local validation output, package feeds, and package logs
 artifacts/

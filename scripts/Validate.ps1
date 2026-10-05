@@ -52,10 +52,13 @@ function Invoke-Step {
 $repo = Split-Path -Parent $PSScriptRoot
 $routingTest = Join-Path $repo 'build/Test-ExternalCommandRouting.ps1'
 $workflowGuard = Join-Path $repo 'build/Test-ExternalCommandWorkflow.ps1'
+$ignoreContractScript = Join-Path $PSScriptRoot 'Validate-IgnoreContract.ps1'
 Invoke-Step -Name 'External-command runtime routing controls' -File $pwshExecutable -TimeoutSeconds 60 -Arguments @(
     '-NoProfile', '-File', $routingTest)
 Invoke-Step -Name 'External-command workflow routing guard' -File $pwshExecutable -TimeoutSeconds 60 -Arguments @(
     '-NoProfile', '-File', $workflowGuard)
+Invoke-Step -Name 'IDE/OS ignore contract and mutation controls' -File $pwshExecutable -TimeoutSeconds 60 -Arguments @(
+    '-NoProfile', '-File', $ignoreContractScript, '-RepositoryPath', $repo, '-SelfTest')
 $launchGuard = Join-Path $repo 'build/Test-NestedPwshLaunch.ps1'
 Invoke-Step -Name 'Nested PowerShell launch guard self-test' -File $pwshExecutable -TimeoutSeconds 60 -Arguments @(
     '-NoProfile', '-File', $launchGuard, '-SelfTest')
