@@ -23,8 +23,8 @@ dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 The second command installs the optional `Microsoft.Extensions.Http.Resilience` integration/example dependency; it is
 not a runtime dependency of the ResilienceSpec package. The third package is not transitively brought in by
 ResilienceSpec, but the example timing scenarios use its public `FakeTimeProvider` API. The package verifies timing
-from public `TimeProvider` observations and does not load or inspect provider internals. The verified
-`Microsoft.Extensions.Http.Resilience` versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+from public `TimeProvider` observations and does not load or inspect provider internals.
+The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**; other versions are unverified.
 
 ## Logical Call Contract
 
@@ -370,7 +370,7 @@ services.AddHttpClient("orders")
     .AddStandardResilienceHandler();
 ```
 
-The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**; other versions are unverified.
 The repository's integration suite runs against both endpoints with `-p:ResilienceVersion=`. Both endpoints use
 `Microsoft.Extensions.TimeProvider.Testing` `10.10.0` for its public fake-clock fixture. The implementation-neutral
 script, report, and assertion core does not

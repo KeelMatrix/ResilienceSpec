@@ -95,7 +95,7 @@ pwsh -NoProfile -File scripts/Validate-ReleaseContract.ps1 -Tag v0.1.0
 - Release-tag validation requires `[Unreleased]` to contain only its heading and blank lines. Reachable commit history
   is also checked for non-product provenance or authorship metadata, prohibited trailers, and non-conforming
   authorship; the GitHub web-flow `KeelMatrix` author / `GitHub` committer exception remains valid.
-- The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+- The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**; other versions are unverified.
   `build/ResilienceCompatibility.props` is the source of truth and its drift validator covers docs, workflows, the DI
   dependency/API, the delta-only timing scope, and the shared telemetry signal calls.
 

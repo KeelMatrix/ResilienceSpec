@@ -188,7 +188,7 @@ other dependencies from NuGet.org into an isolated cache, verifies the restored 
 
 ## Integration range
 
-`build/ResilienceCompatibility.props` is the canonical source for the first-party integration versions. The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified. `Directory.Packages.props` imports that source through the `ResilienceVersion` property. Run the integration suite once per verified endpoint; hosted validation runs both explicitly:
+`build/ResilienceCompatibility.props` is the canonical source for the first-party integration versions. The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**; other versions are unverified. `Directory.Packages.props` imports that source through the `ResilienceVersion` property. Run the integration suite once per verified endpoint; hosted validation runs both explicitly:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\Invoke-IntegrationTests.ps1 -ResilienceVersion 9.8.0

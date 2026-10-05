@@ -4,7 +4,7 @@ This document explains the repository's first-party integration compatibility co
 truth is [`build/ResilienceCompatibility.props`](../build/ResilienceCompatibility.props); repository validation checks
 that the integration matrix and public documentation repeat it exactly.
 
-The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**; other versions are unverified.
 
 Both versions are exercised through the real standard handler chain. The package-consumer smoke uses the default
 10.10.0 endpoint, while the validation workflow and direct integration commands run both endpoints. The

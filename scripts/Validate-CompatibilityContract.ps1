@@ -56,7 +56,7 @@ if (-not [string]::IsNullOrWhiteSpace($ResilienceVersion)) {
         "ResilienceVersion '$ResilienceVersion' is not verified. Select one of: $($expectedVersions -join ', ')."
 }
 
-$versionSentence = "The verified Microsoft.Extensions.Http.Resilience versions are **$($versions[0])** and **$($versions[1])**. Other versions are unverified."
+$versionSentence = "The verified Microsoft.Extensions.Http.Resilience versions are **$($versions[0])** and **$($versions[1])**; other versions are unverified."
 $requiredDocuments = @(
     'README.md',
     'src/KeelMatrix.ResilienceSpec/README.md',

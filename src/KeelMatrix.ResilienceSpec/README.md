@@ -20,9 +20,9 @@ dotnet add package Microsoft.Extensions.TimeProvider.Testing --version 10.10.0
 The `Microsoft.Extensions.Http.Resilience` package is an optional integration/example dependency and is not a runtime
 dependency of the ResilienceSpec package. `Microsoft.Extensions.TimeProvider.Testing` is not transitively brought in by
 ResilienceSpec; the example uses its public `FakeTimeProvider` API. The clock wrapper uses only public `TimeProvider`
-observations and does not load or inspect provider internals. The verified Microsoft.Extensions.Http.Resilience
-versions are **9.8.0** and **10.10.0**. Other versions are unverified. See the
-[repository compatibility contract](https://github.com/KeelMatrix/ResilienceSpec/blob/main/docs/Compatibility.md).
+observations and does not load or inspect provider internals.
+The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**; other versions are unverified.
+See the [repository compatibility contract](https://github.com/KeelMatrix/ResilienceSpec/blob/main/docs/Compatibility.md).
 
 ## Logical Call Contract
 
@@ -151,7 +151,7 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 
 ## Supported Integration Range
 
-The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.
+The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**; other versions are unverified.
 Both endpoints use `Microsoft.Extensions.TimeProvider.Testing` `10.10.0`; other testing-package versions are
 unverified. The implementation-neutral script, report, and assertion core does not reference
 `Microsoft.Extensions.Http.Resilience` or Polly. The shipping package intentionally references

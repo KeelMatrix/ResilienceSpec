@@ -6,7 +6,7 @@ namespace KeelMatrix.ResilienceSpec.Tests;
 public sealed class CompatibilityContractTests
 {
     private const string VersionSentence =
-        "The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**. Other versions are unverified.";
+        "The verified Microsoft.Extensions.Http.Resilience versions are **9.8.0** and **10.10.0**; other versions are unverified.";
 
     [Fact]
     public void CurrentCompatibilityContractPasses()
