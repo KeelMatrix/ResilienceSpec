@@ -926,7 +926,10 @@ public sealed class ReleaseContractTests
     {
         foreach (var relativePath in new[]
         {
+            ".gitignore",
             Path.Combine("scripts", "Invoke-ReleaseWorkflow.ps1"),
+            Path.Combine("scripts", "Validate-IgnoreContract.ps1"),
+            Path.Combine("build", "IgnoreContract.json"),
             Path.Combine("build", "Invoke-ExternalCommand.ps1"),
             Path.Combine("build", "Test-ExternalCommandRouting.ps1")
         })
