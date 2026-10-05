@@ -13,9 +13,9 @@ Set-StrictMode -Version Latest
 
 $repository = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $workingDirectory = $repository
-$pwsh = [Environment]::GetEnvironmentVariable('KEELMATRIX_EXTERNAL_COMMAND_REAL_PATH_PWSH', 'Process')
+$pwsh = [string]$script:ExternalCommandRouting.RealPaths['pwsh']
 if ([string]::IsNullOrWhiteSpace($pwsh) -or -not (Test-Path -LiteralPath $pwsh -PathType Leaf)) {
-    $pwsh = (Get-Command ([string]::Join('', @('p', 'w', 's', 'h'))) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    throw 'The real PowerShell executable was not resolved by external-command routing.'
 }
 $arguments = @('-NoProfile', '-Command')
 
