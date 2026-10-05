@@ -108,11 +108,7 @@ if (-not [string]::IsNullOrWhiteSpace($IgnoreFilePath)) {
 $sourceLines = [IO.File]::ReadAllLines($ignorePath)
 Assert-IgnoreContract -Path $ignorePath
 
-$scratchRoot = $env:PAPERCLIP_TMPDIR
-if ([string]::IsNullOrWhiteSpace($scratchRoot) -or
-    -not (Test-Path -LiteralPath $scratchRoot -PathType Container)) {
-    $scratchRoot = [IO.Path]::GetTempPath()
-}
+$scratchRoot = [IO.Path]::GetTempPath()
 
 $fixtureDirectory = (Resolve-Path -LiteralPath $scratchRoot).Path
 $fixturePath = Join-Path $fixtureDirectory ("ignore-contract-{0}.gitignore" -f [Guid]::NewGuid().ToString('N'))

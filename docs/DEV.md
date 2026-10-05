@@ -45,9 +45,9 @@ pwsh -NoProfile -File .\scripts\Validate.ps1
 ```
 
 The gate performs, in order: external-command routing checks, the IDE/OS ignore contract and mutation controls,
-reachable-history hygiene, restore from `NuGet.config`, a formatting/analyzer check, a Release build of
-`KeelMatrix.ResilienceSpec.slnx`, sequential Release test runs of the core and integration projects, and the package
-gate (`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
+reachable-history hygiene, tracked-file documentation hygiene, restore from `NuGet.config`, a formatting/analyzer
+check, a Release build of `KeelMatrix.ResilienceSpec.slnx`, sequential Release test runs of the core and integration
+projects, and the package gate (`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
 restores the shipping package from its own temporary local feed.
 
@@ -58,6 +58,10 @@ contract covers Visual Studio, Rider, and VS Code state, user-specific IDE files
 macOS, editor, log, cache, and temporary-file noise. The manifest excludes `**/Properties/launchSettings.json`:
 the repository's projects use `Microsoft.NET.Sdk`, none uses `Microsoft.NET.Sdk.Web`, and no launch-settings file
 exists, so the ASP.NET artifact is not applicable.
+
+`scripts/Validate-DocumentationHygiene.ps1` owns checks over tracked file names and text plus declared PNG metadata.
+It fails closed for unclassified tracked files. Core project tests exercise accepted and rejected cases. Standard
+validation and release verification both run this guard.
 
 ### Runtime external-command routing
 

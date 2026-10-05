@@ -691,6 +691,7 @@ function Read-AuthoredText {
 }
 
 $processName = Convert-CodePoints @(112, 97, 112, 101, 114, 99, 108, 105, 112)
+$internalEnvironmentPattern = '(?i)' + [regex]::Escape($processName + '_') + '[A-Z0-9_]+'
 $runtimeTerms = @(
     (Convert-CodePoints @(99, 111, 100, 101, 120)),
     (Convert-CodePoints @(100, 101, 101, 112, 115, 101, 101, 107)),
@@ -725,6 +726,7 @@ $metadataPattern = '(?i)\b(?:' + (($metadataTerms | ForEach-Object { [regex]::Es
 $forbiddenPatterns = @(
     @{ Pattern = '(?i)\b[A-Z]{2,10}-\d{2,}\b'; Label = 'non-product identifier' },
     @{ Pattern = "(?i)\b$processName\b"; Label = 'non-product name' },
+    @{ Pattern = $internalEnvironmentPattern; Label = 'internal runtime environment identifier' },
     @{ Pattern = $runtimePattern; Label = 'runtime vocabulary' },
     @{ Pattern = $processPattern; Label = 'process vocabulary' },
     @{ Pattern = $metadataPattern; Label = 'provenance wording' }

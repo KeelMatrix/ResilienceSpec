@@ -43,6 +43,54 @@ public sealed class DocumentationHygieneTests
     }
 
     [Theory]
+    [InlineData("", "_TMPDIR", true)]
+    [InlineData("", "_RUN_SCRATCH_DIR", false)]
+    [InlineData("WRAPPED_", "_TASK_ID", true)]
+    public void InternalRuntimeEnvironmentIdentifiersAreRejectedFromTrackedFiles(
+        string leadingText,
+        string suffix,
+        bool uppercasePrefix)
+    {
+        using var repository = CreateRepository();
+        var processName = FromCodePoints(112, 97, 112, 101, 114, 99, 108, 105, 112);
+        var environmentName = leadingText +
+            (uppercasePrefix ? processName.ToUpperInvariant() : processName.ToLowerInvariant()) +
+            suffix;
+        WriteText(
+            repository.Path,
+            "scripts/Validate-IgnoreContract.ps1",
+            $"$env:{environmentName}\n",
+            new UTF8Encoding(false));
+        var unsafePath = $"scripts/{environmentName}.ps1";
+        WriteText(repository.Path, unsafePath, "# tracked script fixture\n", new UTF8Encoding(false));
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("internal runtime environment identifier", result.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("scripts/Validate-IgnoreContract.ps1", result.Output, StringComparison.Ordinal);
+        Assert.Contains(unsafePath, result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OperatingSystemTemporaryEnvironmentVariablesRemainAllowed()
+    {
+        using var repository = CreateRepository();
+        WriteText(
+            repository.Path,
+            "scripts/Validate-IgnoreContract.ps1",
+            "$env:TEMP\n$env:TMPDIR\n",
+            new UTF8Encoding(false));
+        AddAll(repository.Path);
+
+        var result = RunGuard(repository.Path);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Documentation hygiene passed", result.Output, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [MemberData(nameof(ProhibitedTextEncodings))]
     public void ProhibitedTextFailsClosedAcrossRepresentativeEncodings(Encoding encoding, string extension)
     {
