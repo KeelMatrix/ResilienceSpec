@@ -6,7 +6,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>KeelMatrix.ResilienceSpec</PackageId>
     <Description>Verify how your real .NET HttpClient resilience chain retries, delays, times out, and finishes under deterministic scripted failures for testing and CI.</Description>
-    <PackageTags>httpclient;resilience;retry;polly;testing;ci;retry-after;timeout;dotnet</PackageTags>
+    <PackageTags>httpclient;resilience;retry;polly;testing;ci;retry-after;timeout;dotnet;keelmatrix-public-product;keelmatrix-primary</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageIcon>icon.png</PackageIcon>

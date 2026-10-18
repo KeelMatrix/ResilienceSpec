@@ -14,7 +14,7 @@
 - `samples/KeelMatrix.ResilienceSpec.Sample` is a runnable walkthrough of the documented quick start.
 - `scripts` contains the repository gates: `Validate.ps1`, `Validate-IgnoreContract.ps1`, `Invoke-ReleaseWorkflow.ps1`,
   `Invoke-PackageSmoke.ps1`, `Inspect-Package.ps1`, `Invoke-IntegrationTests.ps1`, `Invoke-DependencyAudit.ps1`,
-  `Validate-History.ps1`, `Validate-DocumentationHygiene.ps1`,
+  `Validate-History.ps1`, `Validate-DocumentationHygiene.ps1`, `Validate-WebsiteMetadata.ps1`,
   `Validate-ReleaseProvenance.ps1`, and `Validate-ReleaseContract.ps1`.
 - `docs/DEV.md` explains the local validation path; `README.md` and `src/KeelMatrix.ResilienceSpec/README.md` are the
   user-facing documentation.

@@ -24,7 +24,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $packageId = 'KeelMatrix.ResilienceSpec'
 $description = 'Verify how your real .NET HttpClient resilience chain retries, delays, times out, and finishes under deterministic scripted failures for testing and CI.'
-$tags = 'httpclient resilience retry polly testing ci retry-after timeout dotnet'
+$tags = 'httpclient resilience retry polly testing ci retry-after timeout dotnet keelmatrix-public-product keelmatrix-primary'
 $targetFramework = 'net8.0'
 $packageNamespace = 'http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd'
 $normalizedArchiveTimestamp = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "KeelMatrix.ResilienceSpec": {
+      "visibility": "public-product",
+      "role": "primary"
+    }
+  }
+}

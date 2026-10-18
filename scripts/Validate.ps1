@@ -105,6 +105,10 @@ try {
     Invoke-Step -Name 'Restore' -File 'dotnet' -TimeoutSeconds 180 -Arguments (@('restore', $solution, '--configfile', $nugetConfig) + $common)
     $durations['restore'] = $script:stepDuration
 
+    Invoke-Step -Name 'Validate website package metadata contract' -File $pwshExecutable -TimeoutSeconds 180 -Arguments @(
+        '-NoProfile', '-File', (Join-Path $PSScriptRoot 'Validate-WebsiteMetadata.ps1'), '-RepositoryPath', $repo)
+    $durations['website-metadata'] = $script:stepDuration
+
     if ($Mode -ne 'Focused') {
         Invoke-Step -Name 'Verify formatting and analyzers' -File 'dotnet' -TimeoutSeconds 300 -Arguments @(
             'format', $solution, '--verify-no-changes', '--no-restore', '--verbosity', 'quiet')

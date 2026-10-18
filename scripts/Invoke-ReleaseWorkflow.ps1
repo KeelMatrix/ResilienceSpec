@@ -130,6 +130,7 @@ try {
 
     $common = @('--configfile', $nugetConfig, '--no-cache', '--force', '-p:NuGetAudit=false')
     Invoke-Checked -File 'dotnet' -Arguments (@('restore', $solution) + $common) -TimeoutSeconds 300 | Out-Null
+    Invoke-Script -ScriptPath (Join-Path $PSScriptRoot 'Validate-WebsiteMetadata.ps1') -Arguments @('-RepositoryPath', $repo) -TimeoutSeconds 180 | Out-Null
     Invoke-Checked -File 'dotnet' -Arguments @('format', $solution, '--verify-no-changes', '--no-restore', '--verbosity', 'quiet') -TimeoutSeconds 300 | Out-Null
     Invoke-Checked -File 'dotnet' -Arguments @(
         'build', $solution, '--configuration', 'Release', '--no-restore',

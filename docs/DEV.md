@@ -47,11 +47,16 @@ pwsh -NoProfile -File .\scripts\Validate.ps1
 ```
 
 The gate performs, in order: external-command routing checks, the IDE/OS ignore contract and mutation controls,
-reachable-history hygiene, tracked-file documentation hygiene, restore from `NuGet.config`, a formatting/analyzer
-check, a Release build of `KeelMatrix.ResilienceSpec.slnx`, sequential Release test runs of the core and integration
-projects, and the package gate (`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
+reachable-history hygiene, tracked-file documentation hygiene, restore from `NuGet.config`,
+website package metadata consistency, a formatting/analyzer check, a Release build of `KeelMatrix.ResilienceSpec.slnx`,
+sequential Release test runs of the core and integration projects, and the package gate
+(`scripts/Invoke-PackageSmoke.ps1` plus `scripts/Run-Sample.ps1`). `-Mode Full` adds
 `scripts/Invoke-DependencyAudit.ps1 -Mode Required`. The sample is intentionally outside the solution because it
 restores the shipping package from its own temporary local feed.
+
+The repository website metadata contract is checked by scripts/Validate-WebsiteMetadata.ps1. It compares the root
+keelmatrix.website.json classification with each packable project's source sentinel tags and canonical
+GitHub project and repository metadata. Standard validation and release verification run this check after restore.
 
 The IDE/OS ignore requirements and applicability notes have one source of truth in `build/IgnoreContract.json`.
 `scripts/Validate-IgnoreContract.ps1` enforces each required entry in the root `.gitignore`; `scripts/Validate.ps1`
