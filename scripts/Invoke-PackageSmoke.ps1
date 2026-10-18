@@ -131,14 +131,19 @@ try {
     }
 
     $globalJson = Get-Content -LiteralPath (Join-Path $repo 'global.json') -Raw | ConvertFrom-Json
-    $expectedSdkVersion = [string]$globalJson.sdk.version
+    $minimumSdkVersion = [string]$globalJson.sdk.version
     $rollForward = [string]$globalJson.sdk.rollForward
     $sdkResult = Invoke-ExternalCommand -FilePath 'dotnet' -ArgumentList @('--version') -WorkingDirectory $repo -TimeoutSeconds 60
     $selectedSdkVersion = $sdkResult.Output.Trim()
     Assert-Contract ($sdkResult.Succeeded -and $selectedSdkVersion -match '^\d+\.\d+\.\d+$') "Unable to resolve the selected .NET SDK version: $($sdkResult.FailureReason)"
-    Assert-Contract ($rollForward -ceq 'disable') 'global.json must disable SDK roll-forward for package identity evidence.'
-    Assert-Contract ($selectedSdkVersion -ceq $expectedSdkVersion) "The selected .NET SDK '$selectedSdkVersion' does not match pinned global.json SDK '$expectedSdkVersion'."
-    Write-Output "Package identity toolchain: .NET SDK $selectedSdkVersion; global.json rollForward=$rollForward"
+    Assert-Contract ($minimumSdkVersion -match '^\d+\.\d+\.\d+$') 'global.json must declare a complete .NET SDK minimum version.'
+    Assert-Contract ($rollForward -ceq 'latestFeature') 'global.json must use latestFeature roll-forward for .NET SDK servicing.'
+    Assert-Contract ($globalJson.sdk.allowPrerelease -eq $false) 'global.json must exclude prerelease SDKs.'
+    $minimumSdk = [version]$minimumSdkVersion
+    $selectedSdk = [version]$selectedSdkVersion
+    $selectedSdkMeetsMinimum = ($selectedSdk.Major -eq $minimumSdk.Major) -and ($selectedSdk.Minor -eq $minimumSdk.Minor) -and ($selectedSdk -ge $minimumSdk)
+    Assert-Contract $selectedSdkMeetsMinimum "The selected .NET SDK '$selectedSdkVersion' must meet global.json minimum '$minimumSdkVersion' and remain in the same major/minor line."
+    Write-Output ("Package identity toolchain: .NET SDK {0}; global.json minimum={1}, rollForward={2}, allowPrerelease={3}" -f $selectedSdkVersion, $minimumSdkVersion, $rollForward, $globalJson.sdk.allowPrerelease)
 
     foreach ($name in @(
             'NUGET_PACKAGES',

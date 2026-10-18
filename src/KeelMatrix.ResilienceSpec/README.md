@@ -147,7 +147,8 @@ scenario.Report.ShouldHaveAttempts(2).ShouldRespectRetryAfter();
 - The package gate packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, stores entries
   without compression, emits LF-only UTF-8 package text payloads, compares the `.nupkg` and `.snupkg` SHA256 values, and
   inspects the normalized artifacts before the clean consumer restore. This makes the
-  package artifact identity reproducible for the fixed commit and SDK selected by `global.json`.
+  package artifact identity reproducible for a fixed commit and selected SDK version; archives produced by different
+  SDK versions are not guaranteed to be byte-identical.
 
 ## Supported Integration Range
 

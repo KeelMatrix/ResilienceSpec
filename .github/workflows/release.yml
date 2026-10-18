@@ -70,7 +70,7 @@ jobs:
       - name: Set up .NET SDK for publishing
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.401
+          global-json-file: global.json
 
       - name: Download validated packages
         uses: actions/download-artifact@v4

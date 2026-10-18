@@ -5,7 +5,9 @@ This document is for maintainers of KeelMatrix.ResilienceSpec. Package consumers
 
 ## Prerequisites
 
-- The exact .NET SDK pinned by `global.json` (`10.0.401`); SDK roll-forward is disabled for package identity evidence.
+- The .NET 10 SDK at or above `10.0.400`. `global.json` uses `latestFeature` to select the highest installed
+  .NET 10 feature band and patch at or above that minimum. A host with `10.0.402` and no higher eligible SDK
+  selects `10.0.402`; prerelease SDKs are excluded.
 - PowerShell 7 (`pwsh`) for the repository gates.
 - Bash for the Linux validation script.
 - The verification path needs no listener, socket, container, or hosted service: scripted scenarios are answered in
@@ -156,8 +158,9 @@ pwsh -NoProfile -File .\scripts\Run-Sample.ps1
 pwsh -NoProfile -File .\scripts\Invoke-PackageSmoke.ps1
 ```
 
-The script requires the exact .NET SDK pinned by `global.json`, then packs the shipping project twice with
-`--include-symbols`, normalizes both archives to the fixed ZIP-local timestamp `1980-01-01 00:00:00`, stored
+The script requires the SDK selected by `global.json`'s `latestFeature` policy at or above its declared
+minimum. It then packs the shipping project twice with `--include-symbols`, normalizes both archives to the fixed
+ZIP-local timestamp `1980-01-01 00:00:00`, stored
 (uncompressed) entries, and LF-only UTF-8 text payloads. It fails if either the `.nupkg` or `.snupkg` SHA256 changes
 between packs, and prints a sorted entry-level manifest plus its canonical identity SHA256, including both generated
 nuspec entries. It then

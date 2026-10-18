@@ -396,12 +396,14 @@ so this package deliberately asserts the assembled behaviour instead of restatin
   uses session/process-group containment plus descendant inspection; its result exposes that boundary and documents
   the limitation that a process deliberately creating a new session can escape. Detectable containment, inspection,
   termination, and cleanup errors fail closed rather than claiming containment.
-- Only `net8.0` is exercised. The package gate requires the exact `.NET SDK 10.0.401` pinned by `global.json` with SDK roll-forward
-  disabled. It packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, stores entries
-  without compression, emits LF-only UTF-8 package text payloads, compares both archive SHA256 values, prints a sorted
+- Only `net8.0` is exercised. The package gate uses the .NET 10 SDK selected by `global.json`: `10.0.400` is the
+  minimum and `latestFeature` selects the highest installed .NET 10 feature band and patch at or above it. A host
+  with `10.0.402` and no higher eligible .NET 10 SDK selects `10.0.402`; prerelease SDKs are excluded. The gate
+  packs twice, normalizes ZIP entry timestamps to `1980-01-01 00:00:00` ZIP-local time, stores entries without
+  compression, emits LF-only UTF-8 package text payloads, compares both archive SHA256 values, prints a sorted
   entry-level manifest and its canonical identity SHA256, and inspects the normalized artifacts before the clean
-  consumer restore. The manifest includes the generated nuspec entries, so the recorded identity is reproducible in an
-  independent environment using the pinned toolchain.
+  consumer restore. Matching SDK versions can reproduce the recorded identity; different SDK versions are not
+  guaranteed to produce byte-identical archives.
 
 ## Telemetry
 
